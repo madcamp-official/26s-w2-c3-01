@@ -13,6 +13,8 @@ spring:
   jackson:
     default-property-inclusion: non_null
 app:
+  google:
+    web-client-id: ${GOOGLE_WEB_CLIENT_ID:170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com}
   seed-demo: ${DEMO_SEED_ENABLED:true}
   ops:
     username: ${OPS_USERNAME:ops}

@@ -45,6 +45,23 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun loginWithGoogle(idToken: String) {
+        if (_loginState.value == LoginUiState.Loading) return
+        viewModelScope.launch {
+            _loginState.value = LoginUiState.Loading
+            authRepository.googleLogin(idToken)
+                .onSuccess { response ->
+                    accessToken = response.accessToken
+                    _loginState.value = LoginUiState.Success(response.expiresInSeconds)
+                }
+                .onFailure {
+                    _loginState.value = LoginUiState.Error(
+                        "Google 로그인에 실패했습니다. 잠시 후 다시 시도해주세요."
+                    )
+                }
+        }
+    }
+
     fun completeOnboarding() = repository.completeOnboarding()
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
     fun selectNearby(handle: String?) = repository.selectNearby(handle)
