@@ -10,6 +10,8 @@ Android 앱과 분리된 Spring Boot Kotlin 서버입니다. REST 기준은 [`..
 
 Docker가 현재 설치되어 있지 않은 환경이라면 Docker Desktop 설치 후 위 명령을 실행하면 됩니다. 앱 서버는 `http://localhost:8080`, RabbitMQ 관리 화면은 `http://localhost:15672`입니다.
 
+Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Compose가 Docker Desktop emulation으로 실행합니다. 첫 실행은 이미지 다운로드와 에뮬레이션 초기화 때문에 다소 오래 걸릴 수 있습니다.
+
 초기 개발 계정은 `demo@melody.local` / `demo1234`입니다. 시작 후 즉시 시드되며, 운영 배포에서는 이 시더를 비활성화하고 별도 가입 흐름으로 교체해야 합니다.
 
 ## 제공 범위
