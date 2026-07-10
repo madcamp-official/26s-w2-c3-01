@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -34,7 +35,8 @@ fun LoginScreen(
     modifier: Modifier = Modifier,
 ) {
     var email by rememberSaveable { mutableStateOf("demo@melody.local") }
-    var password by rememberSaveable { mutableStateOf("") }
+    // 비밀번호는 SavedState에 넣지 않아 프로세스·화면 복원 시 남지 않게 합니다.
+    var password by remember { mutableStateOf("") }
     val loading = state == LoginUiState.Loading
     val canSubmit = email.isNotBlank() && password.isNotBlank() && !loading
 
