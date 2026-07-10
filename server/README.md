@@ -34,3 +34,5 @@ curl http://127.0.0.1:8080/actuator/health
 ```
 
 PostgreSQL과 RabbitMQ는 Docker 내부 네트워크에만 존재하고, 애플리케이션의 8080 포트도 VM의 loopback에만 바인딩됩니다. 외부 접속은 Cloudflare Tunnel을 통해서만 허용합니다.
+
+운영 대시보드는 `/internal/ops`에서 확인합니다. HTTP Basic 인증을 사용하며 `.env`의 `OPS_USERNAME`, `OPS_PASSWORD`로만 접근할 수 있습니다. 사용자 비밀번호, JWT, 위치 좌표, 메시지 본문은 표시하지 않습니다.

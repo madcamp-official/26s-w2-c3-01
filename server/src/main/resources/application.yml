@@ -14,6 +14,9 @@ spring:
     default-property-inclusion: non_null
 app:
   seed-demo: ${DEMO_SEED_ENABLED:true}
+  ops:
+    username: ${OPS_USERNAME:ops}
+    password: ${OPS_PASSWORD:local-ops-password-change-me}
   jwt:
     # 최소 32바이트. 로컬 개발에서도 .env 또는 환경변수로만 제공합니다.
     secret: ${JWT_SECRET:}

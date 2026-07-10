@@ -10,6 +10,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
+      OPS_USERNAME: ${OPS_USERNAME:-ops}
+      OPS_PASSWORD: ${OPS_PASSWORD:?Set OPS_PASSWORD in .env}
     ports:
       # cloudflared만 접근하며 VM 외부 인터페이스에는 직접 공개하지 않습니다.
       - "127.0.0.1:8080:8080"
