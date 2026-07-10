@@ -1,6 +1,8 @@
 services:
   postgres:
     image: postgis/postgis:16-3.5
+    # 공식 이미지가 현재 amd64만 제공하므로 Apple Silicon에서는 Docker Desktop의 emulation을 사용합니다.
+    platform: linux/amd64
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-melody_bubble}
       POSTGRES_USER: ${POSTGRES_USER:-melody}

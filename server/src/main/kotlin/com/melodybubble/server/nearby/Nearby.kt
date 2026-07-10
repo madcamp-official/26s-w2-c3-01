@@ -36,7 +36,7 @@ class NearbyService(private val jdbc: JdbcTemplate, @Value("\${app.nearby.radius
           LEFT JOIN music_statuses ms ON ms.user_id=u.id AND ms.expires_at>now()
           ORDER BY distance_meters LIMIT 40
         """.trimIndent()
-        return NearbySnapshot(jdbc.query(sql, { rs, _ ->
+        return NearbySnapshot(items = jdbc.query(sql, { rs, _ ->
             val handle = rs.getString("nearby_handle")
             NearbyBubble(handle, rs.getString("display_name"), rs.getString("profile_color"), position(handle), 65 + (stable(handle, 31)), proximity(rs.getDouble("distance_meters")),
                 rs.getString("track_title")?.let { TrackSummary(it, rs.getString("artist_name")) })
@@ -70,7 +70,7 @@ class NearbyController(private val nearby: NearbyService) {
 @org.springframework.messaging.handler.annotation.MessageMapping("location/update")
 @org.springframework.stereotype.Controller
 class PresenceMessageController(private val nearby: NearbyService, private val messaging: SimpMessagingTemplate) {
-    @org.springframework.messaging.handler.annotation.SendToUser("/queue/ack")
+    @org.springframework.messaging.simp.annotation.SendToUser("/queue/ack")
     fun updateLocation(update: LocationUpdate, principal: Principal): Envelope<Map<String, String>> {
         val userId = UUID.fromString(principal.name)
         nearby.updateLocation(userId, update)

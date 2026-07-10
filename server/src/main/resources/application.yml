@@ -13,6 +13,7 @@ spring:
   jackson:
     default-property-inclusion: non_null
 app:
+  seed-demo: ${DEMO_SEED_ENABLED:true}
   jwt:
     # 최소 32바이트. 로컬 개발에서도 .env 또는 환경변수로만 제공합니다.
     secret: ${JWT_SECRET:}
