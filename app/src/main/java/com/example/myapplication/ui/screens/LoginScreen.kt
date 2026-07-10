@@ -20,6 +20,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
@@ -27,16 +28,24 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.ui.LoginUiState
+import com.example.myapplication.data.remote.GoogleCredentialClient
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(
     state: LoginUiState,
     onLogin: (String, String) -> Unit,
+    onGoogleLogin: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var email by rememberSaveable { mutableStateOf("demo@melody.local") }
     // 비밀번호는 SavedState에 넣지 않아 프로세스·화면 복원 시 남지 않게 합니다.
     var password by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val googleClient = remember(context) { GoogleCredentialClient(context) }
+    var googleError by remember { mutableStateOf<String?>(null) }
     val loading = state == LoginUiState.Loading
     val canSubmit = email.isNotBlank() && password.isNotBlank() && !loading
 
@@ -109,5 +118,24 @@ fun LoginScreen(
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(20.dp))
+        Button(
+            onClick = {
+                googleError = null
+                scope.launch {
+                    runCatching { googleClient.getIdToken(context) }
+                        .onSuccess(onGoogleLogin)
+                        .onFailure { googleError = "Google 계정을 선택하지 못했습니다." }
+                }
+            },
+            enabled = !loading,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+        ) {
+            Text("Google로 계속하기")
+        }
+        googleError?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
     }
 }

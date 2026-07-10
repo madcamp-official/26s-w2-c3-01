@@ -18,6 +18,7 @@ fun configuredValue(name: String): String =
         ?: when (name) {
             "API_BASE_URL" -> "https://api.batiger00.madcamp-kaist.org"
             "STOMP_WS_URL" -> "wss://api.batiger00.madcamp-kaist.org/ws"
+            "GOOGLE_WEB_CLIENT_ID" -> "170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com"
             else -> ""
         }
 
@@ -46,6 +47,11 @@ android {
             "String",
             "STOMP_WS_URL",
             quotedBuildConfig(configuredValue("STOMP_WS_URL"))
+        )
+        buildConfigField(
+            "String",
+            "GOOGLE_WEB_CLIENT_ID",
+            quotedBuildConfig(configuredValue("GOOGLE_WEB_CLIENT_ID"))
         )
     }
 
@@ -86,6 +92,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.google.identity.googleid)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

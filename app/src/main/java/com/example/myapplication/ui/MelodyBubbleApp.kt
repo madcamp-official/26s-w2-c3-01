@@ -129,6 +129,7 @@ fun MelodyBubbleApp(
         LoginScreen(
             state = loginState,
             onLogin = viewModel::login,
+            onGoogleLogin = viewModel::loginWithGoogle,
             modifier = modifier.safeDrawingPadding()
         )
         return
