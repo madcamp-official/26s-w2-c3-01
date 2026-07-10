@@ -1,0 +1,4 @@
+# Android Studio가 실제 local.properties에서 로컬 SDK 경로를 관리합니다.
+# 실제 서버가 없거나 데모를 실행할 때는 아래 두 값만 비워 둡니다.
+API_BASE_URL=
+STOMP_WS_URL=

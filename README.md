@@ -1,236 +1,99 @@
-# 26s-w2-c3-01
+# Melody Bubble Android MVP
 
-## 공통과제 II : 협업형 실전 산출물 제작 (2인 1팀)
+Melody Bubble은 주변 사용자를 정확한 위치 대신 익명 음악 버블로 표현하고, 음악 취향·리액션·라운지·1:1 대화를 통해 연결하는 Android 앱입니다. 이 저장소의 MVP는 `Information architecture.png`, `wireframe.png`, `DB.png`, `기획서 초안.md`를 Android에서 시연 가능한 흐름으로 좁혀 구현합니다.
 
-**목적:** 실시간 인터랙션, LLM Wrapper, Cross-Platform 중 하나의 옵션을 선택해 구현하며, 선택한 기술을 실제로 동작하는 형태의 산출물로 완성한다.
+> 개인정보 기준: 다른 사용자에게 GPS 좌표, 정확한 거리, 실제 방향, 이동 경로를 노출하지 않습니다. 와이어프레임의 `4m`, `7m` 같은 숫자와 레이더상의 방향은 초기 시각 참고이며 제품 계약이 아닙니다.
 
-**선택 옵션:**
+## 현재 MVP
 
-| 옵션 | 설명 |
-|---|---|
-| 실시간 인터랙션 | 사용자 간 상태 변화, 실시간 데이터 흐름, 스트리밍 응답 등 실시간성이 드러나는 기능을 구현 |
-| LLM Wrapper | LLM API를 활용하여 AI 기능이 포함된 산출물을 구현 |
-| Cross-Platform | 하나의 산출물을 여러 실행 환경에서 사용할 수 있도록 구현* |
+- 홈/근처 탐색, 사용자 상세, 라운지, 인박스·채팅, 마이 화면을 하나의 데모 흐름으로 연결합니다.
+- 주변 사용자와 라운지 변화는 실제 서버가 없어도 재현 가능한 데모 데이터로 시연합니다. 공유 중에는 약 3.5초마다 가상 Delta가 반영됩니다.
+- 로컬 영속 데이터와 서버 소유 데이터를 분리하며, 좌표와 위치 이력은 Room에 저장하지 않습니다.
+- 실제 연동용 값은 `API_BASE_URL`, `STOMP_WS_URL` 두 개뿐입니다. 저장소에는 실제 값이나 토큰을 커밋하지 않습니다.
+- 현재 네트워크 어댑터는 구현 범위 밖입니다. URL을 설정해도 앱은 안전한 데모 fallback을 사용하며, REST/STOMP 경로와 payload가 후속 서버 연동 계약으로 준비되어 있습니다.
 
-> *데스크톱 앱 ↔ 모바일 앱; 혹은 다른 폼팩터에서의 앱; 웹만/웹 기반 프레임워크(Electron, Tauri 등) 대신 다른 프레임워크를 시도해보는 것을 적극 권장
+구현 상태와 후속 범위는 [MVP 구현 기준](docs/MVP_GUIDE.md), 화면별 데이터 출처와 서버 계약은 [API·실시간 계약](docs/API_CONTRACT.md), DB·Room 차이는 [데이터 저장 및 개인정보 기준](docs/DATA_POLICY.md)에서 확인할 수 있습니다.
 
-**결과물:** 선택한 옵션이 적용된 작동 가능한 산출물, 실행 가능한 코드, 시연 자료 및 관련 문서
+## 실행 환경
 
----
+- Android Studio에서 프로젝트를 열어 실행하는 방식을 권장합니다.
+- Gradle Wrapper: 9.4.1
+- Gradle JVM: 21
+- Android `minSdk 24`, `targetSdk 36`, `compileSdk 36.1`
+- 세로형 Android 스마트폰 또는 에뮬레이터
 
-## 팀원
+## 빠른 실행
 
-| 이름 | 학교 | GitHub | 역할 |
-|---|---|---|---|
-| 박지호 |  |  |  |
-| 이지오 |  |  |  |
+1. Android Studio에서 프로젝트를 열고 Gradle Sync를 실행해 로컬 SDK 경로가 든 `local.properties`를 생성합니다. 기존 파일을 `local.properties.example`로 덮어쓰지 않습니다.
 
----
+2. 예시 파일의 두 키를 `local.properties`에 추가합니다. 데모 실행에서는 값을 빈 상태로 유지합니다.
 
-## 선택 옵션
+   ```properties
+   API_BASE_URL=
+   STOMP_WS_URL=
+   ```
 
-- [ ] 실시간 인터랙션
-- [ ] LLM Wrapper
-- [ ] Cross-Platform
+3. Android Studio에서 `app` 구성을 실행하거나 터미널에서 JDK 21을 선택해 빌드합니다. macOS에서 Android Studio 번들 JBR을 쓰는 예시는 다음과 같습니다.
 
----
+   ```bash
+   export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+   ./gradlew assembleDebug
+   ```
 
-## 기획안
+4. 생성된 디버그 앱을 에뮬레이터 또는 기기에 설치해 실행합니다.
 
-- **산출물 주제:**
-- **제작 목적:**
-- **선택 옵션:**
-- **핵심 구현 요소:**
-  -
-  -
-  -
-- **사용 / 시연 시나리오:**
-- **팀원별 역할:**
+## 데모 모드와 실제 연동 모드
 
-### 개발 일정
-
-| 날짜 | 목표 |
-|---|---|
-| Day 1 |  |
-| Day 2 |  |
-| Day 3 |  |
-| Day 4 |  |
-| Day 5 |  |
-| Day 6 |  |
-| Day 7 |  |
-
----
-
-## 구현 명세서
-
-| 구현 요소 | 설명 | 우선순위 |
+| 구성 | 설정 | 현재 앱 동작 |
 |---|---|---|
-|  |  | 필수 |
-|  |  | 필수 |
-|  |  | 선택 |
-|  |  | 선택 |
+| 데모 | 두 URL을 모두 비움 | `DEMO LIVE`; 시드 데이터, 메모리 상태, Room 오프라인 기록을 사용 |
+| 실제 연동 준비 | `https://`, `wss://`로 시작하는 URL 문자열을 모두 설정 | `DEMO FALLBACK`; 보안 스킴 접두사만 확인하고 현재도 데모 저장소를 사용 |
+| 실제 연동 완료 후 | 두 URL과 백엔드·네트워크 어댑터가 모두 준비됨 | REST snapshot·명령과 STOMP 실시간 이벤트를 서버와 교환하도록 교체 |
 
----
+실제 연동 예시는 다음과 같습니다. 값은 배포 환경에서만 채우고 저장소에 커밋하지 않습니다.
 
-## 아키텍처
-
-<!-- 실시간 인터랙션: WebSocket/SSE/WebRTC 구조도 / LLM Wrapper: API 연동 흐름도 / Cross-Platform: 플랫폼 구성도 -->
-
----
-
-## 설계 문서
-
-> 프로젝트 성격에 따라 필요한 항목만 작성
-
-### 화면 / 인터페이스 설계
-
-<!-- Figma 링크, 화면 이미지, CLI 사용 예시, 앱 화면 등 -->
-
-### 데이터 구조
-
-<!-- DB 스키마, JSON 구조, 파일 저장 방식 등 -->
-
-### API / 외부 서비스 연동
-
-| Method / 방식 | Endpoint / 서비스 | 설명 | 요청 | 응답 | 비고 |
-|---|---|---|---|---|---|
-|  |  |  |  |  |  |
-
----
-
-## 산출물 및 실행 방법
-
-- **산출물 설명:**
-- **실행 환경:**
-- **실행 방법:**
-- **시연 영상 / 이미지:** (선택)
-
-### 실행 방법
-
-```bash
-# 환경 설정
-cp .env.example .env
-
-# 의존성 설치
-npm install   # 또는 pip install -r requirements.txt 등
-
-# 실행
-npm run dev   # 또는 python main.py 등
+```properties
+API_BASE_URL=https://api.example.com/
+STOMP_WS_URL=wss://api.example.com/ws
 ```
 
-### 기술 구성
+- `API_BASE_URL`: 인증, 초기 화면 조회, 설정 변경, 과거 기록 조회에 사용하는 HTTPS REST 기준 URL
+- `STOMP_WS_URL`: 개인 Queue와 라운지·지역 Topic을 구독하는 WSS/STOMP 연결 URL
+- 빌드 값 우선순위는 Gradle `-P` 속성 → 같은 이름의 환경 변수 → `local.properties`입니다. 어느 경로를 쓰더라도 필요한 키는 이 두 개뿐입니다.
+- 둘 중 하나만 설정되거나 `http://`·`ws://`처럼 보안 스킴이 아니면 미구성으로 판단합니다. 현재 검사는 접두사 수준이므로 실제 URL 파싱·도달 가능성·인증서 검증은 후속 네트워크 어댑터가 담당해야 합니다.
+- 이 저장소에는 백엔드, 운영 계정, JWT, 지도·음악 사업자 API 키가 포함되지 않습니다.
+- URL은 향후 네트워크 데이터 소스를 연결할 주입 지점입니다. 현재 빌드만으로 운영 서버 통신이 이루어진다고 가정하면 안 됩니다.
 
-| 분류 | 사용 기술 |
-|---|---|
-| 핵심 기술 |  |
-| 실행 환경 |  |
-| 데이터 저장 |  |
-| 외부 API / 서비스 |  |
-| 기타 |  |
+## 권장 시연 시나리오
 
----
+1. 앱을 실행하고 데모 안내를 확인합니다.
+2. 홈에서 주변 공유 상태와 익명 버블, 주변 음악 요약을 확인합니다.
+3. 근처 탭에서 유사도 `60%+`, `75%+`, `90%+` 필터를 바꾸고 익명 사용자를 선택합니다.
+4. 사용자 상세에서 공개가 허용된 음악 정보만 보고 정해진 리액션 4종 중 하나 또는 팔로우를 실행합니다.
+5. 라운지에 입장해 추천곡 카드와 집계 투표가 즉시 갱신되는 흐름을 확인합니다.
+6. 인박스에서 알림을 확인하고, 맞팔로 가정된 대화방에서 메시지 전송 흐름을 확인합니다.
+7. 마이 화면에서 주변 발견·리액션·오프라인 교환 설정을 확인하고, 데모 음악 카드를 Room에 저장한 뒤 동기화 상태 변화를 확인합니다.
 
-## 회고 문서
+시연 중 버블의 위치는 UI 배치를 위한 가상 좌표입니다. 상대의 방위나 실제 좌표로 해석하면 안 됩니다. 거리는 숫자 대신 `탐색 범위 안`, `가까운 편` 같은 비정밀 상태로만 표현합니다.
 
-> [KPT 방법론 참고](https://velog.io/@habwa/%EB%8B%A8%EA%B8%B0-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-%ED%9A%8C%EA%B3%A0-KPT-%EB%B0%A9%EB%B2%95%EB%A1%A0)
+## 검증
 
-### Keep — 잘 된 점, 다음에도 유지할 것
+```bash
+./gradlew testDebugUnitTest lintDebug assembleDebug
 
--
--
--
+# 실행 중인 에뮬레이터 또는 기기가 있을 때
+./gradlew connectedDebugAndroidTest
+```
 
-### Problem — 아쉬웠던 점, 개선이 필요한 것
+위치·알림 접근처럼 실제 기기 기능이 필요한 항목은 권한을 승인한 테스트 기기에서 별도로 확인합니다. Android 13+에서 알림 권한을 거부하면 서비스는 실행돼도 알림 서랍의 지속 알림은 보장되지 않으므로 앱의 `중지`를 사용합니다. 사용자가 주변 공유를 직접 시작하기 전에는 위치 공유를 시작하지 않으며, 종료 후에는 좌표를 보관하지 않는 것이 기준입니다.
 
--
--
--
+현재 단위 테스트는 오래된 Nearby Delta 무시, 투표 전환, 맞팔 채팅 검증, 클라이언트 주변 모델의 좌표·정확 거리 필드 부재, 빈 URL의 데모 진입을 확인합니다. 권한 거부, 알림 접근, 서비스 알림의 중지 액션, 프로세스 복귀는 실제 기기에서 확인해야 합니다.
 
-### Try — 다음번에 시도해볼 것
+## 원본 설계 산출물
 
--
--
--
+- [Information architecture](Information%20architecture.png)
+- [Wireframe](wireframe.png)
+- [DB diagram](DB.png)
+- [기획서 초안](%EA%B8%B0%ED%9A%8D%EC%84%9C%20%EC%B4%88%EC%95%88.md)
 
-### 팀원별 소감
-
-**박지호:**
-
-> 
-
-**이지오:**
-
-> 
-
----
-
-## 참고 자료
-
-### 실시간 인터랙션
-
-**WebSocket**
-- https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API
-- https://techblog.woowahan.com/5268/
-- https://tech.kakao.com/posts/391
-- https://daleseo.com/websocket/
-- https://kakaoentertainment-tech.tistory.com/110
-
-**Socket.IO**
-- https://socket.io/docs/v4/
-- https://inpa.tistory.com/entry/SOCKET-%F0%9F%93%9A-Namespace-Room-%EA%B8%B0%EB%8A%A5
-- https://adjh54.tistory.com/549
-- https://fred16157.github.io/node.js/nodejs-socketio-communication-room-and-namespace/
-
-**SSE (Server-Sent Events)**
-- https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events
-- https://developer.mozilla.org/ko/docs/Web/API/Server-sent_events/Using_server-sent_events
-- https://api7.ai/ko/blog/what-is-sse
-
-**TCP / UDP Socket**
-- https://docs.python.org/3/library/socket.html
-- https://inpa.tistory.com/entry/NW-%F0%9F%8C%90-%EC%95%84%EC%A7%81%EB%8F%84-%EB%AA%A8%ED%98%B8%ED%95%9C-TCP-UDP-%EA%B0%9C%EB%85%90-%E2%9D%93-%EC%89%BD%EA%B2%8C-%EC%9D%B4%ED%95%B4%ED%95%98%EC%9E%90
-
-**gRPC Streaming**
-- https://grpc.io/docs/what-is-grpc/core-concepts/
-- https://tech.ktcloud.com/entry/gRPC%EC%9D%98-%EB%82%B4%EB%B6%80-%EA%B5%AC%EC%A1%B0-%ED%8C%8C%ED%97%A4%EC%B9%98%EA%B8%B0-HTTP2-Protobuf-%EA%B7%B8%EB%A6%AC%EA%B3%A0-%EC%8A%A4%ED%8A%B8%EB%A6%AC%EB%B0%8D
-- https://tech.ktcloud.com/entry/gRPC%EC%9D%98-%EB%82%B4%EB%B6%80-%EA%B5%AC%EC%A1%B0-%ED%8C%8C%ED%97%A4%EC%B9%98%EA%B8%B02-Channel-Stub
-- https://inspirit941.tistory.com/371
-- https://devocean.sk.com/blog/techBoardDetail.do?ID=167433
-
-**WebRTC**
-- https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API
-- https://webrtc.org/getting-started/overview
-- https://web.dev/articles/webrtc-basics?hl=ko
-- https://devocean.sk.com/blog/techBoardDetail.do?ID=164885
-- https://beomkey-nkb.github.io/%EA%B0%9C%EB%85%90%EC%A0%95%EB%A6%AC/webRTC%EC%A0%95%EB%A6%AC/
-- https://gh402.tistory.com/45
-- https://on.com2us.com/tech/webrtc-coturn-turn-stun-server-setup-guide/
-
-**QUIC / WebTransport**
-- https://developer.mozilla.org/en-US/docs/Web/API/WebTransport_API
-- https://datatracker.ietf.org/doc/html/rfc9000
-- https://news.hada.io/topic?id=13888
-
-#### KCLOUD VM / Cloudflare Tunnel 환경별 주의사항
-
-| 환경 | 사용 가능(권장) 기술 | 포트/조건 | 주의할 기술 |
-|---|---|---|---|
-| **로컬 / 일반 VM** | HTTP/REST, WebSocket, Socket.IO, SSE, TCP Socket, gRPC Streaming, WebRTC, QUIC/WebTransport 등 대부분 가능 | 직접 포트 개방 가능. 예: 3000, 5000, 8000, 8080, 9000 등. 외부 공개 시 방화벽/보안그룹/공인 IP 설정 필요 | WebRTC는 STUN/TURN 필요 가능. QUIC/WebTransport는 HTTP/3 · UDP 지원 필요 |
-| **KCLOUD VM (VPN 내부)** | HTTP/REST, WebSocket, Socket.IO, SSE, WebRTC 시그널링 | 접속 기기 VPN 필요. 기본 허용 포트: **22, 80, 443**. 개발 포트(3000, 8000, 8080 등)는 직접 접근 제한 가능 | TCP Socket은 포트 제한 있음. gRPC는 HTTP/2 설정 필요. WebRTC 미디어·UDP·QUIC/WebTransport 비권장 |
-| **KCLOUD VM + Tunnel** | HTTP/REST, WebSocket, Socket.IO, SSE, WebRTC 시그널링 | VM의 `localhost:<port>`를 도메인에 연결. `localPort`는 **1024~65535**. 예: 3000, 8000, 8080 가능 | 순수 TCP Socket, UDP, WebRTC 미디어/DataChannel, QUIC/WebTransport 불가. gRPC 보장 어려움 |
-| **외부 서비스 + 우리 도메인** | HTTP/REST, WebSocket, Socket.IO, SSE, WebRTC 시그널링 | Vercel/Netlify/Railway/Render/AWS/GCP 등에 배포 후 CNAME/A 레코드 연결. 보통 외부는 **443** 사용 | WebSocket/gRPC/TCP/UDP는 플랫폼 지원 여부 확인 필요. 서버리스 플랫폼은 장시간 연결 제한 가능 |
-| **서버 없이 외부 SaaS 사용** | Supabase Realtime, Firebase, Pusher/Ably, LLM API Streaming | 직접 포트 관리 불필요. 각 서비스 SDK/API 사용 | 커스텀 TCP/UDP 서버 구현 불가. WebRTC는 STUN/TURN 필요할 수 있음 |
-
-### LLM Wrapper
-
-- https://github.com/teddylee777/openai-api-kr
-- https://github.com/teddylee777/langchain-kr
-- https://devocean.sk.com/blog/techBoardDetail.do?ID=167407
-- https://mastra.ai/docs
-
-### Cross-Platform
-
-- https://flutter.dev/
-- https://reactnative.dev/
-- https://docs.expo.dev/
-- https://kotlinlang.org/multiplatform/
+원본 산출물은 전체 제품 방향을 담습니다. 현재 앱에 포함된 범위와 서버가 필요한 후속 범위는 동일하지 않으므로, 구현·시연 판단에는 `docs/`의 MVP 기준을 우선 적용합니다.
