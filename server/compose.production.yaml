@@ -24,6 +24,9 @@ services:
   postgres:
     image: postgis/postgis:16-3.5
     restart: unless-stopped
+    ports:
+      # DBeaver는 SSH tunnel을 거쳐서만 접근합니다. 외부 인터페이스에는 공개하지 않습니다.
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-melody_bubble}
       POSTGRES_USER: ${POSTGRES_USER:-melody}
