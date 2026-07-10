@@ -52,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -61,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,6 +79,7 @@ import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.core.model.Lounge
 import com.example.myapplication.core.model.LoungeStatus
+import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.RelationshipStatus
@@ -650,6 +653,7 @@ fun MyScreen(
     onAllowReactionsChange: (Boolean) -> Unit,
     onOfflineExchangeChange: (Boolean) -> Unit,
     onOpenMusicSelect: () -> Unit,
+    onOpenMelodyAlias: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenOfflineExchange: () -> Unit,
     modifier: Modifier = Modifier
@@ -705,8 +709,8 @@ fun MyScreen(
             SettingsLink(
                 icon = Icons.Outlined.Tune,
                 title = "멜로디 별칭",
-                subtitle = profile.melodyNotes.joinToString(" · "),
-                onClick = {}
+                subtitle = "${profile.melodyNotes.joinToString(" · ")} · ${profile.melodyAliasTone}",
+                onClick = onOpenMelodyAlias
             )
         }
         item {
@@ -762,6 +766,197 @@ fun MyScreen(
                     color = MutedMint,
                     style = MaterialTheme.typography.bodyMedium
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun MelodyAliasScreen(
+    profile: ProfileSettings,
+    candidates: List<MelodyAliasCandidate>,
+    onBack: () -> Unit,
+    onPreview: (MelodyAliasCandidate) -> Unit,
+    onPreviewTone: (String) -> Unit,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var requestedCandidates by rememberSaveable { mutableStateOf(false) }
+    var selectedMood by rememberSaveable { mutableStateOf(profile.melodyAliasMood) }
+    var selectedTone by rememberSaveable { mutableStateOf(profile.melodyAliasTone) }
+    var selectedPitch by rememberSaveable { mutableStateOf(0.5f) }
+    var selectedTempo by rememberSaveable { mutableStateOf(tempoLabel(profile.melodyAliasTempo)) }
+
+    val currentCandidate = candidates.firstOrNull { it.id == profile.melodyAliasId }
+        ?: candidates.firstOrNull { it.notes == profile.melodyNotes }
+    val moods = (listOf("밝음", "몽환", "차분", "설렘", "귀여움", "에너지") +
+        candidates.map { it.mood }).distinct()
+    val tones = (listOf("전자음", "피아노", "기타", "벨", "오르골", "신스패드") +
+        candidates.map { it.tone }).distinct()
+    val rankedCandidates = remember(candidates, selectedMood, selectedTone, selectedPitch, selectedTempo) {
+        candidates
+            .sortedWith(
+                compareByDescending<MelodyAliasCandidate> {
+                    melodyCandidateScore(it, selectedMood, selectedTone, selectedPitch, selectedTempo)
+                }.thenBy { kotlin.math.abs(it.tempo - tempoTarget(selectedTempo)) }
+            )
+            .take(5)
+    }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        BackHeader(onBack = onBack, title = "멜로디 별칭", subtitle = "짧고 또렷한 알림음 시그널")
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                AppPanel(color = SignalGreen.copy(alpha = 0.08f)) {
+                    Text("현재 멜로디", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        profile.melodyNotes.joinToString(" · "),
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MiniTag(profile.melodyAliasMood, selected = true)
+                        MiniTag(profile.melodyAliasTone, selected = true)
+                        MiniTag("${profile.melodyAliasTempo} BPM")
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { currentCandidate?.let(onPreview) },
+                            enabled = currentCandidate != null,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("멜로디 듣기")
+                        }
+                        Button(
+                            onClick = {
+                                editing = true
+                                requestedCandidates = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("수정")
+                        }
+                    }
+                }
+            }
+
+            if (editing && !requestedCandidates) {
+                item { SectionLabel("1. 원하는 무드") }
+                item {
+                    ChoiceGrid(
+                        options = moods,
+                        selected = selectedMood,
+                        columns = 2,
+                        onSelect = {
+                            selectedMood = it
+                            requestedCandidates = false
+                        }
+                    )
+                }
+                item { SectionLabel("2. 원하는 톤") }
+                item {
+                    ToneChoiceGrid(
+                        options = tones,
+                        selected = selectedTone,
+                        onSelect = {
+                            selectedTone = it
+                            requestedCandidates = false
+                            onPreviewTone(it)
+                        }
+                    )
+                }
+                item { SectionLabel("3. 피치") }
+                item {
+                    PitchSlider(
+                        value = selectedPitch,
+                        onValueChange = {
+                            selectedPitch = it
+                            requestedCandidates = false
+                        }
+                    )
+                }
+                item { SectionLabel("4. 속도") }
+                item {
+                    ChoiceGrid(
+                        options = listOf("느림", "보통", "빠름"),
+                        selected = selectedTempo,
+                        columns = 3,
+                        onSelect = {
+                            selectedTempo = it
+                            requestedCandidates = false
+                        }
+                    )
+                }
+                item {
+                    Button(
+                        onClick = { requestedCandidates = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Text("선택 완료")
+                    }
+                }
+                if (!requestedCandidates) {
+                    item {
+                        AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
+                            Text("선택 완료를 누르면 후보를 만들어요", style = MaterialTheme.typography.titleMedium)
+                            Text("나중에는 이 지점에서 LLM API를 호출하고, 지금은 DB 데모 후보를 불러옵니다.", color = MutedMint)
+                        }
+                    }
+                }
+            }
+            if (editing && requestedCandidates) {
+                item {
+                    AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
+                        Text("선택한 조건", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MiniTag(selectedMood, selected = true)
+                            MiniTag(selectedTone, selected = true)
+                            MiniTag(pitchLabel(selectedPitch))
+                            MiniTag(selectedTempo)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(
+                            onClick = { requestedCandidates = false },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("조건 다시 고르기")
+                        }
+                    }
+                }
+                if (requestedCandidates) {
+                    item { SectionLabel("추천 후보 5개") }
+                }
+                if (requestedCandidates && rankedCandidates.isEmpty()) {
+                    item {
+                        AppPanel {
+                            Text("아직 DB 후보가 준비되지 않았어요", style = MaterialTheme.typography.titleMedium)
+                            Text("데모 데이터가 로드되면 이곳에 후보가 표시됩니다.", color = MutedMint)
+                        }
+                    }
+                } else if (requestedCandidates) {
+                    items(rankedCandidates, key = { it.id }) { candidate ->
+                        MelodyAliasCandidateCard(
+                            candidate = candidate,
+                            selected = candidate.id == profile.melodyAliasId,
+                            onPreview = { onPreview(candidate) },
+                            onSelect = {
+                                onSelect(candidate.id)
+                                editing = false
+                                requestedCandidates = false
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -859,6 +1054,194 @@ fun OfflineExchangeScreen(
             }
         }
     }
+}
+
+@Composable
+private fun ChoiceGrid(
+    options: List<String>,
+    selected: String,
+    columns: Int = 2,
+    onSelect: (String) -> Unit
+) {
+    AppPanel {
+        options.chunked(columns).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowOptions.forEach { option ->
+                    FilterChip(
+                        selected = selected == option,
+                        onClick = { onSelect(option) },
+                        label = { Text(option) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                repeat(columns - rowOptions.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun ToneChoiceGrid(
+    options: List<String>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    AppPanel {
+        options.chunked(2).forEach { rowOptions ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowOptions.forEach { option ->
+                    FilterChip(
+                        selected = selected == option,
+                        onClick = { onSelect(option) },
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(option)
+                                Spacer(Modifier.width(6.dp))
+                                Text("🔊")
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                repeat(2 - rowOptions.size) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+private fun PitchSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit
+) {
+    AppPanel {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("로우피치", color = MutedMint, style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.weight(1f))
+            Text("하이피치", color = MutedMint, style = MaterialTheme.typography.labelMedium)
+        }
+        Slider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = 0f..1f,
+            steps = 3
+        )
+        Text(
+            text = when {
+                value < 0.25f -> "낮고 안정적인 알림음"
+                value < 0.5f -> "조금 낮은 톤"
+                value < 0.75f -> "선명한 중고음"
+                else -> "높고 반짝이는 톤"
+            },
+            color = SignalGreen,
+            style = MaterialTheme.typography.labelLarge
+        )
+    }
+}
+
+@Composable
+private fun MelodyAliasCandidateCard(
+    candidate: MelodyAliasCandidate,
+    selected: Boolean,
+    onPreview: () -> Unit,
+    onSelect: () -> Unit
+) {
+    AppPanel(color = if (selected) SignalGreen.copy(alpha = 0.10f) else MossSurface) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(candidate.name, style = MaterialTheme.typography.titleMedium)
+                Text(candidate.notes.joinToString(" · "), color = PaleMint)
+            }
+            if (selected) {
+                Icon(Icons.Outlined.CheckCircle, contentDescription = "선택됨", tint = SignalGreen)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MiniTag(candidate.mood, selected = true)
+            MiniTag(candidate.tone)
+            MiniTag("${candidate.tempo} BPM")
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onPreview, modifier = Modifier.weight(1f)) {
+                Text("듣기")
+            }
+            Button(onClick = onSelect, modifier = Modifier.weight(1f)) {
+                Text(if (selected) "선택됨" else "이걸로 변경")
+            }
+        }
+    }
+}
+
+private fun melodyCandidateScore(
+    candidate: MelodyAliasCandidate,
+    mood: String,
+    tone: String,
+    pitch: Float,
+    tempo: String
+): Int {
+    val tempoDiff = kotlin.math.abs(candidate.tempo - tempoTarget(tempo))
+    val pitchDiff = kotlin.math.abs(candidate.averageMidiPitch() - pitchTarget(pitch))
+    return (if (candidate.mood == mood) 50 else 0) +
+        (if (candidate.tone == tone) 40 else 0) +
+        (25 - (pitchDiff * 2).toInt()).coerceAtLeast(0) +
+        (30 - (tempoDiff / 4)).coerceAtLeast(0)
+}
+
+private fun MelodyAliasCandidate.averageMidiPitch(): Int {
+    val pitches = notes.mapNotNull { note ->
+        val match = Regex("""([A-G]#?)(\d)""").matchEntire(note) ?: return@mapNotNull null
+        val index = mapOf(
+            "C" to 0,
+            "C#" to 1,
+            "D" to 2,
+            "D#" to 3,
+            "E" to 4,
+            "F" to 5,
+            "F#" to 6,
+            "G" to 7,
+            "G#" to 8,
+            "A" to 9,
+            "A#" to 10,
+            "B" to 11
+        )[match.groupValues[1]] ?: return@mapNotNull null
+        val octave = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+        (octave + 1) * 12 + index
+    }
+    return if (pitches.isEmpty()) 76 else pitches.sum() / pitches.size
+}
+
+private fun pitchTarget(value: Float): Int = when {
+    value < 0.25f -> 66
+    value < 0.5f -> 72
+    value < 0.75f -> 80
+    else -> 88
+}
+
+private fun pitchLabel(value: Float): String = when {
+    value < 0.25f -> "로우피치"
+    value < 0.5f -> "중저음"
+    value < 0.75f -> "중고음"
+    else -> "하이피치"
+}
+
+private fun tempoLabel(tempo: Int): String = when {
+    tempo < 110 -> "느림"
+    tempo > 135 -> "빠름"
+    else -> "보통"
+}
+
+private fun tempoTarget(label: String): Int = when (label) {
+    "느림" -> 96
+    "빠름" -> 148
+    else -> 124
 }
 
 @Composable

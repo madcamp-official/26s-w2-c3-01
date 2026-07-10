@@ -9,6 +9,7 @@ import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyReducers
 import com.example.myapplication.core.model.MelodyUiState
+import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.NotificationType
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.RelationshipStatus
@@ -16,6 +17,7 @@ import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.local.MelodyDatabase
+import com.example.myapplication.data.local.MelodyAliasCandidateEntity
 import com.example.myapplication.data.local.OfflineExchangeEntity
 import com.example.myapplication.data.local.SyncOutboxEntity
 import com.example.myapplication.data.remote.ApiEnvironment
@@ -56,6 +58,7 @@ interface MelodyRepository {
     fun setDiscoverable(enabled: Boolean)
     fun setAllowReactions(enabled: Boolean)
     fun setOfflineExchangeEnabled(enabled: Boolean)
+    fun selectMelodyAlias(candidateId: String)
     fun createDemoExchange(peerAlias: String)
     fun syncExchange(exchangeId: String)
     fun clearFeedback()
@@ -95,6 +98,14 @@ class DemoMelodyRepository(
             database.offlineExchangeDao().observeAll().collect { entities ->
                 _state.update { current ->
                     current.copy(offlineExchanges = entities.map { it.toDomain() })
+                }
+            }
+        }
+
+        scope.launch {
+            database.melodyAliasCandidateDao().observeAll().collect { entities ->
+                _state.update { current ->
+                    current.copy(melodyAliasCandidates = entities.map { it.toDomain() })
                 }
             }
         }
@@ -436,6 +447,23 @@ class DemoMelodyRepository(
         _state.update { it.copy(profile = it.profile.copy(offlineExchangeEnabled = enabled)) }
     }
 
+    override fun selectMelodyAlias(candidateId: String) {
+        val candidate = _state.value.melodyAliasCandidates.firstOrNull { it.id == candidateId }
+            ?: return
+        _state.update { current ->
+            current.copy(
+                profile = current.profile.copy(
+                    melodyNotes = candidate.notes,
+                    melodyAliasId = candidate.id,
+                    melodyAliasTone = candidate.tone,
+                    melodyAliasMood = candidate.mood,
+                    melodyAliasTempo = candidate.tempo
+                ),
+                feedbackMessage = "${candidate.name}을(를) 멜로디 별칭으로 설정했어요"
+            )
+        }
+    }
+
     override fun createDemoExchange(peerAlias: String) {
         if (!_state.value.profile.offlineExchangeEnabled) {
             _state.update { it.copy(feedbackMessage = "마이 화면에서 오프라인 교환을 켜 주세요") }
@@ -538,5 +566,18 @@ class DemoMelodyRepository(
         melodyAlias = melodyAlias,
         exchangedAt = exchangedAt,
         syncState = runCatching { SyncState.valueOf(syncState) }.getOrDefault(SyncState.PENDING)
+    )
+
+    private fun MelodyAliasCandidateEntity.toDomain() = MelodyAliasCandidate(
+        id = id,
+        name = name,
+        mood = mood,
+        tone = tone,
+        tempo = tempo,
+        energy = energy,
+        notes = notesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() },
+        rhythm = rhythmCsv.split(",").mapNotNull { it.trim().toIntOrNull() },
+        toneJsPreset = toneJsPreset,
+        melodyId = melodyId
     )
 }
