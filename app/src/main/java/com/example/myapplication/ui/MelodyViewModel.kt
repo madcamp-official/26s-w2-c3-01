@@ -2,14 +2,48 @@ package com.example.myapplication.ui
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.data.MelodyRepository
+import com.example.myapplication.data.remote.AuthRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+sealed interface LoginUiState {
+    data object Idle : LoginUiState
+    data object Loading : LoginUiState
+    data class Success(val expiresInSeconds: Long) : LoginUiState
+    data class Error(val message: String) : LoginUiState
+}
 
 class MelodyViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: MelodyRepository = DemoMelodyRepository(application)
+    private val authRepository by lazy { AuthRepository() }
+    private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
+    private var accessToken: String? = null
+
     val uiState = repository.state
+    val loginState = _loginState.asStateFlow()
+
+    fun login(email: String, password: String) {
+        if (_loginState.value == LoginUiState.Loading) return
+        viewModelScope.launch {
+            _loginState.value = LoginUiState.Loading
+            authRepository.login(email, password)
+                .onSuccess { response ->
+                    accessToken = response.accessToken
+                    _loginState.value = LoginUiState.Success(response.expiresInSeconds)
+                }
+                .onFailure {
+                    _loginState.value = LoginUiState.Error(
+                        "로그인하지 못했습니다. 서버와 계정 정보를 확인해주세요."
+                    )
+                }
+        }
+    }
 
     fun completeOnboarding() = repository.completeOnboarding()
     fun selectTab(tab: MainTab) = repository.selectTab(tab)

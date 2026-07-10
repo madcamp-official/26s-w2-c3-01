@@ -15,7 +15,11 @@ fun configuredValue(name: String): String =
     providers.gradleProperty(name).orNull
         ?: providers.environmentVariable(name).orNull
         ?: localProperties.getProperty(name)
-        ?: ""
+        ?: when (name) {
+            "API_BASE_URL" -> "https://api.batiger00.madcamp-kaist.org"
+            "STOMP_WS_URL" -> "wss://api.batiger00.madcamp-kaist.org/ws"
+            else -> ""
+        }
 
 fun quotedBuildConfig(value: String): String =
     "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -80,6 +84,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation(libs.retrofit.core)
+    implementation(libs.retrofit.converter.gson)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

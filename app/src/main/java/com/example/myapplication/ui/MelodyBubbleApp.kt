@@ -45,6 +45,7 @@ import com.example.myapplication.ui.components.MelodyBottomNavigationBar
 import com.example.myapplication.ui.screens.ChatScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
+import com.example.myapplication.ui.screens.LoginScreen
 import com.example.myapplication.ui.screens.LoungeDetailScreen
 import com.example.myapplication.ui.screens.LoungeListScreen
 import com.example.myapplication.ui.screens.MusicSelectScreen
@@ -73,6 +74,7 @@ fun MelodyBubbleApp(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.uiState.collectAsState()
+    val loginState by viewModel.loginState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -121,6 +123,15 @@ fun MelodyBubbleApp(
         val message = state.feedbackMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
         viewModel.clearFeedback()
+    }
+
+    if (loginState !is LoginUiState.Success) {
+        LoginScreen(
+            state = loginState,
+            onLogin = viewModel::login,
+            modifier = modifier.safeDrawingPadding()
+        )
+        return
     }
 
     if (!state.isOnboardingComplete) {
