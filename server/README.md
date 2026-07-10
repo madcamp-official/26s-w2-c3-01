@@ -33,6 +33,38 @@ docker compose --env-file .env -f compose.production.yaml up -d --build
 curl http://127.0.0.1:8080/actuator/health
 ```
 
-PostgreSQL과 RabbitMQ는 Docker 내부 네트워크에만 존재하고, 애플리케이션의 8080 포트도 VM의 loopback에만 바인딩됩니다. 외부 접속은 Cloudflare Tunnel을 통해서만 허용합니다.
+PostgreSQL과 애플리케이션 포트는 VM의 loopback에만 바인딩됩니다. 외부 API 접속은 Cloudflare Tunnel, DB 개발자 접속은 SSH tunnel을 통해서만 허용합니다. RabbitMQ는 Docker 내부 네트워크에만 존재합니다.
 
 운영 대시보드는 `/internal/ops`에서 확인합니다. HTTP Basic 인증을 사용하며 `.env`의 `OPS_USERNAME`, `OPS_PASSWORD`로만 접근할 수 있습니다. 사용자 비밀번호, JWT, 위치 좌표, 메시지 본문은 표시하지 않습니다.
+
+## DBeaver로 운영 DB 구조 확인
+
+먼저 VPN을 연결한 Mac에서 SSH tunnel을 유지합니다.
+
+```bash
+./scripts/open-db-tunnel.sh
+```
+
+DBeaver의 PostgreSQL 연결값은 다음과 같습니다.
+
+```text
+Host: localhost
+Port: 15432
+Database: melody_bubble
+Username: melody
+Password: VM의 server/.env에 있는 POSTGRES_PASSWORD
+```
+
+비밀번호는 저장소나 채팅에 복사하지 않습니다. `15432`는 Mac의 loopback 포트이고 VM에서는 PostgreSQL이 `127.0.0.1:5432`에만 열리므로 인터넷에서 DB로 직접 접근할 수 없습니다.
+
+DBeaver 연결 후 `public` schema에서 테이블·컬럼·인덱스·외래 키를 확인하거나 ER Diagram을 열 수 있습니다. Flyway 적용 상태는 아래 쿼리로 확인합니다.
+
+```sql
+SELECT installed_rank, version, description, installed_on, success
+FROM flyway_schema_history
+ORDER BY installed_rank;
+```
+
+## Android Room 확인
+
+앱을 debug로 실행한 뒤 Android Studio의 `View → Tool Windows → App Inspection → Database Inspector`에서 `offline_exchange_local`, `sync_outbox`를 확인합니다. 이 데이터는 서버 PostgreSQL과 별개입니다.
