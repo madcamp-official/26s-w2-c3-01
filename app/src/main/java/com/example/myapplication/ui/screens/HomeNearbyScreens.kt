@@ -610,7 +610,7 @@ private fun CompactRadar(
                         contentDescription = "추상 주변 레이더, 리스너 ${listeners.size}명. 실제 위치나 방향을 나타내지 않음"
                     }
             ) {
-                val center = Offset(size.width * 0.54f, size.height * 0.54f)
+                val center = Offset(size.width * 0.5f, size.height * 0.5f)
                 listOf(0.22f, 0.39f, 0.56f).forEach { scale ->
                     drawCircle(
                         color = MelodyBubbleColors.Border.copy(alpha = 0.82f),
