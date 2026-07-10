@@ -4,7 +4,9 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.core.model.MainTab
+import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.Track
+import com.example.myapplication.audio.MelodyAliasPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.data.MelodyRepository
 import com.example.myapplication.data.remote.AuthRepository
@@ -22,6 +24,7 @@ sealed interface LoginUiState {
 class MelodyViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: MelodyRepository = DemoMelodyRepository(application)
     private val authRepository by lazy { AuthRepository() }
+    private val melodyAliasPreviewPlayer = MelodyAliasPreviewPlayer()
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private var accessToken: String? = null
 
@@ -84,11 +87,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun setDiscoverable(enabled: Boolean) = repository.setDiscoverable(enabled)
     fun setAllowReactions(enabled: Boolean) = repository.setAllowReactions(enabled)
     fun setOfflineExchangeEnabled(enabled: Boolean) = repository.setOfflineExchangeEnabled(enabled)
+    fun selectMelodyAlias(candidateId: String) = repository.selectMelodyAlias(candidateId)
+    fun previewMelodyAlias(candidate: MelodyAliasCandidate) = melodyAliasPreviewPlayer.play(candidate)
+    fun previewMelodyTone(tone: String) = melodyAliasPreviewPlayer.playToneSample(tone)
     fun createDemoExchange(peerAlias: String) = repository.createDemoExchange(peerAlias)
     fun syncExchange(exchangeId: String) = repository.syncExchange(exchangeId)
     fun clearFeedback() = repository.clearFeedback()
 
     override fun onCleared() {
+        melodyAliasPreviewPlayer.release()
         repository.close()
         super.onCleared()
     }

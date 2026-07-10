@@ -172,10 +172,27 @@ data class ProfileSettings(
     val genres: List<String>,
     val moods: List<String>,
     val melodyNotes: List<String>,
+    val melodyAliasId: String,
+    val melodyAliasTone: String,
+    val melodyAliasMood: String,
+    val melodyAliasTempo: Int,
     val musicVisibilityLabel: String,
     val discoverable: Boolean,
     val allowReactions: Boolean,
     val offlineExchangeEnabled: Boolean
+)
+
+data class MelodyAliasCandidate(
+    val id: String,
+    val name: String,
+    val mood: String,
+    val tone: String,
+    val tempo: Int,
+    val energy: String,
+    val notes: List<String>,
+    val rhythm: List<Int>,
+    val toneJsPreset: String,
+    val melodyId: String
 )
 
 data class OfflineExchangeRecord(
@@ -204,6 +221,7 @@ data class MelodyUiState(
     val chats: List<ChatPreview>,
     val chatMessages: Map<String, List<ChatMessage>>,
     val profile: ProfileSettings,
+    val melodyAliasCandidates: List<MelodyAliasCandidate> = emptyList(),
     val offlineExchanges: List<OfflineExchangeRecord> = emptyList(),
     val selectedNearbyHandle: String? = null,
     val selectedLoungeId: String? = null,
