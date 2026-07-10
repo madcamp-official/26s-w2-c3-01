@@ -191,14 +191,15 @@ fun SharingStatusCard(
     MelodyCard(
         modifier = modifier.semantics {
             contentDescription = "$stateLabel, $connectionLabel, 공유 범위 $scopeLabel"
-        }
+        },
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(42.dp),
                 shape = CircleShape,
                 color = if (sharing) {
                     MelodyBubbleColors.Primary.copy(alpha = 0.16f)
@@ -225,7 +226,7 @@ fun SharingStatusCard(
                         Modifier
                             .size(7.dp)
                             .background(
-                                color = if (connectionState == ConnectionState.LIVE) {
+                        color = if (connectionState == ConnectionState.LIVE) {
                                     MelodyBubbleColors.Primary
                                 } else {
                                     MelodyBubbleColors.Warning
@@ -247,7 +248,7 @@ fun SharingStatusCard(
                 Text(
                     text = "$scopeLabel · $connectionLabel",
                     color = MelodyBubbleColors.TextMuted,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -256,9 +257,9 @@ fun SharingStatusCard(
             Button(
                 onClick = if (sharing) onStop else onStart,
                 modifier = Modifier
-                    .height(48.dp)
-                    .widthIn(min = 72.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp),
+                    .height(42.dp)
+                    .widthIn(min = 64.dp),
+                contentPadding = PaddingValues(horizontal = 13.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (sharing) {
                         MelodyBubbleColors.SurfaceRaised

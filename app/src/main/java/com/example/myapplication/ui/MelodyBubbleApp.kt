@@ -50,6 +50,7 @@ import com.example.myapplication.ui.screens.LoungeListScreen
 import com.example.myapplication.ui.screens.MusicSelectScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
+import com.example.myapplication.ui.screens.NearbyMusicFilter
 import com.example.myapplication.ui.screens.OfflineExchangeScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.screens.UserDetailScreen
@@ -286,6 +287,7 @@ private fun MainShell(
     onOpenOfflineExchange: () -> Unit
 ) {
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
+    var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
 
     Scaffold(
         containerColor = Ink,
@@ -315,7 +317,9 @@ private fun MainShell(
                 state = state,
                 modifier = contentModifier,
                 similarityThreshold = similarityThreshold.toInt(),
+                musicFilter = nearbyMusicFilter,
                 onSimilarityThresholdChange = { similarityThreshold = it.toFloat() },
+                onMusicFilterChange = { nearbyMusicFilter = it },
                 onSelectListener = { viewModel.selectNearby(it.nearbyHandle) },
                 onOpenListenerDetail = { onOpenUser(it.nearbyHandle) },
                 onReact = { listener, label -> viewModel.react(listener.nearbyHandle, label) },
