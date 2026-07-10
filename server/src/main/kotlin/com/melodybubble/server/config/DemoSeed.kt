@@ -2,14 +2,19 @@ package com.melodybubble.server.config
 
 import org.springframework.boot.ApplicationArguments
 import org.springframework.boot.ApplicationRunner
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Component
 import java.util.UUID
 
 @Component
-class DemoSeed(private val jdbc: JdbcTemplate) : ApplicationRunner {
+class DemoSeed(
+    private val jdbc: JdbcTemplate,
+    @Value("\${app.seed-demo}") private val enabled: Boolean,
+) : ApplicationRunner {
     override fun run(args: ApplicationArguments) {
+        if (!enabled) return
         if ((jdbc.queryForObject("select count(*) from users", Int::class.java) ?: 0) > 0) return
         val encoder = BCryptPasswordEncoder()
         val people = listOf(

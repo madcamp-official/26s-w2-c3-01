@@ -23,3 +23,14 @@ Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Comp
 - Flyway 기반 PostGIS 스키마: 사용자, 개인정보 설정, 최신 위치 TTL, 음악 상태, 채팅, 라운지·투표
 
 `current_locations`에는 세션당 최신 위치만 유지하며 90초 TTL 뒤 주변 조회에서 제외됩니다. `displayPosition`은 `nearbyHandle`에서 결정되는 추상 좌표로, 실제 위치와 방향을 표현하지 않습니다.
+
+## VM 배포
+
+VM에서는 `.env.production.example`을 `.env`로 복사해 빈 secret을 채운 뒤 실행합니다.
+
+```bash
+docker compose --env-file .env -f compose.production.yaml up -d --build
+curl http://127.0.0.1:8080/actuator/health
+```
+
+PostgreSQL과 RabbitMQ는 Docker 내부 네트워크에만 존재하고, 애플리케이션의 8080 포트도 VM의 loopback에만 바인딩됩니다. 외부 접속은 Cloudflare Tunnel을 통해서만 허용합니다.
