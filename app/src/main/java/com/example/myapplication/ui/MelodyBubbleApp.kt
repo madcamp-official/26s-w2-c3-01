@@ -208,6 +208,10 @@ fun MelodyBubbleApp(
                         lounge = lounge,
                         onBack = { navController.popBackStack() },
                         onJoin = { viewModel.joinLounge(lounge.id) },
+                        onLeave = {
+                            viewModel.joinLounge(lounge.id)
+                            navController.popBackStack()
+                        },
                         onVote = { viewModel.vote(lounge.id, it) },
                         onReactToCard = { viewModel.reactToMusicCard(lounge.id, it) },
                         onSendCurrentTrack = { viewModel.sendMusicCard(lounge.id) },
@@ -328,7 +332,10 @@ private fun MainShell(
             MainTab.LOUNGE -> LoungeListScreen(
                 lounges = state.lounges,
                 onOpen = onOpenLounge,
-                onJoin = viewModel::joinLounge,
+                onJoinAndOpen = { roomId ->
+                    viewModel.joinLounge(roomId)
+                    onOpenLounge(roomId)
+                },
                 modifier = contentModifier.safeDrawingPadding()
             )
             MainTab.INBOX -> InboxScreen(
