@@ -601,7 +601,7 @@ private fun CompactRadar(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(206.dp)
+                .aspectRatio(1f)
         ) {
             Canvas(
                 modifier = Modifier
@@ -639,18 +639,24 @@ private fun CompactRadar(
                 )
             }
             Column(
-                modifier = Modifier.padding(18.dp)
+                modifier = Modifier
+                    .fillMaxWidth(0.58f)
+                    .padding(18.dp)
             ) {
                 Text(
                     text = "주변 버블 스냅샷",
                     color = MelodyBubbleColors.Text,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "실제 거리·방향을 숨긴 추상 분포",
                     color = MelodyBubbleColors.TextMuted,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             nearestMusic?.currentTrack?.let { track ->
@@ -658,7 +664,7 @@ private fun CompactRadar(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(14.dp)
-                        .widthIn(max = 190.dp),
+                        .widthIn(max = 168.dp),
                     shape = RoundedCornerShape(16.dp),
                     color = MelodyBubbleColors.Background.copy(alpha = 0.84f),
                     border = BorderStroke(1.dp, MelodyBubbleColors.Border)
