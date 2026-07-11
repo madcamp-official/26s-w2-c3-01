@@ -865,14 +865,12 @@ class DemoMelodyRepository(
                 isOnboardingComplete = false,
                 nearbyListeners = emptyList(),
                 popularTracks = emptyList(),
-                lounges = emptyList(),
                 notifications = realtimeInboxStore?.load().orEmpty(),
                 chats = emptyList(),
                 chatMessages = emptyMap(),
                 detectedTrack = detectedPlayback.track,
                 detectedTrackPlaying = detectedPlayback.isPlaying,
                 selectedNearbyHandle = null,
-                selectedLoungeId = null,
                 dataSourceLabel = "SERVER LIVE",
             )
         }
@@ -1685,17 +1683,9 @@ class DemoMelodyRepository(
                     isNew = false
                 )
             }
-            val lounges = current.lounges.map { lounge ->
-                if (lounge.id == "campus-lounge") {
-                    lounge.copy(memberCount = lounge.memberCount + if (liveTick % 2 == 0) 1 else -1)
-                } else {
-                    lounge
-                }
-            }
             current.copy(
                 snapshotSequence = current.snapshotSequence + 1,
                 nearbyListeners = movedListeners,
-                lounges = lounges
             )
         }
     }
