@@ -71,6 +71,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
@@ -482,6 +483,8 @@ fun MyScreen(
     modifier: Modifier = Modifier,
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
+    var awaitingProfileSave by rememberSaveable { mutableStateOf(false) }
+    var profileSaveStarted by rememberSaveable { mutableStateOf(false) }
     var visibilityEditing by rememberSaveable { mutableStateOf(false) }
     var deleteConfirm by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
@@ -497,6 +500,14 @@ fun MyScreen(
     var colorHex by rememberSaveable(profile.colorHex) { mutableStateOf(profile.colorHex) }
     var genres by rememberSaveable(profile.genres) { mutableStateOf(profile.genres) }
     var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
+    LaunchedEffect(profileSaving, feedbackMessage, awaitingProfileSave) {
+        if (awaitingProfileSave && profileSaving) profileSaveStarted = true
+        if (awaitingProfileSave && profileSaveStarted && !profileSaving) {
+            awaitingProfileSave = false
+            profileSaveStarted = false
+            if (feedbackMessage == "프로필을 변경했어요") editing = false
+        }
+    }
     val context = LocalContext.current
     val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) avatar = runCatching {
@@ -566,10 +577,23 @@ fun MyScreen(
             ProfileTagEditor("내 음악 무드", listOf("Calm", "Night", "Dreamy", "Bright", "Energetic", "Warm"), moods) { moods = it }
             Spacer(Modifier.height(26.dp))
             Button(
-                onClick = { onProfileUpdate(name, colorHex, bio, avatar, genres, moods); editing = false },
-                enabled = name.trim().length >= 2,
+                onClick = {
+                    awaitingProfileSave = true
+                    profileSaveStarted = false
+                    onProfileUpdate(name, colorHex, bio, avatar, genres, moods)
+                },
+                enabled = name.trim().length >= 2 && !awaitingProfileSave,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
-            ) { Text("프로필 저장", fontWeight = FontWeight.Bold) }
+            ) {
+                if (awaitingProfileSave) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (awaitingProfileSave) "저장 중" else "프로필 저장", fontWeight = FontWeight.Bold)
+            }
+            if (!awaitingProfileSave && feedbackMessage?.contains("저장하지 못해") == true) {
+                Text(feedbackMessage, color = MaterialTheme.colorScheme.error)
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
