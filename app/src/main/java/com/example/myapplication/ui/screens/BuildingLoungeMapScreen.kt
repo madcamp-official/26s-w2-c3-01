@@ -578,6 +578,98 @@ private fun SubLoungeList(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun SubLoungeDetailSheet(
+    state: BuildingLoungeUiState,
+    onDismiss: () -> Unit,
+    onLeave: () -> Unit,
+    onSendTrack: (String?) -> Unit,
+    onReactToCard: (String, String) -> Unit,
+    onVote: (String) -> Unit,
+    onRefresh: () -> Unit,
+) {
+    val snapshot = state.subLoungeSnapshot
+    var cardMessage by remember(state.selectedSubLoungeId) { mutableStateOf("") }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MossSurface,
+        contentColor = PaleMint,
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 720.dp)
+                .navigationBarsPadding(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = 18.dp,
+                end = 18.dp,
+                bottom = 28.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            snapshot?.title ?: "하위 라운지 연결 중",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            snapshot?.style ?: "실시간 상태를 불러오고 있어요",
+                            color = MutedMint,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = if (state.realtimeState == ConnectionState.LIVE) {
+                            SignalGreen.copy(alpha = 0.16f)
+                        } else {
+                            MossSurfaceHigh
+                        },
+                    ) {
+                        Text(
+                            if (state.realtimeState == ConnectionState.LIVE) "실시간" else "재연결 중",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            color = if (state.realtimeState == ConnectionState.LIVE) SignalGreen else MutedMint,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Outlined.Refresh, contentDescription = "라운지 새로고침")
+                    }
+                }
+            }
+
+            if (state.detailLoading && snapshot == null) {
+                item {
+                    Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = SignalGreen)
+                    }
+                }
+            }
+
+            snapshot?.let { room ->
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        MetricPanel("참여자", "${room.memberCount}명", Modifier.weight(1f))
+                        MetricPanel("재생 중", "${room.listeningStatuses.count { it.isPlaying }}곡", Modifier.weight(1f))
+                        MetricPanel("추천", "${room.cards.size}개", Modifier.weight(1f))
+                    }
+                }
+
+                item { SectionLabel("지금 함께 듣는 음악") }
+                if (room.listeningStatuses.isEmpty()) {
+                    item { EmptyLoungePanel("아직 공유된 음악이 없어요", "음악을 재생하면 자동으로 이곳에 표시돼요.") }
+                } else {
+                    items(room.listeningStatuses, key = { "${it.listenerAlias}-${it.updatedAt}" }) { listening ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MossSurfaceHigh,
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun CreateSubLoungeSheet(
     onDismiss: () -> Unit,
     onCreate: (String, String?) -> Unit
