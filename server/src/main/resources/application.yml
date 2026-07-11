@@ -21,6 +21,9 @@ app:
   openai:
     api-key: ${OPENAI_API_KEY:}
     model: ${OPENAI_MODEL:gpt-5.4}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MUSIC_MODEL:lyria-3-clip-preview}
   ops:
     username: ${OPS_USERNAME:ops}
     password: ${OPS_PASSWORD:local-ops-password-change-me}

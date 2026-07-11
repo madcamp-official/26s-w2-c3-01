@@ -4,110 +4,50 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
-  <title>Melody Alias Prompt Lab</title>
-  <script src="https://unpkg.com/tone@14.8.49/build/Tone.js"></script>
+  <title>Lyria 3 Music Prompt Lab</title>
   <style>
-    :root{--ink:#141614;--paper:#f4f2ea;--panel:#fffdf7;--line:#d5d0c2;--muted:#656b64;--green:#16784f;--blue:#315bb8;--yellow:#ecce54;--red:#b74435;--shadow:0 12px 34px rgba(20,22,20,.08)}
-    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Avenir Next","Pretendard",Arial,sans-serif}button,input,select{font:inherit}
-    .shell{max-width:1180px;margin:auto;padding:26px 18px 52px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;border-top:5px solid var(--ink);padding-top:18px;margin-bottom:20px}
-    .eyebrow,.label{font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}h1{margin:8px 0 0;font-size:clamp(32px,6vw,64px);line-height:.9;letter-spacing:-.05em}.grid{display:grid;grid-template-columns:360px 1fr;gap:14px}
-    .panel{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);padding:18px}.control{margin:0 0 14px}.control label{display:block;margin-bottom:7px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}select,input{width:100%;border:1px solid var(--line);background:white;padding:11px;color:var(--ink);border-radius:0}input:focus,select:focus,button:focus-visible{outline:3px solid var(--yellow);outline-offset:2px}
-    .tags{display:flex;flex-wrap:wrap;gap:8px}.tag{border:1px solid var(--line);background:white;padding:8px 10px;cursor:pointer}.tag.active{background:var(--ink);color:white;border-color:var(--ink)}.actions{display:flex;gap:8px;margin-top:16px}button{border:1px solid var(--ink);background:var(--ink);color:white;padding:11px 14px;cursor:pointer}button.secondary{background:white;color:var(--ink)}button.play{background:var(--blue);border-color:var(--blue)}button:disabled{opacity:.55;cursor:wait}
-    .status{min-height:22px;margin-top:12px;color:var(--muted);font-size:13px}.status.error{color:var(--red)}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.card{border:1px solid var(--line);background:white;padding:14px;min-height:190px}.card h2{margin:4px 0 4px;font-size:22px;letter-spacing:-.03em}.card p{margin:8px 0;color:var(--muted);font-size:13px}.notes{font:700 13px ui-monospace,monospace;margin:12px 0}.json,.prompt{width:100%;min-height:260px;border:1px solid var(--line);background:#161815;color:#e8f1df;padding:14px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.prompt{min-height:420px;resize:vertical}.section-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}.editor-actions{display:flex;gap:8px;align-items:center}
-    @media(max-width:900px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr}.top{display:block}.row{grid-template-columns:1fr}}
+    :root{--ink:#171817;--paper:#f2f0e9;--panel:#fffdf8;--line:#d3cec0;--muted:#666b65;--green:#176c4b;--blue:#315bb8;--red:#b74435;--shadow:0 12px 34px rgba(20,22,20,.08)}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Avenir Next","Pretendard",Arial,sans-serif}button,textarea{font:inherit}.shell{max-width:1060px;margin:auto;padding:26px 18px 56px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;border-top:5px solid var(--ink);padding-top:18px;margin-bottom:20px}.eyebrow,.label{font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}h1{margin:8px 0 0;font-size:clamp(34px,6vw,66px);line-height:.92;letter-spacing:-.04em}.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:14px}.panel{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);padding:18px}.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.prompt{width:100%;min-height:460px;border:1px solid var(--line);background:#171917;color:#e9f2e8;padding:16px;resize:vertical;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.prompt:focus,button:focus-visible,audio:focus-visible{outline:3px solid #e5c849;outline-offset:2px}.actions{display:flex;gap:8px;margin-top:12px}button{border:1px solid var(--ink);background:var(--ink);color:white;padding:12px 15px;cursor:pointer}button.secondary{background:white;color:var(--ink)}button:disabled{opacity:.55;cursor:wait}.status{min-height:22px;margin:12px 0;color:var(--muted);font-size:13px}.status.error{color:var(--red)}.loading{display:none;border-top:1px solid var(--line);padding-top:16px;margin-top:16px}.loading.active{display:block}.bar{height:5px;background:#dedbd2;overflow:hidden}.bar::after{content:"";display:block;width:40%;height:100%;background:var(--green);animation:move 1.2s ease-in-out infinite}.result{display:none}.result.active{display:block}.result h2{margin:5px 0 8px;font-size:26px}.result p{color:var(--muted);line-height:1.5;white-space:pre-wrap}.art{aspect-ratio:1;background:linear-gradient(145deg,#173e31,#315bb8 55%,#dfc750);display:grid;place-items:center;color:white;margin-bottom:16px}.art span{font:700 64px/1 ui-monospace,monospace}audio{width:100%;margin:8px 0 14px}.meta{display:flex;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line)}a{color:inherit}@keyframes move{from{transform:translateX(-110%)}to{transform:translateX(260%)}}@media(max-width:780px){.grid{grid-template-columns:1fr}.top{display:block}.prompt{min-height:360px}}
   </style>
 </head>
 <body>
 <main class="shell">
   <header class="top">
-    <div>
-      <div class="eyebrow">Internal ops / OpenAI test</div>
-      <h1>Melody Alias<br>Prompt Lab</h1>
-    </div>
+    <div><div class="eyebrow">Internal ops / Gemini music test</div><h1>Lyria 3<br>Prompt Lab</h1></div>
     <a href="/internal/ops/" class="eyebrow">Back to ops</a>
   </header>
-
   <section class="grid">
-    <aside class="panel">
-      <div class="row">
-        <div class="control">
-          <label class="label" for="mood">Mood</label>
-          <select id="mood"></select>
-        </div>
-        <div class="control">
-          <label class="label" for="tone">Tone</label>
-          <select id="tone"></select>
-        </div>
-      </div>
-      <div class="row">
-        <div class="control">
-          <label class="label" for="energy">Energy</label>
-          <select id="energy"></select>
-        </div>
-        <div class="control">
-          <label class="label" for="tempoRange">Tempo range</label>
-          <select id="tempoRange"></select>
-        </div>
-      </div>
-      <div class="control">
-        <label class="label" for="count">Candidate count</label>
-        <input id="count" type="number" min="1" max="5" value="3">
-      </div>
-      <div class="control">
-        <label class="label">Vibe tags</label>
-        <div class="tags" id="vibeTags"></div>
-      </div>
-      <div class="actions">
-        <button id="generate">Generate</button>
-        <button id="preview" class="secondary">Refresh prompt</button>
-      </div>
-      <div class="status" id="status">Ready.</div>
-    </aside>
+    <article class="panel">
+      <div class="section-title"><span class="label">Editable music prompt</span><span class="label" id="count">0 chars</span></div>
+      <textarea class="prompt" id="prompt" spellcheck="false">Create one expressive 30-second instrumental identity song that communicates "this is my vibe."
 
-    <section>
-      <div class="cards" id="cards"></div>
-      <article class="panel">
-        <div class="section-title">
-          <span class="label">Model response</span>
-        </div>
-        <pre class="json" id="json">{}</pre>
-      </article>
-      <article class="panel" style="margin-top:14px">
-        <div class="section-title">
-          <span class="label">Editable prompt</span>
-          <div class="editor-actions"><span class="label" id="promptCount">0 chars</span><button id="resetPrompt" class="secondary">Load default</button></div>
-        </div>
-        <textarea class="prompt" id="prompt" spellcheck="false" aria-label="OpenAI prompt"></textarea>
-      </article>
-    </section>
+Mood: dreamy, warm, quietly confident.
+Instrumentation: mellow electric piano, soft nylon guitar, airy analog synth pad, subtle bass, and restrained brushed percussion.
+Structure: a memorable opening motif, gentle development, and a satisfying ending within 30 seconds.
+Production: polished 48 kHz stereo, intimate and spacious, musical and pleasant, never harsh or alarm-like.
+Instrumental only. No vocals, no spoken words. Do not imitate any existing artist or copyrighted song.</textarea>
+      <div class="actions"><button id="generate">Generate 30-second song</button><button id="reset" class="secondary">Reset prompt</button></div>
+      <div class="status" id="status">프롬프트를 수정한 뒤 생성 버튼을 누르세요.</div>
+      <div class="loading" id="loading"><div class="label">Lyria is composing</div><p>30초 음악을 만들고 있어요. 최대 몇 분 걸릴 수 있습니다.</p><div class="bar"></div></div>
+    </article>
+    <aside class="panel">
+      <div class="result" id="result">
+        <div class="art"><span>L3</span></div>
+        <div class="label">Generated clip</div><h2>Your 30-second song</h2>
+        <audio id="audio" controls preload="metadata"></audio>
+        <p id="description"></p>
+        <div class="meta"><span class="label" id="model"></span><span class="label">MP3 / 30 sec</span></div>
+      </div>
+      <div id="empty"><div class="art"><span>30</span></div><div class="label">One prompt · one song</div><h2>생성 결과가 여기에 나타납니다</h2><p style="color:var(--muted);line-height:1.5">Tone.js 합성 대신 Lyria 3가 완성된 MP3 음악 한 곡을 생성합니다.</p></div>
+    </aside>
   </section>
 </main>
-
 <script>
-  const $=id=>document.getElementById(id);
-  const state={options:null,result:null,activeTags:new Set(['cozy','light','friendly'])};
-  const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const payload=()=>({mood:$('mood').value,tone:$('tone').value,energy:$('energy').value,tempoRange:$('tempoRange').value,vibeTags:[...state.activeTags],count:Number($('count').value||3)});
-  function fillSelect(id,items){$(id).innerHTML=items.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}
-  function setStatus(text,isError=false){$('status').textContent=text;$('status').classList.toggle('error',isError)}
-  async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
-  async function loadOptions(){const r=await fetch('/internal/ops/api/melody-alias/options');state.options=await r.json();fillSelect('mood',state.options.moods);fillSelect('tone',state.options.tones);fillSelect('energy',state.options.energies);fillSelect('tempoRange',state.options.tempoRanges);$('vibeTags').innerHTML=state.options.vibeTags.map(tag=>`<button type="button" class="tag ${state.activeTags.has(tag)?'active':''}" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('');$('vibeTags').addEventListener('click',e=>{const tag=e.target?.dataset?.tag;if(!tag)return;state.activeTags.has(tag)?state.activeTags.delete(tag):state.activeTags.add(tag);e.target.classList.toggle('active');refreshPrompt()});await refreshPrompt()}
-  function updatePromptCount(){$('promptCount').textContent=`${$('prompt').value.length.toLocaleString()} chars`}
-  async function refreshPrompt(){try{const d=await post('/internal/ops/api/melody-alias/prompt-preview',payload());$('prompt').value=d.prompt;updatePromptCount();setStatus('Default prompt loaded. Edit it, then press Generate.')}catch(e){setStatus(e.message,true)}}
-  async function generate(){const promptOverride=$('prompt').value.trim();if(!promptOverride){setStatus('Prompt cannot be empty.',true);return}setStatus('Calling OpenAI with the edited prompt...');$('generate').disabled=true;try{const d=await post('/internal/ops/api/melody-alias/generate',{...payload(),promptOverride});state.result=d;$('json').textContent=JSON.stringify(d,null,2);renderCards(d.candidates);setStatus('Generated from your edited prompt. Press Play to hear a candidate.')}catch(e){setStatus(e.message,true)}finally{$('generate').disabled=false}}
-  function renderCards(candidates){$('cards').innerHTML=candidates.map((c,i)=>`<article class="card"><span class="label">${esc(c.mood)} / ${esc(c.tone)}</span><h2>${esc(c.name)}</h2><p>${esc(c.playbackHint)}</p><div class="notes">${esc(c.notes.join('  '))}</div><p>${esc(c.rhythmMs.join(' / '))} ms</p><button class="play" data-index="${i}">Play</button></article>`).join('')}
-  function instrumentFor(candidate){
-    const tone=String(candidate.tone).toLowerCase(),p=candidate.toneJsPreset;
-    if(tone.includes('guitar')||tone.includes('기타'))return new Tone.PluckSynth({attackNoise:.7,dampening:2800,resonance:.9});
-    if(tone.includes('bell')||tone.includes('벨'))return new Tone.FMSynth({harmonicity:2.6,modulationIndex:6,oscillator:{type:'sine'},envelope:{attack:.004,decay:1.1,sustain:.08,release:1.4},modulation:{type:'sine'},modulationEnvelope:{attack:.002,decay:.7,sustain:0,release:1}});
-    if(tone.includes('glass')||tone.includes('오르골'))return new Tone.FMSynth({harmonicity:3.5,modulationIndex:4.5,oscillator:{type:'sine'},envelope:{attack:.003,decay:1.2,sustain:.03,release:1.5},modulationEnvelope:{attack:.002,decay:.5,sustain:0,release:.8}});
-    if(tone.includes('piano')||tone.includes('피아노'))return new Tone.Synth({oscillator:{type:'triangle8'},envelope:{attack:.008,decay:.7,sustain:.18,release:1.1}});
-    if(tone.includes('pad')||tone.includes('신스패드'))return new Tone.AMSynth({harmonicity:1.01,oscillator:{type:'sine'},envelope:{attack:.18,decay:.5,sustain:.55,release:1.5},modulation:{type:'triangle'},modulationEnvelope:{attack:.3,decay:.4,sustain:.3,release:1.2}});
-    if(tone.includes('synth')||tone.includes('전자음'))return new Tone.AMSynth({harmonicity:1.5,oscillator:{type:'sine'},envelope:{attack:.03,decay:.45,sustain:.35,release:1},modulation:{type:'triangle'},modulationEnvelope:{attack:.08,decay:.3,sustain:.2,release:.8}});
-    const Synth=Tone[p.synth]||Tone.Synth;return new Synth({oscillator:{type:'sine'},envelope:{attack:.03,decay:.5,sustain:.25,release:1}});
-  }
-  async function play(index){const c=state.result?.candidates?.[index];if(!c)return;await Tone.start();const p=c.toneJsPreset;const reverb=new Tone.Reverb({decay:1.4,wet:Math.min(.45,p.effects.reverb)}).toDestination();await reverb.generate();const delay=new Tone.FeedbackDelay('16n',Math.min(.22,p.effects.delay));delay.wet.value=Math.min(.3,p.effects.delay);delay.connect(reverb);const synth=instrumentFor(c).connect(delay);let t=Tone.now()+.05;c.notes.forEach((note,i)=>{const dur=(c.rhythmMs[i]||160)/1000;synth.triggerAttackRelease(note,Math.max(.06,dur*.82),t);t+=dur});setTimeout(()=>{synth.dispose();delay.dispose();reverb.dispose()},Math.ceil((t-Tone.now()+2)*1000))}
-  $('generate').addEventListener('click',generate);$('preview').addEventListener('click',refreshPrompt);$('resetPrompt').addEventListener('click',refreshPrompt);$('prompt').addEventListener('input',updatePromptCount);['mood','tone','energy','tempoRange','count'].forEach(id=>$(id).addEventListener('change',refreshPrompt));$('cards').addEventListener('click',e=>{const index=e.target?.dataset?.index;if(index!==undefined)play(Number(index))});loadOptions();
+  const $=id=>document.getElementById(id);const initial=$('prompt').value;
+  function updateCount(){$('count').textContent=`${$('prompt').value.length.toLocaleString()} chars`}
+  function setStatus(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error)}
+  async function generate(){const prompt=$('prompt').value.trim();if(!prompt){setStatus('프롬프트를 입력해 주세요.',true);return}$('generate').disabled=true;$('loading').classList.add('active');$('result').classList.remove('active');$('empty').style.display='block';setStatus('Lyria 3가 음악을 생성하고 있습니다...');try{const response=await fetch('/internal/ops/api/lyria/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});if(!response.ok)throw new Error(await response.text());const data=await response.json();$('audio').src=`data:${data.mimeType};base64,${data.audioBase64}`;$('description').textContent=data.description||'Instrumental music generated from your prompt.';$('model').textContent=data.model;$('empty').style.display='none';$('result').classList.add('active');setStatus('30초 음악 생성이 완료됐습니다. 재생 버튼을 눌러 들어보세요.')}catch(error){setStatus(error.message||'음악 생성에 실패했습니다.',true)}finally{$('generate').disabled=false;$('loading').classList.remove('active')}}
+  $('prompt').addEventListener('input',updateCount);$('generate').addEventListener('click',generate);$('reset').addEventListener('click',()=>{$('prompt').value=initial;updateCount();setStatus('기본 프롬프트로 되돌렸습니다.')});updateCount();
 </script>
 </body>
 </html>
