@@ -62,6 +62,23 @@ class RealtimePublisherTest {
     }
 
     @Test
+    fun `defers a topic event until the transaction commits`() {
+        TransactionSynchronizationManager.setActualTransactionActive(true)
+        TransactionSynchronizationManager.initSynchronization()
+
+        publisher.toTopicAfterCommit(
+            "/topic/sub-lounges/room-1",
+            RealtimeEventTypes.SUB_LOUNGE_STATE_UPDATED,
+            mapOf("memberCount" to 2),
+        )
+
+        assertThat(channel.messages).isEmpty()
+        TransactionSynchronizationManager.getSynchronizations().forEach { it.afterCommit() }
+        assertThat(channel.messages.single().headers[SimpMessageHeaderAccessor.DESTINATION_HEADER])
+            .isEqualTo("/topic/sub-lounges/room-1")
+    }
+
+    @Test
     fun `does not leak an event from a rolled back transaction`() {
         TransactionSynchronizationManager.setActualTransactionActive(true)
         TransactionSynchronizationManager.initSynchronization()
