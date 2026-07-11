@@ -182,3 +182,95 @@ class NearbyReactionService(
                 senderId = UUID.fromString(rs.getString("sender_id")),
                 recipientId = UUID.fromString(rs.getString("recipient_id")),
                 clientReactionId = UUID.fromString(rs.getString("client_reaction_id")),
+                reactionType = rs.getString("reaction_type"),
+                trackTitle = rs.getString("track_title"),
+                trackArtist = rs.getString("track_artist"),
+                createdAt = rs.getTimestamp("created_at").toInstant(),
+            )
+        },
+        senderId,
+        clientReactionId,
+    ).single()
+
+    private fun resolveActiveRecipient(senderId: UUID, nearbyHandle: String): ReactionRecipient {
+        if (!nearbyHandle.matches(Regex("[A-Za-z0-9_]{3,48}"))) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "주변 사용자를 찾을 수 없습니다.")
+        }
+        return jdbc.query(
+            """
+            select ps.user_id,privacy.allow_reactions
+            from presence_sessions ps
+            join user_privacy_settings privacy on privacy.user_id=ps.user_id
+            join current_locations recipient_location
+              on recipient_location.session_id=ps.id and recipient_location.expires_at>now()
+            where ps.nearby_handle=? and ps.expires_at>now()
+              and privacy.discoverable=true
+              and privacy.discoverability_scope<>'HIDDEN'
+              and (
+                privacy.discoverability_scope='NEARBY' or (
+                  privacy.discoverability_scope='MUTUALS'
+                  and exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=ps.user_id)
+                  and exists(select 1 from user_follows f where f.follower_id=ps.user_id and f.followed_id=?)
+                )
+              )
+              and exists(
+                select 1 from presence_sessions sender_session
+                join current_locations sender_location
+                  on sender_location.session_id=sender_session.id and sender_location.expires_at>now()
+                where sender_session.user_id=? and sender_session.expires_at>now()
+                  and ST_DWithin(
+                    recipient_location.point::geography,
+                    sender_location.point::geography,
+                    (select discovery_radius_meters from user_privacy_settings where user_id=?)
+                  )
+              )
+            """.trimIndent(),
+            { rs, _ -> ReactionRecipient(UUID.fromString(rs.getString(1)), rs.getBoolean(2)) },
+            nearbyHandle,
+            senderId,
+            senderId,
+            senderId,
+            senderId,
+        ).firstOrNull()
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "주변 사용자가 더 이상 활성 상태가 아닙니다.")
+    }
+
+    private fun ensureNotBlocked(senderId: UUID, recipientId: UUID) {
+        val blocked = jdbc.queryForObject(
+            """
+            select exists(select 1 from user_blocks
+              where (blocker_id=? and blocked_id=?) or (blocker_id=? and blocked_id=?))
+            """.trimIndent(),
+            Boolean::class.java,
+            senderId,
+            recipientId,
+            recipientId,
+            senderId,
+        ) == true
+        if (blocked) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "차단 관계에서는 리액션을 보낼 수 없습니다.")
+        }
+    }
+
+    private fun validatedTrack(rawTitle: String?, rawArtist: String?): Pair<String?, String?> {
+        val title = rawTitle?.trim()?.ifBlank { null }
+        val artist = rawArtist?.trim()?.ifBlank { null }
+        if ((title == null) != (artist == null)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "곡 제목과 아티스트를 함께 입력해 주세요.")
+        }
+        if ((title?.length ?: 0) > 160 || (artist?.length ?: 0) > 160) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "곡 제목과 아티스트는 160자까지 입력할 수 있습니다.")
+        }
+        return title to artist
+    }
+
+    companion object {
+        private val REACTION_TYPES = setOf("LIKE", "SAME_TASTE", "GREAT_PICK", "LISTEN_TOGETHER")
+    }
+}
+
+@RestController
+@RequestMapping("/api/v1/nearby")
+class NearbyReactionController(private val reactions: NearbyReactionService) {
+    @GetMapping("/reactions")
+    fun received(
