@@ -70,22 +70,81 @@ class LyriaMusicService(
     }
 
     fun generateAlias(request: LyriaAliasGenerateRequest): LyriaGenerateResponse {
-        val emphasized = request.instruments.joinToString(", ").ifBlank { "Piano" }
-        val moods = request.moods.entries.joinToString(", ") { "${it.key} ${it.value}%" }
-        val prompt = """
+        return generate(LyriaGenerateRequest(buildAliasPrompt(request)))
+    }
+
+    internal fun buildAliasPrompt(request: LyriaAliasGenerateRequest): String {
+        val rankedMoods = request.moods.entries
+            .map { it.key.trim() to it.value.coerceIn(0, 100) }
+            .filter { it.first.isNotBlank() && it.second > 0 }
+            .sortedByDescending { it.second }
+        val primaryMood = rankedMoods.getOrNull(0) ?: ("Calm" to 50)
+        val secondaryMood = rankedMoods.getOrNull(1)
+        val accents = rankedMoods.drop(2)
+        val emphasized = request.instruments.map(String::trim).filter(String::isNotBlank)
+            .joinToString(", ").ifBlank { "piano" }
+        val genre = genreDirection(request.genre)
+        val pitch = pitchDirection(request.pitch.coerceIn(0, 100))
+        val speed = speedDirection(request.speed.coerceIn(0, 100))
+        val secondaryLine = secondaryMood?.let {
+            "Secondary mood: ${it.first} (${it.second}/100 intensity). It should support, not override, the primary mood."
+        } ?: "Secondary mood: none. Keep the emotional direction focused."
+        val accentLine = accents.takeIf { it.isNotEmpty() }?.joinToString(", ") { "${it.first} ${it.second}/100" }
+            ?.let { "Subtle mood accents: $it. Treat these only as light color; do not average every mood equally." }
+            ?: "Subtle mood accents: none."
+
+        return """
             Create one polished 30-second instrumental identity song that expresses "this is my vibe."
 
-            Mood blend: $moods.
-            Genre: ${request.genre}.
-            Emphasized instruments: $emphasized.
-            Pitch character: ${request.pitch}/100, where 0 is low and grounded and 100 is high and airy.
-            Speed and energy: ${request.speed}/100, where 0 is slow and spacious and 100 is fast and energetic.
+            EMOTIONAL PRIORITY
+            Primary mood: ${primaryMood.first} (${primaryMood.second}/100 intensity). This must be the clearest emotional impression.
+            $secondaryLine
+            $accentLine
 
-            The emphasized instruments should be more noticeable, but the arrangement does not have to contain only those instruments. Add any supporting instruments needed to make the music coherent, rich, and pleasant.
+            GENRE AND ARRANGEMENT
+            $genre
+            Make the genre recognizable through rhythm, harmony, sound palette, and arrangement, not merely as a vague influence.
+            Lead instruments: $emphasized. Keep them clearly audible and central to the motif.
+
+            PITCH PROFILE
+            $pitch
+
+            TEMPO AND ENERGY
+            $speed
+
+            Supporting instruments are allowed, but they must not obscure the selected genre, primary mood, or lead instruments.
             Build a memorable motif, a clear development, and a satisfying ending within 30 seconds. Keep the mix musical and comfortable to hear, never harsh or alarm-like.
             Instrumental only. No vocals or spoken words. Do not imitate any existing artist or copyrighted song.
         """.trimIndent()
-        return generate(LyriaGenerateRequest(prompt))
+    }
+
+    private fun genreDirection(genre: String): String = when (genre.trim().lowercase()) {
+        "팝", "pop" -> "Genre: modern pop. Use a clear hook, clean production, and an accessible verse-to-chorus-like arc."
+        "힙합", "hip-hop", "hip hop" -> "Genre: hip-hop. Use a defined drum pocket, syncopated groove, and strong low-end pulse."
+        "r&b", "알앤비" -> "Genre: contemporary R&B. Use a laid-back pocket, soulful extended harmony, and smooth layered textures."
+        "밴드사운드", "band" -> "Genre: live band sound. Center the arrangement on drums, bass, and expressive guitar or keys with human dynamics."
+        "전자음악", "electronic" -> "Genre: electronic music. Use synthesized timbres, a precise electronic groove, and deliberate textural movement."
+        "어쿠스틱", "acoustic" -> "Genre: acoustic. Use natural instruments, intimate dynamics, and organic room-like texture."
+        "재즈", "jazz" -> "Genre: jazz. Use swing or a nuanced jazz pocket, extended chords, and conversational instrumental phrasing."
+        "락", "rock" -> "Genre: rock. Use assertive live drums, electric-guitar-driven momentum, and a strong dynamic rise."
+        "클래식", "classical" -> "Genre: classical. Use acoustic orchestral or chamber writing, thematic development, and expressive dynamics."
+        else -> "Genre: ${genre.trim().ifBlank { "modern pop" }}. Make its defining rhythmic, harmonic, and timbral traits unmistakable."
+    }
+
+    private fun pitchDirection(pitch: Int): String = when (pitch) {
+        in 0..20 -> "Very low and grounded: keep the motif in a low register, use weighty bass and dark voicings, and avoid bright high-register leads."
+        in 21..40 -> "Low-mid and warm: favor lower melodic phrases, full bass, and close warm voicings with limited high-frequency sparkle."
+        in 41..60 -> "Balanced mid register: keep the lead centered and natural, with an even low-to-high frequency balance and no extreme register bias."
+        in 61..80 -> "High and airy: place the lead in the upper-mid register, use open voicings and light bass, and add controlled high-frequency shimmer."
+        else -> "Very high and luminous: feature an upper-register motif, sparkling textures, open voicings, and restrained low end; avoid heavy low-register riffs."
+    }
+
+    private fun speedDirection(speed: Int): String = when (speed) {
+        in 0..20 -> "Very slow and spacious, approximately 55-70 BPM, with long phrases, sparse attacks, and low energy."
+        in 21..40 -> "Relaxed, approximately 70-90 BPM, with an unhurried groove and gentle dynamic motion."
+        in 41..60 -> "Moderate, approximately 90-115 BPM, with steady forward motion and balanced energy."
+        in 61..80 -> "Fast and energetic, approximately 115-140 BPM, with active rhythm and a clear dynamic lift."
+        else -> "Very fast and intense, approximately 140-165 BPM, with urgent rhythmic motion while remaining clean and musical."
     }
 
     private fun parseResponse(root: JsonNode): LyriaGenerateResponse {

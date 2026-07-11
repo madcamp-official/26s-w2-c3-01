@@ -1,8 +1,10 @@
 package com.example.myapplication.data.remote
 
 import com.example.myapplication.BuildConfig
+import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 object ApiClient {
     private fun retrofit(environment: ApiEnvironment): Retrofit = Retrofit.Builder()
@@ -24,6 +26,18 @@ object ApiClient {
     fun createMelodyAliasApi(environment: ApiEnvironment = ApiEnvironment()): MelodyAliasApi =
         retrofit(environment).create(MelodyAliasApi::class.java)
 
-    fun createLyriaMusicApi(environment: ApiEnvironment = ApiEnvironment()): LyriaMusicApi =
-        retrofit(environment).create(LyriaMusicApi::class.java)
+    fun createLyriaMusicApi(environment: ApiEnvironment = ApiEnvironment()): LyriaMusicApi {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(3, TimeUnit.MINUTES)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+
+        return Retrofit.Builder()
+            .baseUrl(environment.apiBaseUrl.trimEnd('/') + "/")
+            .client(client)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(LyriaMusicApi::class.java)
+    }
 }
