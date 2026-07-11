@@ -849,28 +849,29 @@ private fun CreateSubLoungeSheet(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Create sub lounge", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("하위 라운지 만들기", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it.take(80) },
-                label = { Text("Title") },
+                label = { Text("방 이름") },
+                supportingText = { Text("2~80자 · 같은 건물에서 중복 이름은 사용할 수 없어요.") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
             OutlinedTextField(
                 value = style,
                 onValueChange = { style = it.take(80) },
-                label = { Text("Style") },
+                label = { Text("음악 스타일 (선택)") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
             Button(
                 onClick = { onCreate(title, style.ifBlank { null }) },
-                enabled = title.isNotBlank(),
+                enabled = title.trim().length >= 2,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(containerColor = SignalGreen)
             ) {
-                Text("Create")
+                Text("만들고 입장하기")
             }
         }
     }
