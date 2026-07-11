@@ -1340,6 +1340,7 @@ class DemoMelodyRepository(
             is RealtimeEvent.NearbyMusicUpdated -> applyNearbyMusicUpdated(event)
             is RealtimeEvent.PopularTracksUpdated -> applyPopularTracksUpdated(event)
             is RealtimeEvent.NotificationCreated -> applyNotificationCreated(event)
+            is RealtimeEvent.SubLoungeUpdated -> Unit
             is RealtimeEvent.ServerError -> {
                 event.envelope.payload.message?.takeIf(String::isNotBlank)?.let { message ->
                     _state.update { it.copy(feedbackMessage = message) }
