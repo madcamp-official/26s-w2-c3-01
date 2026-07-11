@@ -1,15 +1,15 @@
 # 화면 데이터 출처와 API·STOMP 계약
 
-이 문서는 원본 기획의 통신 방향을 Android MVP가 교체 가능한 데이터 소스로 사용할 수 있도록 정리한 기준입니다. 저장소에 백엔드나 네트워크 어댑터는 포함되지 않으므로 아래 경로는 서버 연동 시 합의할 버전 `v1` 계약이며, 현재 호출된다는 뜻이 아닙니다. 현재 앱은 항상 데모 저장소를 사용합니다. 코드에 선언된 endpoint/destination과 기획상 후속 항목을 구분해 적습니다.
+이 문서는 Android 앱과 Spring 서버가 사용하는 버전 `v1` 통신 계약입니다. 인증된 세션에서는 실제 REST API를 사용하며, 주변 Presence와 관계·안전 기능은 서버 응답을 기준으로 화면 상태를 구성합니다.
 
 ### 현재 Android에 선언된 계약 경계
 
-- REST: 로그인, 토큰 갱신, 내 프로필·공개 범위, 주변 snapshot·상세, 라운지 목록·상세, 대화방·과거 메시지, 알림, 오프라인 교환 동기화
+- REST: 로그인, 토큰 갱신, 내 프로필·Presence 공개 범위, 주변 snapshot·상세, 팔로우·차단·신고, 맞팔 대화방·메시지
 - STOMP SEND: Presence, 위치·음악, 리액션, 채팅·읽음, 라운지 입장·퇴장·카드·리액션·투표
 - STOMP SUBSCRIBE: 개인 nearby/chat/notifications/reactions/ack/errors Queue와 라운지 state/cards/votes Topic
-- 후속 계약: 회원가입, 취향 저장, 팔로우·차단·신고 REST, 채팅 typing, 지역 trend·pulse, 라운지 reaction Topic, 행사 Topic
+- 후속 계약: 채팅 typing, 지역 trend·pulse, 라운지 reaction Topic, 행사 Topic
 
-선언된 계약도 아직 HTTP/WebSocket 클라이언트에 연결되지 않았습니다. URL이 설정되면 현재는 `DEMO FALLBACK` 라벨만 사용합니다.
+좌표는 Presence TTL 동안 최신값 한 건만 저장하며 주변 응답에는 실제 좌표·방향·정확 거리를 포함하지 않습니다.
 
 ## 1. 데이터 소스 우선순위
 
@@ -30,14 +30,14 @@
 | 홈 | 시드 주변 요약·인기 음악, Foreground Service 공유 상태 | `GET /api/v1/nearby/snapshot`; 지역 trend REST는 후속 | `/user/queue/nearby`; Presence·location·music SEND; 지역 trend Topic은 후속 | 익명 버블, 가상 배치, 유사도, 공개 허용 음악, 익명 집계 |
 | 근처 | 홈과 같은 시드 목록 | `GET /api/v1/nearby/snapshot` | `/user/queue/nearby` | 정확 거리·방향 없는 주변 사용자 카드 |
 | 사용자 상세 | 선택한 시드 사용자 | snapshot에 포함된 공개 필드 또는 `GET /api/v1/nearby/{nearbyHandle}` | 리액션 `/app/reaction/send`; 결과 `/user/queue/reactions`, `/ack` | 임시 handle, 별칭, 유사도, 공개 음악·취향 요약 |
-| 팔로우 | 메모리 상태 전환 | 후속 `PUT`·`DELETE /api/v1/nearby/{nearbyHandle}/follow` | 결과 `/user/queue/notifications` | 팔로우·맞팔 상태 |
-| 차단·신고 | 차단 시 메모리 목록 제거, 신고 시 데모 접수 피드백 | 후속 `PUT /api/v1/nearby/{nearbyHandle}/block`, `POST /api/v1/nearby/{nearbyHandle}/reports` | 결과는 개인 `/user/queue/notifications|ack|errors` | 공개 메시지 없이 본인 처리 결과만 표시 |
+| 팔로우 | 서버 관계 상태 | `PUT`·`DELETE /api/v1/nearby/{nearbyHandle}/follow` | 결과 `/user/queue/notifications` 확장 가능 | 팔로우·맞팔 상태와 맞팔 대화방 ID |
+| 차단·신고 | 서버 차단 목록·신고 접수 | `PUT /api/v1/nearby/{nearbyHandle}/block`, `GET /api/v1/me/blocks`, `DELETE /api/v1/me/blocks/{blockId}`, `POST /api/v1/nearby/{nearbyHandle}/reports` | 처리 결과는 요청자에게만 반환 | 공개 메시지 없이 본인 처리 결과만 표시 |
 | 라운지 목록 | 시드 라운지 | `GET /api/v1/rooms?areaId={areaId}` | 선택 사항: 지역 notice | 이름, 상태, 익명 참여자 수, 장르·분위기 |
 | 라운지 상세 | 시드 카드·투표 | `GET /api/v1/rooms/{roomId}` | `/app/room/join|leave|card|reaction|vote`; 현재 구독은 `state|cards|votes`, reaction Topic은 후속 | 집계·추천곡 카드·정해진 리액션·투표 |
 | 인박스 | 시드 알림·대화방 | `GET /api/v1/notifications`, `GET /api/v1/chat/rooms` | `/user/queue/notifications`, `/user/queue/reactions`, `/user/queue/chat` | 본인에게 전달된 알림·대화 미리보기 |
-| 1:1 채팅 | 시드 대화 | `GET /api/v1/chat/rooms/{roomId}/messages?cursor=...` | 현재 `/app/chat/send|read`; typing은 후속, 수신은 `/user/queue/chat|ack|errors` | 맞팔 대화방의 텍스트와 전송 상태 |
+| 1:1 채팅 | 서버 대화 | `GET /api/v1/chat/rooms`, `GET`·`POST /api/v1/chat/rooms/{roomId}/messages` | STOMP 수신은 후속 | 맞팔이며 차단되지 않은 대화방의 텍스트와 전송 상태 |
 | 마이·설정 | 로컬 데모 프로필, 알림 접근 설정 진입 | `GET /api/v1/me`, `PATCH /api/v1/me`, `PUT /api/v1/me/privacy` | 설정 반영 알림은 개인 Queue 선택 | 본인 프로필·취향·공개 범위 |
-| 현재 음악 선택 | `DemoCatalog` 최근 곡 또는 알림 listener의 최소 폴백 문자열 | 후속 음악 검색 REST가 필요할 수 있음 | `/app/music/update` | 제목·아티스트·source; 앱 계정·원본 알림 전체 제외 |
+| 현재 음악 선택 | `MediaSessionManager` 직접 감지, 세션 미제공 앱만 알림 문자열 폴백 | `POST /api/v1/nearby/music` | `/app/music/update` 확장 가능 | 제목·아티스트·source·재생 여부; 앱 계정·원본 알림 전체 제외 |
 | 오프라인 기록 | Room `offline_exchange_local`·`sync_outbox` | `POST /api/v1/offline-exchanges/sync` | Nearby Connections는 후속이며 STOMP와 별도 | 직접 승인한 음악 카드와 동기화 상태 |
 
 `nearbyHandle`은 현재 Presence 범위에서만 쓰는 불투명 식별자여야 합니다. 사용자 상세에서 서버의 영구 UUID를 주변 사용자에게 그대로 노출하지 않습니다. 기획 초안의 `temporaryUserId` 개념은 Android·API 계약에서 `nearbyHandle`로 통일합니다.
@@ -138,6 +138,8 @@ GET /api/v1/nearby/snapshot
 GET /api/v1/me
 PUT /api/v1/me/taste-profile
 PUT /api/v1/me/privacy
+GET /api/v1/me/presence-settings
+PUT /api/v1/me/presence-settings
 ```
 
 ```json
@@ -149,6 +151,10 @@ PUT /api/v1/me/privacy
 }
 ```
 
+Presence 설정은 `discoverabilityScope`(`NEARBY`, `MUTUALS`, `HIDDEN`),
+`musicVisibility`(`TITLE_ARTIST`, `MUTUALS`, `HIDDEN`), `discoveryRadiusMeters`(50–2000),
+`allowReactions`를 저장합니다. 서버 주변 검색은 요청자의 저장된 반경과 상대의 공개 범위를 함께 집행합니다.
+
 ```json
 {
   "discoverability": "NEARBY",
@@ -159,7 +165,7 @@ PUT /api/v1/me/privacy
 }
 ```
 
-### 팔로우 — 후속 계약
+### 팔로우
 
 ```http
 PUT /api/v1/nearby/{nearbyHandle}/follow
@@ -174,10 +180,12 @@ DELETE /api/v1/nearby/{nearbyHandle}/follow
 }
 ```
 
-### 차단·신고 — 후속 계약
+### 차단·신고
 
 ```http
 PUT /api/v1/nearby/{nearbyHandle}/block
+GET /api/v1/me/blocks
+DELETE /api/v1/me/blocks/{blockId}
 POST /api/v1/nearby/{nearbyHandle}/reports
 ```
 
