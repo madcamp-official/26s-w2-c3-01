@@ -468,14 +468,31 @@ private fun LoungeRoomsSheet(
             state.message?.let {
                 Text(it, color = SignalGreen, style = MaterialTheme.typography.labelMedium)
             }
+            state.userLocation?.accuracyMeters?.takeIf { it > 100f }?.let { accuracy ->
+                Text(
+                    "위치 정확도가 약 ${accuracy.roundToInt()}m예요. 건물 입장이 정확하지 않을 수 있어요.",
+                    color = MutedMint,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
             if (entered == null) {
-                LazyColumn(
-                    modifier = Modifier.height(320.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    val visible = if (insideLounges.isEmpty()) state.lounges.take(8) else insideLounges
-                    items(visible, key = { it.id }) { lounge ->
-                        BuildingLoungeRow(lounge = lounge, onEnter = { onEnter(lounge.id) })
+                when {
+                    state.loading -> Box(
+                        Modifier.fillMaxWidth().height(180.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { CircularProgressIndicator(color = SignalGreen) }
+                    state.lounges.isEmpty() -> EmptyLoungePanel(
+                        if (state.loadFailed) "건물 정보를 불러오지 못했어요" else "주변 실제 건물이 없어요",
+                        if (state.loadFailed) "잠시 후 위치 새로고침을 다시 시도해 주세요." else "이 위치에는 아직 캐시된 OSM 건물이 없습니다.",
+                    )
+                    else -> LazyColumn(
+                        modifier = Modifier.height(320.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        val visible = if (insideLounges.isEmpty()) state.lounges.take(8) else insideLounges
+                        items(visible, key = { it.id }) { lounge ->
+                            BuildingLoungeRow(lounge = lounge, onEnter = { onEnter(lounge.id) })
+                        }
                     }
                 }
             } else {
