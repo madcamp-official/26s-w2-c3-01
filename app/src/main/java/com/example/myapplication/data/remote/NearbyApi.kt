@@ -25,6 +25,12 @@ data class RemoteNearbySnapshot(
     val radiusMeters: Int?,
     val items: List<RemoteNearbyBubble>
 )
+data class RemotePopularTrack(
+    val title: String,
+    val artist: String,
+    val listenerCount: Int,
+    val reactionCount: Int
+)
 data class LocationUpdateRequest(
     val requestId: String,
     val clientSessionId: String,
@@ -50,10 +56,41 @@ data class PresenceSettingsUpdateRequest(
     val discoveryRadiusMeters: Int,
     val allowReactions: Boolean
 )
+data class NearbyReactionRequest(
+    val clientReactionId: String,
+    val reactionType: String,
+    val trackTitle: String?,
+    val trackArtist: String?
+)
+data class RemoteNearbyReaction(
+    val reactionId: String,
+    val clientReactionId: String,
+    val reactionType: String,
+    val createdAt: String
+)
+data class RemoteReceivedReaction(
+    val reactionId: String,
+    val clientReactionId: String,
+    val reactionType: String,
+    val senderAlias: String,
+    val trackTitle: String?,
+    val trackArtist: String?,
+    val createdAt: String
+)
 
 interface NearbyApi {
     @GET("api/v1/nearby/snapshot")
     suspend fun snapshot(@Header("Authorization") authorization: String): RemoteNearbySnapshot
+
+    @GET("api/v1/nearby/popular-tracks")
+    suspend fun popularTracks(
+        @Header("Authorization") authorization: String
+    ): List<RemotePopularTrack>
+
+    @GET("api/v1/nearby/reactions")
+    suspend fun receivedReactions(
+        @Header("Authorization") authorization: String
+    ): List<RemoteReceivedReaction>
 
     @POST("api/v1/nearby/location")
     suspend fun updateLocation(
@@ -66,6 +103,13 @@ interface NearbyApi {
         @Header("Authorization") authorization: String,
         @Body request: MusicUpdateRequest
     )
+
+    @POST("api/v1/nearby/{nearbyHandle}/reactions")
+    suspend fun sendReaction(
+        @Header("Authorization") authorization: String,
+        @Path("nearbyHandle") nearbyHandle: String,
+        @Body request: NearbyReactionRequest
+    ): RemoteNearbyReaction
 
     @DELETE("api/v1/nearby/presence/{clientSessionId}")
     suspend fun stopPresence(
