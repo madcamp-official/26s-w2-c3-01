@@ -238,6 +238,8 @@ object DemoCatalog {
                 accountAlias = "JH Melody",
                 nearbyDisplayAlias = "Lime",
                 colorHex = 0xFF25C76FL,
+                bio = "좋은 음악을 발견하고 나누는 걸 좋아해요.",
+                avatarDataUrl = null,
                 genres = listOf("Indie", "R&B"),
                 moods = listOf("Calm", "Night"),
                 melodyNotes = listOf("C4", "E4", "G4"),

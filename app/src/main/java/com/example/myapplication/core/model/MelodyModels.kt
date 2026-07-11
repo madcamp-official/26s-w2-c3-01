@@ -19,7 +19,16 @@ enum class SharingState {
     STOPPED,
     STARTING,
     ACTIVE,
-    PERMISSION_REQUIRED
+    PERMISSION_REQUIRED,
+    FAILED
+}
+
+enum class NearbyLoadState {
+    IDLE,
+    LOADING,
+    READY,
+    EMPTY,
+    ERROR
 }
 
 enum class Proximity(val label: String) {
@@ -89,6 +98,7 @@ data class NearbyListener(
     val currentTrack: Track?,
     val commonGenres: List<String>,
     val relationship: RelationshipStatus = RelationshipStatus.NONE,
+    val canReact: Boolean = true,
     val isNew: Boolean = false
 )
 
@@ -169,6 +179,8 @@ data class ProfileSettings(
     val accountAlias: String,
     val nearbyDisplayAlias: String,
     val colorHex: Long,
+    val bio: String,
+    val avatarDataUrl: String?,
     val genres: List<String>,
     val moods: List<String>,
     val melodyNotes: List<String>,
@@ -206,6 +218,22 @@ data class OfflineExchangeRecord(
     val syncState: SyncState
 )
 
+data class BlockedUser(
+    val blockId: String,
+    val displayAlias: String,
+    val colorHex: Long,
+    val blockedAt: String
+)
+
+enum class ReportReason(val label: String) {
+    SPAM("스팸·광고"),
+    HARASSMENT("괴롭힘·위협"),
+    HATE("혐오 표현"),
+    SEXUAL_CONTENT("부적절한 성적 콘텐츠"),
+    IMPERSONATION("사칭"),
+    OTHER("기타")
+}
+
 data class MelodyUiState(
     val isOnboardingComplete: Boolean = false,
     val selectedTab: MainTab = MainTab.HOME,
@@ -214,6 +242,7 @@ data class MelodyUiState(
     val scopeLabel: String = "캠퍼스 주변",
     val snapshotSequence: Long = 1,
     val currentTrack: Track,
+    val currentTrackPlaying: Boolean = true,
     val nearbyListeners: List<NearbyListener>,
     val popularTracks: List<PopularTrack>,
     val lounges: List<Lounge>,
@@ -223,6 +252,12 @@ data class MelodyUiState(
     val profile: ProfileSettings,
     val melodyAliasCandidates: List<MelodyAliasCandidate> = emptyList(),
     val offlineExchanges: List<OfflineExchangeRecord> = emptyList(),
+    val blockedUsers: List<BlockedUser> = emptyList(),
+    val discoveryRadiusMeters: Int = 300,
+    val discoverabilityScope: String = "NEARBY",
+    val musicVisibility: String = "TITLE_ARTIST",
+    val nearbyLoadState: NearbyLoadState = NearbyLoadState.IDLE,
+    val nearbyErrorMessage: String? = null,
     val selectedNearbyHandle: String? = null,
     val selectedLoungeId: String? = null,
     val feedbackMessage: String? = null,

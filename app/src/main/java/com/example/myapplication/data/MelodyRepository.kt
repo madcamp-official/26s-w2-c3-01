@@ -1,8 +1,12 @@
 package com.example.myapplication.data
 
 import android.content.Context
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
 import com.example.myapplication.core.model.ChatMessage
 import com.example.myapplication.core.model.ChatPreview
+import com.example.myapplication.core.model.BlockedUser
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
@@ -10,9 +14,11 @@ import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyReducers
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.MelodyAliasCandidate
+import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NotificationType
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.RelationshipStatus
+import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.Track
@@ -21,6 +27,23 @@ import com.example.myapplication.data.local.MelodyAliasCandidateEntity
 import com.example.myapplication.data.local.OfflineExchangeEntity
 import com.example.myapplication.data.local.SyncOutboxEntity
 import com.example.myapplication.data.remote.ApiEnvironment
+import com.example.myapplication.data.remote.ApiClient
+import com.example.myapplication.data.remote.LocationUpdateRequest
+import com.example.myapplication.data.remote.MusicUpdateRequest
+import com.example.myapplication.data.remote.PresenceSettingsUpdateRequest
+import com.example.myapplication.data.remote.RemoteChatSummary
+import com.example.myapplication.data.remote.RemoteFollowResponse
+import com.example.myapplication.data.remote.RemoteNearbyBubble
+import com.example.myapplication.data.remote.ReportSubmitRequest
+import com.example.myapplication.data.remote.SendChatMessageRequest
+import com.example.myapplication.data.remote.ProfileUpdateRequest
+import com.example.myapplication.data.remote.PrivacyUpdateRequest
+import com.example.myapplication.data.remote.RemoteProfile
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import androidx.core.content.ContextCompat
+import com.example.myapplication.service.SharingForegroundService
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +56,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 interface MelodyRepository {
     val state: StateFlow<MelodyUiState>
@@ -44,25 +68,35 @@ interface MelodyRepository {
     fun startSharing()
     fun stopSharing()
     fun setSharingPermissionRequired()
+    fun setSharingStartFailed()
+    fun retrySharing()
     fun follow(handle: String)
     fun react(handle: String, reactionLabel: String)
     fun block(handle: String)
-    fun report(handle: String)
+    fun report(handle: String, reason: ReportReason = ReportReason.OTHER, description: String? = null)
+    fun loadBlockedUsers()
+    fun unblock(blockId: String)
     fun joinLounge(roomId: String)
     fun vote(roomId: String, optionId: String)
     fun sendMusicCard(roomId: String)
     fun reactToMusicCard(roomId: String, cardId: String)
     fun sendChat(roomId: String, content: String)
     fun selectTrack(track: Track)
+    fun setCurrentMusicPlaying(isPlaying: Boolean)
     fun markInboxRead()
     fun setDiscoverable(enabled: Boolean)
     fun setAllowReactions(enabled: Boolean)
     fun setOfflineExchangeEnabled(enabled: Boolean)
+    fun setMusicVisibility(label: String)
+    fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
+    fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>)
     fun selectMelodyAlias(candidateId: String)
     fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
     fun createDemoExchange(peerAlias: String)
     fun syncExchange(exchangeId: String)
     fun clearFeedback()
+    fun authenticate(accessToken: String)
+    fun logout()
     fun close()
 }
 
@@ -81,6 +115,7 @@ class DemoMelodyRepository(
         DemoCatalog.initialState(
             isOnboardingComplete = preferences.getBoolean("onboarding-complete", false)
         ).copy(
+            profile = restoreProfile(DemoCatalog.initialState(false).profile),
             dataSourceLabel = if (environment.isConfigured) {
                 "DEMO FALLBACK"
             } else {
@@ -91,9 +126,36 @@ class DemoMelodyRepository(
     override val state: StateFlow<MelodyUiState> = _state.asStateFlow()
 
     private var sharingJob: Job? = null
+    private val clientSessionId = preferences.getString("client-session-id", null)
+        ?: UUID.randomUUID().toString().also { preferences.edit().putString("client-session-id", it).apply() }
+    private val nearbyApi = ApiClient.createNearbyApi(environment)
+    private val profileApi = ApiClient.createProfileApi(environment)
+    private val socialApi = ApiClient.createSocialApi(environment)
+    @Volatile private var accessToken: String? = null
     private var liveTick = 0
+    private var locationReceiverRegistered = false
+    private val locationReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != SharingForegroundService.ACTION_LOCATION_FIX) return
+            val latitude = intent.getDoubleExtra(SharingForegroundService.EXTRA_LATITUDE, Double.NaN)
+            val longitude = intent.getDoubleExtra(SharingForegroundService.EXTRA_LONGITUDE, Double.NaN)
+            val accuracy = intent.getFloatExtra(SharingForegroundService.EXTRA_ACCURACY_METERS, Float.NaN)
+                .takeIf(Float::isFinite)
+            if (!latitude.isFinite() || !longitude.isFinite()) return
+            if (_state.value.sharingState == SharingState.ACTIVE) {
+                scope.launch { syncPresence(LocationFix(latitude, longitude, accuracy)) }
+            }
+        }
+    }
 
     init {
+        ContextCompat.registerReceiver(
+            applicationContext,
+            locationReceiver,
+            IntentFilter(SharingForegroundService.ACTION_LOCATION_FIX),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        locationReceiverRegistered = true
         scope.launch {
             database.offlineExchangeDao().deleteExpired(System.currentTimeMillis())
             database.offlineExchangeDao().observeAll().collect { entities ->
@@ -140,21 +202,33 @@ class DemoMelodyRepository(
 
     override fun startSharing() {
         if (_state.value.sharingState == SharingState.ACTIVE || sharingJob?.isActive == true) return
+        if (accessToken.isNullOrBlank()) {
+            setSharingStartFailed()
+            return
+        }
         sharingJob = scope.launch {
             _state.update {
                 it.copy(
                     sharingState = SharingState.STARTING,
                     connectionState = ConnectionState.CONNECTING,
+                    nearbyLoadState = NearbyLoadState.LOADING,
+                    nearbyErrorMessage = null,
                     feedbackMessage = "안전한 주변 공유를 준비하고 있어요"
                 )
             }
-            delay(700)
+            val synced = syncPresence()
             _state.update {
                 it.copy(
                     sharingState = SharingState.ACTIVE,
-                    connectionState = ConnectionState.LIVE,
-                    feedbackMessage = "캠퍼스 주변에 음악을 공유 중이에요"
+                    connectionState = if (synced) ConnectionState.LIVE else ConnectionState.RECONNECTING,
+                    feedbackMessage = if (synced) "실제 주변 기기와 음악을 공유 중이에요" else "연결이 복구되면 자동으로 다시 공유해요"
                 )
+            }
+            var retryDelayMillis = 5_000L
+            while (isActive && _state.value.sharingState == SharingState.ACTIVE) {
+                delay(retryDelayMillis)
+                val recovered = syncPresence()
+                retryDelayMillis = if (recovered) 10_000L else (retryDelayMillis * 2).coerceAtMost(30_000L)
             }
         }
     }
@@ -166,9 +240,13 @@ class DemoMelodyRepository(
             it.copy(
                 sharingState = SharingState.STOPPED,
                 connectionState = ConnectionState.OFFLINE,
+                nearbyLoadState = NearbyLoadState.IDLE,
+                nearbyErrorMessage = null,
+                nearbyListeners = emptyList(),
                 feedbackMessage = "주변 공유를 중지했어요"
             )
         }
+        accessToken?.let { token -> scope.launch { runCatching { nearbyApi.stopPresence("Bearer $token", clientSessionId) } } }
     }
 
     override fun setSharingPermissionRequired() {
@@ -176,67 +254,52 @@ class DemoMelodyRepository(
             it.copy(
                 sharingState = SharingState.PERMISSION_REQUIRED,
                 connectionState = ConnectionState.OFFLINE,
+                nearbyLoadState = NearbyLoadState.IDLE,
                 feedbackMessage = "주변 공유를 시작하려면 위치 권한이 필요해요"
             )
         }
     }
 
-    override fun follow(handle: String) {
-        var becameMutual = false
-        _state.update { current ->
-            val updatedListeners = current.nearbyListeners.map { listener ->
-                if (listener.nearbyHandle != handle) return@map listener
-                val nextRelationship = when (listener.relationship) {
-                    RelationshipStatus.NONE -> RelationshipStatus.FOLLOWING
-                    RelationshipStatus.FOLLOWS_ME -> {
-                        becameMutual = true
-                        RelationshipStatus.MUTUAL
-                    }
-                    RelationshipStatus.FOLLOWING -> RelationshipStatus.NONE
-                    RelationshipStatus.MUTUAL -> RelationshipStatus.MUTUAL
-                    RelationshipStatus.BLOCKED -> RelationshipStatus.BLOCKED
-                }
-                listener.copy(relationship = nextRelationship)
-            }
-            val peer = updatedListeners.firstOrNull { it.nearbyHandle == handle }
-            val newNotification = if (becameMutual && peer != null) {
-                InboxNotification(
-                    id = "mutual-${UUID.randomUUID()}",
-                    type = NotificationType.MUTUAL_FOLLOW,
-                    actorAlias = peer.displayAlias,
-                    actorColorHex = peer.colorHex,
-                    preview = "서로 팔로우했어요. 이제 대화할 수 있어요",
-                    relativeTime = "방금"
-                )
-            } else {
-                null
-            }
-            val hasChat = current.chats.any { it.peerHandle == handle }
-            val newChat = if (becameMutual && peer != null && !hasChat) {
-                ChatPreview(
-                    roomId = "chat-${handle.substringAfter("nearby-").substringBefore("-")}",
-                    peerHandle = handle,
-                    peerAlias = peer.displayAlias,
-                    peerColorHex = peer.colorHex,
-                    lastMessage = "서로 팔로우했어요",
-                    relativeTime = "방금",
-                    unreadCount = 0,
-                    relationship = RelationshipStatus.MUTUAL
-                )
-            } else {
-                null
-            }
-            current.copy(
-                nearbyListeners = updatedListeners,
-                notifications = listOfNotNull(newNotification) + current.notifications,
-                chats = listOfNotNull(newChat) + current.chats,
-                feedbackMessage = when {
-                    becameMutual -> "맞팔이 성립됐어요. 인박스에서 대화해 보세요"
-                    peer?.relationship == RelationshipStatus.FOLLOWING -> "팔로우했어요"
-                    peer?.relationship == RelationshipStatus.NONE -> "팔로우를 취소했어요"
-                    else -> current.feedbackMessage
-                }
+    override fun setSharingStartFailed() {
+        _state.update {
+            it.copy(
+                sharingState = SharingState.FAILED,
+                connectionState = ConnectionState.OFFLINE,
+                nearbyLoadState = NearbyLoadState.ERROR,
+                nearbyErrorMessage = "공유 서비스를 시작하지 못했어요. 권한과 시스템 설정을 확인한 뒤 다시 시도해 주세요.",
+                feedbackMessage = "주변 공유를 시작하지 못했어요",
             )
+        }
+    }
+
+    override fun retrySharing() {
+        _state.update {
+            it.copy(
+                nearbyLoadState = NearbyLoadState.LOADING,
+                nearbyErrorMessage = null,
+                connectionState = ConnectionState.CONNECTING,
+            )
+        }
+        if (_state.value.sharingState == SharingState.ACTIVE) {
+            scope.launch { syncPresence() }
+        } else {
+            startSharing()
+        }
+    }
+
+    override fun follow(handle: String) {
+        val token = accessToken ?: return
+        val relationship = _state.value.nearbyListeners
+            .firstOrNull { it.nearbyHandle == handle }?.relationship ?: return
+        scope.launch {
+            runCatching {
+                if (relationship == RelationshipStatus.FOLLOWING) {
+                    socialApi.unfollow("Bearer $token", handle)
+                } else {
+                    socialApi.follow("Bearer $token", handle)
+                }
+            }.onSuccess { applyFollowResponse(handle, it) }
+                .onFailure { error -> showRequestError(error, "팔로우 상태를 변경하지 못했어요") }
         }
     }
 
@@ -254,20 +317,65 @@ class DemoMelodyRepository(
         val alias = _state.value.nearbyListeners.firstOrNull {
             it.nearbyHandle == handle
         }?.displayAlias ?: return
-        _state.update { current ->
-            current.copy(
-                nearbyListeners = current.nearbyListeners.filterNot { it.nearbyHandle == handle },
-                selectedNearbyHandle = null,
-                feedbackMessage = "$alias 님을 차단했어요. 서로의 주변 목록에 표시되지 않아요"
-            )
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching { socialApi.block("Bearer $token", handle) }
+                .onSuccess { blocked ->
+                    _state.update { current ->
+                        current.copy(
+                            nearbyListeners = current.nearbyListeners.filterNot { it.nearbyHandle == handle },
+                            chats = current.chats.filterNot { it.peerHandle == handle },
+                            blockedUsers = listOf(blocked.toDomain()) + current.blockedUsers
+                                .filterNot { it.blockId == blocked.blockId },
+                            selectedNearbyHandle = null,
+                            feedbackMessage = "$alias 님을 차단했어요. 서로의 주변 목록에 표시되지 않아요",
+                        )
+                    }
+                }
+                .onFailure { error -> showRequestError(error, "사용자를 차단하지 못했어요") }
         }
     }
 
-    override fun report(handle: String) {
+    override fun report(handle: String, reason: ReportReason, description: String?) {
         val alias = _state.value.nearbyListeners.firstOrNull {
             it.nearbyHandle == handle
         }?.displayAlias ?: return
-        _state.update { it.copy(feedbackMessage = "$alias 님의 신고 초안을 접수했어요") }
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching {
+                socialApi.report(
+                    "Bearer $token",
+                    handle,
+                    ReportSubmitRequest(UUID.randomUUID().toString(), reason.name, description),
+                )
+            }.onSuccess {
+                _state.update { state -> state.copy(feedbackMessage = "$alias 님에 대한 신고를 제출했어요") }
+            }.onFailure { error -> showRequestError(error, "신고를 제출하지 못했어요") }
+        }
+    }
+
+    override fun loadBlockedUsers() {
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching { socialApi.blocks("Bearer $token") }
+                .onSuccess { users -> _state.update { it.copy(blockedUsers = users.map { user -> user.toDomain() }) } }
+                .onFailure { error -> showRequestError(error, "차단 목록을 불러오지 못했어요") }
+        }
+    }
+
+    override fun unblock(blockId: String) {
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching { socialApi.unblock("Bearer $token", blockId) }
+                .onSuccess {
+                    _state.update { state ->
+                        state.copy(
+                            blockedUsers = state.blockedUsers.filterNot { it.blockId == blockId },
+                            feedbackMessage = "차단을 해제했어요",
+                        )
+                    }
+                }.onFailure { error -> showRequestError(error, "차단을 해제하지 못했어요") }
+        }
     }
 
     override fun joinLounge(roomId: String) {
@@ -398,22 +506,46 @@ class DemoMelodyRepository(
             )
         }
         scope.launch {
-            delay(450)
-            _state.update { current ->
-                current.copy(
-                    chatMessages = current.chatMessages + (
-                        roomId to current.chatMessages[roomId].orEmpty().map { message ->
-                            if (message.clientMessageId == clientId) {
-                                message.copy(
-                                    messageId = "server-${UUID.randomUUID()}",
-                                    deliveryState = DeliveryState.SENT
-                                )
-                            } else {
-                                message
-                            }
-                        }
+            val token = accessToken
+            val result = if (token == null) {
+                Result.failure(IllegalStateException("로그인이 필요합니다"))
+            } else {
+                runCatching {
+                    socialApi.sendChatMessage(
+                        "Bearer $token",
+                        roomId,
+                        SendChatMessageRequest(clientId, trimmed),
                     )
-                )
+                }
+            }
+            result.onSuccess { remote ->
+                _state.update { current ->
+                    current.copy(
+                        chatMessages = current.chatMessages + (
+                            roomId to current.chatMessages[roomId].orEmpty().map { message ->
+                                if (message.clientMessageId == clientId) {
+                                    message.copy(
+                                        messageId = remote.messageId,
+                                        deliveryState = DeliveryState.SENT,
+                                    )
+                                } else message
+                            }
+                        )
+                    )
+                }
+            }.onFailure { error ->
+                _state.update { current ->
+                    current.copy(
+                        chatMessages = current.chatMessages + (
+                            roomId to current.chatMessages[roomId].orEmpty().map { message ->
+                                if (message.clientMessageId == clientId) {
+                                    message.copy(deliveryState = DeliveryState.FAILED)
+                                } else message
+                            }
+                        )
+                    )
+                }
+                showRequestError(error, "메시지를 보내지 못했어요")
             }
         }
     }
@@ -422,9 +554,16 @@ class DemoMelodyRepository(
         _state.update {
             it.copy(
                 currentTrack = track,
+                currentTrackPlaying = true,
                 feedbackMessage = "${track.title}을(를) 현재 음악으로 선택했어요"
             )
         }
+        syncMusicIfSharing()
+    }
+
+    override fun setCurrentMusicPlaying(isPlaying: Boolean) {
+        _state.update { it.copy(currentTrackPlaying = isPlaying) }
+        syncMusicIfSharing()
     }
 
     override fun markInboxRead() {
@@ -438,14 +577,79 @@ class DemoMelodyRepository(
 
     override fun setDiscoverable(enabled: Boolean) {
         _state.update { it.copy(profile = it.profile.copy(discoverable = enabled)) }
+        persistProfile(_state.value.profile)
+        updatePresenceSettings(
+            _state.value.discoveryRadiusMeters,
+            if (enabled) "NEARBY" else "HIDDEN",
+            _state.value.musicVisibility,
+        )
     }
 
     override fun setAllowReactions(enabled: Boolean) {
         _state.update { it.copy(profile = it.profile.copy(allowReactions = enabled)) }
+        persistProfile(_state.value.profile)
+        syncPresenceSettings()
     }
 
     override fun setOfflineExchangeEnabled(enabled: Boolean) {
         _state.update { it.copy(profile = it.profile.copy(offlineExchangeEnabled = enabled)) }
+        persistProfile(_state.value.profile)
+    }
+
+    override fun setMusicVisibility(label: String) {
+        _state.update { it.copy(profile = it.profile.copy(musicVisibilityLabel = label)) }
+        persistProfile(_state.value.profile)
+        val visibility = when (label) {
+            "맞팔에게만 공개" -> "MUTUALS"
+            "비공개" -> "HIDDEN"
+            else -> "TITLE_ARTIST"
+        }
+        updatePresenceSettings(
+            _state.value.discoveryRadiusMeters,
+            _state.value.discoverabilityScope,
+            visibility,
+        )
+    }
+
+    override fun updatePresenceSettings(
+        radiusMeters: Int,
+        discoverabilityScope: String,
+        musicVisibility: String,
+    ) {
+        _state.update {
+            it.copy(
+                discoveryRadiusMeters = radiusMeters.coerceIn(50, 2000),
+                discoverabilityScope = discoverabilityScope,
+                musicVisibility = musicVisibility,
+                profile = it.profile.copy(
+                    discoverable = discoverabilityScope != "HIDDEN",
+                    musicVisibilityLabel = when (musicVisibility) {
+                        "MUTUALS" -> "맞팔에게만 공개"
+                        "HIDDEN" -> "비공개"
+                        else -> "제목과 아티스트 공개"
+                    },
+                ),
+            )
+        }
+        syncPresenceSettings()
+    }
+
+    override fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>) {
+        _state.update { current -> current.copy(profile = current.profile.copy(
+            accountAlias = displayName.trim(), nearbyDisplayAlias = displayName.trim(), colorHex = colorHex,
+            bio = bio.trim(), avatarDataUrl = avatarDataUrl, genres = genres, moods = moods,
+        )) }
+        persistProfile(_state.value.profile)
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching {
+                profileApi.update("Bearer $token", ProfileUpdateRequest(
+                    displayName, "#%06X".format(colorHex and 0xFFFFFF), bio,
+                    avatarDataUrl, genres, moods,
+                ))
+            }.onSuccess { applyRemoteProfile(it, "프로필을 변경했어요") }
+                .onFailure { _state.update { state -> state.copy(feedbackMessage = "프로필을 저장하지 못했어요") } }
+        }
     }
 
     override fun selectMelodyAlias(candidateId: String) {
@@ -542,7 +746,359 @@ class DemoMelodyRepository(
         _state.update { it.copy(feedbackMessage = null) }
     }
 
+    override fun authenticate(accessToken: String) {
+        this.accessToken = accessToken
+        preferences.edit().putBoolean("onboarding-complete", false).apply()
+        _state.update {
+            it.copy(
+                isOnboardingComplete = false,
+                nearbyListeners = emptyList(),
+                popularTracks = emptyList(),
+                lounges = emptyList(),
+                notifications = emptyList(),
+                chats = emptyList(),
+                chatMessages = emptyMap(),
+                selectedNearbyHandle = null,
+                selectedLoungeId = null,
+                dataSourceLabel = "SERVER LIVE",
+            )
+        }
+        scope.launch { runCatching { profileApi.me("Bearer $accessToken") }.onSuccess { applyRemoteProfile(it) } }
+        scope.launch {
+            runCatching { nearbyApi.presenceSettings("Bearer $accessToken") }
+                .onSuccess { remote ->
+                    _state.update {
+                        it.copy(
+                            discoveryRadiusMeters = remote.discoveryRadiusMeters,
+                            discoverabilityScope = remote.discoverabilityScope,
+                            musicVisibility = remote.musicVisibility,
+                            profile = it.profile.copy(
+                                discoverable = remote.discoverabilityScope != "HIDDEN",
+                                allowReactions = remote.allowReactions,
+                                musicVisibilityLabel = when (remote.musicVisibility) {
+                                    "MUTUALS" -> "맞팔에게만 공개"
+                                    "HIDDEN" -> "비공개"
+                                    else -> "제목과 아티스트 공개"
+                                },
+                            ),
+                        )
+                    }
+                }
+        }
+        loadBlockedUsers()
+        loadChatRooms()
+    }
+
+    override fun logout() {
+        stopSharing()
+        accessToken = null
+        preferences.edit().clear().apply()
+        _state.update { it.copy(
+            isOnboardingComplete = false,
+            selectedTab = MainTab.HOME,
+            profile = DemoCatalog.initialState(false).profile,
+            feedbackMessage = null,
+            dataSourceLabel = "SIGNED OUT",
+        ) }
+    }
+
+    private fun syncPresenceSettings() {
+        val token = accessToken ?: return
+        val state = _state.value
+        scope.launch {
+            runCatching {
+                nearbyApi.updatePresenceSettings(
+                    "Bearer $token",
+                    PresenceSettingsUpdateRequest(
+                        state.discoverabilityScope,
+                        state.musicVisibility,
+                        state.discoveryRadiusMeters,
+                        state.profile.allowReactions,
+                    ),
+                )
+            }.onSuccess { remote ->
+                _state.update {
+                    it.copy(
+                        discoveryRadiusMeters = remote.discoveryRadiusMeters,
+                        discoverabilityScope = remote.discoverabilityScope,
+                        musicVisibility = remote.musicVisibility,
+                        feedbackMessage = "주변 공개 범위를 저장했어요",
+                    )
+                }
+            }.onFailure { error -> showRequestError(error, "공개 범위를 저장하지 못했어요") }
+        }
+    }
+
+    private fun applyRemoteProfile(remote: RemoteProfile, feedback: String? = null) {
+        _state.update { current -> current.copy(profile = current.profile.copy(
+            accountAlias = remote.displayName,
+            nearbyDisplayAlias = remote.displayName,
+            colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
+            bio = remote.bio.orEmpty(),
+            avatarDataUrl = remote.avatarDataUrl,
+            genres = remote.genres.orEmpty(),
+            moods = remote.moods.orEmpty(),
+            discoverable = remote.discoverable,
+            musicVisibilityLabel = if (remote.shareMusic) "제목과 아티스트 공개" else "비공개",
+        ), feedbackMessage = feedback ?: current.feedbackMessage) }
+        persistProfile(_state.value.profile)
+    }
+
+    private fun persistProfile(profile: com.example.myapplication.core.model.ProfileSettings) {
+        preferences.edit()
+            .putString("profile-account-alias", profile.accountAlias)
+            .putString("profile-nearby-alias", profile.nearbyDisplayAlias)
+            .putLong("profile-color", profile.colorHex)
+            .putString("profile-bio", profile.bio)
+            .putString("profile-avatar", profile.avatarDataUrl)
+            .putString("profile-genres", profile.genres.joinToString("\u001F"))
+            .putString("profile-moods", profile.moods.joinToString("\u001F"))
+            .putString("profile-music-visibility", profile.musicVisibilityLabel)
+            .putBoolean("profile-discoverable", profile.discoverable)
+            .putBoolean("profile-allow-reactions", profile.allowReactions)
+            .putBoolean("profile-offline-exchange", profile.offlineExchangeEnabled)
+            .apply()
+    }
+
+    private fun restoreProfile(fallback: com.example.myapplication.core.model.ProfileSettings): com.example.myapplication.core.model.ProfileSettings {
+        if (!preferences.contains("profile-account-alias")) return fallback
+        return fallback.copy(
+            accountAlias = preferences.getString("profile-account-alias", fallback.accountAlias) ?: fallback.accountAlias,
+            nearbyDisplayAlias = preferences.getString("profile-nearby-alias", fallback.nearbyDisplayAlias) ?: fallback.nearbyDisplayAlias,
+            colorHex = preferences.getLong("profile-color", fallback.colorHex),
+            bio = preferences.getString("profile-bio", fallback.bio) ?: fallback.bio,
+            avatarDataUrl = preferences.getString("profile-avatar", null),
+            genres = preferences.getString("profile-genres", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.genres,
+            moods = preferences.getString("profile-moods", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.moods,
+            musicVisibilityLabel = preferences.getString("profile-music-visibility", fallback.musicVisibilityLabel) ?: fallback.musicVisibilityLabel,
+            discoverable = preferences.getBoolean("profile-discoverable", fallback.discoverable),
+            allowReactions = preferences.getBoolean("profile-allow-reactions", fallback.allowReactions),
+            offlineExchangeEnabled = preferences.getBoolean("profile-offline-exchange", fallback.offlineExchangeEnabled),
+        )
+    }
+
+    private suspend fun syncPresence(fix: LocationFix? = null): Boolean {
+        val token = accessToken ?: return false
+        val location = fix ?: lastKnownLocation()?.let {
+            LocationFix(it.latitude, it.longitude, it.accuracy.takeIf(Float::isFinite))
+        } ?: run {
+            _state.update {
+                it.copy(
+                    connectionState = ConnectionState.RECONNECTING,
+                    nearbyLoadState = NearbyLoadState.LOADING,
+                    nearbyErrorMessage = "현재 위치를 확인하고 있어요. 잠시만 기다려 주세요.",
+                )
+            }
+            return false
+        }
+        return runCatching {
+            val playback = _state.value
+            nearbyApi.updateMusic(
+                "Bearer $token",
+                MusicUpdateRequest(
+                    playback.currentTrack.title,
+                    playback.currentTrack.artist,
+                    playback.currentTrack.platform,
+                    playback.currentTrackPlaying,
+                ),
+            )
+            val snapshot = nearbyApi.updateLocation(
+                "Bearer $token",
+                LocationUpdateRequest(
+                    UUID.randomUUID().toString(),
+                    clientSessionId,
+                    location.latitude,
+                    location.longitude,
+                    location.accuracyMeters,
+                )
+            )
+            _state.update { current ->
+                current.copy(
+                    nearbyListeners = snapshot.items.map { it.toDomain() },
+                    connectionState = ConnectionState.LIVE,
+                    discoveryRadiusMeters = snapshot.radiusMeters ?: current.discoveryRadiusMeters,
+                    nearbyLoadState = if (snapshot.items.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
+                    nearbyErrorMessage = null,
+                    dataSourceLabel = "SERVER LIVE",
+                )
+            }
+            true
+        }.getOrElse { error ->
+            _state.update { current ->
+                current.copy(
+                    connectionState = ConnectionState.RECONNECTING,
+                    nearbyLoadState = NearbyLoadState.ERROR,
+                    nearbyErrorMessage = requestErrorMessage(error, "주변 서버에 연결하지 못했어요."),
+                )
+            }
+            false
+        }
+    }
+
+    private fun syncMusicIfSharing() {
+        if (_state.value.sharingState != SharingState.ACTIVE) return
+        val token = accessToken ?: return
+        val state = _state.value
+        scope.launch {
+            runCatching {
+                nearbyApi.updateMusic(
+                    "Bearer $token",
+                    MusicUpdateRequest(
+                        state.currentTrack.title,
+                        state.currentTrack.artist,
+                        state.currentTrack.platform,
+                        state.currentTrackPlaying,
+                    ),
+                )
+            }.onFailure { error ->
+                _state.update {
+                    it.copy(
+                        connectionState = ConnectionState.RECONNECTING,
+                        nearbyErrorMessage = requestErrorMessage(error, "음악 상태를 공유하지 못했어요."),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun lastKnownLocation(): android.location.Location? {
+        val fine = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) return null
+        val manager = applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return manager.getProviders(true).mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+            .maxByOrNull { it.time }
+    }
+
+    private fun RemoteNearbyBubble.toDomain() = com.example.myapplication.core.model.NearbyListener(
+        nearbyHandle = nearbyHandle,
+        displayAlias = displayAlias,
+        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+        displayPosition = com.example.myapplication.core.model.DisplayPosition(displayPosition.x, displayPosition.y),
+        matchScore = matchScore,
+        proximity = runCatching { com.example.myapplication.core.model.Proximity.valueOf(proximity) }.getOrDefault(com.example.myapplication.core.model.Proximity.AROUND),
+        isPlaying = track != null,
+        currentTrack = track?.let { Track(id = "remote-$nearbyHandle", title = it.title, artist = it.artist, platform = "REMOTE") },
+        commonGenres = emptyList(),
+        relationship = relationship?.let {
+            runCatching { RelationshipStatus.valueOf(it) }.getOrDefault(RelationshipStatus.NONE)
+        } ?: RelationshipStatus.NONE,
+        canReact = canReact ?: true,
+    )
+
+    private fun applyFollowResponse(handle: String, response: RemoteFollowResponse) {
+        val relationship = runCatching { RelationshipStatus.valueOf(response.relationship) }
+            .getOrDefault(RelationshipStatus.NONE)
+        _state.update { current ->
+            val peer = current.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
+            val listeners = current.nearbyListeners.map {
+                if (it.nearbyHandle == handle) it.copy(relationship = relationship) else it
+            }
+            val newChat = response.roomId?.takeIf { response.mutual }?.let { roomId ->
+                ChatPreview(
+                    roomId = roomId,
+                    peerHandle = handle,
+                    peerAlias = response.peerAlias,
+                    peerColorHex = response.peerColor.removePrefix("#").toLongOrNull(16)
+                        ?: peer?.colorHex ?: 0x6750A4,
+                    lastMessage = "서로 팔로우했어요",
+                    relativeTime = "방금",
+                    unreadCount = 0,
+                    relationship = RelationshipStatus.MUTUAL,
+                )
+            }
+            val chatsWithoutPeer = current.chats.filterNot { it.peerHandle == handle }
+            val notification = if (response.mutual && peer != null) {
+                InboxNotification(
+                    id = "mutual-${UUID.randomUUID()}",
+                    type = NotificationType.MUTUAL_FOLLOW,
+                    actorAlias = peer.displayAlias,
+                    actorColorHex = peer.colorHex,
+                    preview = "서로 팔로우했어요. 이제 대화할 수 있어요",
+                    relativeTime = "방금",
+                )
+            } else null
+            current.copy(
+                nearbyListeners = listeners,
+                chats = listOfNotNull(newChat) + chatsWithoutPeer,
+                notifications = listOfNotNull(notification) + current.notifications,
+                feedbackMessage = when {
+                    response.mutual -> "맞팔이 성립됐어요. 인박스에서 대화해 보세요"
+                    response.following -> "팔로우했어요"
+                    else -> "팔로우를 취소했어요"
+                },
+            )
+        }
+    }
+
+    private fun loadChatRooms() {
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching { socialApi.chatRooms("Bearer $token") }
+                .onSuccess { rooms ->
+                    _state.update { current -> current.copy(chats = rooms.map { room -> room.toDomain() }) }
+                    rooms.forEach { room ->
+                        scope.launch {
+                            runCatching { socialApi.chatMessages("Bearer $token", room.roomId) }
+                                .onSuccess { messages ->
+                                    _state.update { current ->
+                                        current.copy(
+                                            chatMessages = current.chatMessages + (
+                                                room.roomId to messages.map { message ->
+                                                    ChatMessage(
+                                                        message.messageId,
+                                                        message.clientMessageId ?: message.messageId,
+                                                        message.roomId,
+                                                        message.isMine,
+                                                        message.content,
+                                                        "최근",
+                                                        DeliveryState.SENT,
+                                                    )
+                                                }
+                                            )
+                                        )
+                                    }
+                                }
+                        }
+                    }
+                }.onFailure { error -> showRequestError(error, "대화방을 불러오지 못했어요") }
+        }
+    }
+
+    private fun RemoteChatSummary.toDomain() = ChatPreview(
+        roomId = roomId,
+        peerHandle = peerHandle ?: "chat-$roomId",
+        peerAlias = peerAlias,
+        peerColorHex = peerColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+        lastMessage = lastMessage ?: "서로 팔로우했어요",
+        relativeTime = if (lastMessageAt == null) "새 대화" else "최근",
+        unreadCount = unreadCount,
+        relationship = RelationshipStatus.MUTUAL,
+    )
+
+    private fun com.example.myapplication.data.remote.RemoteBlockedUser.toDomain() = BlockedUser(
+        blockId = blockId,
+        displayAlias = displayAlias,
+        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+        blockedAt = blockedAt,
+    )
+
+    private fun showRequestError(error: Throwable, fallback: String) {
+        _state.update { it.copy(feedbackMessage = requestErrorMessage(error, fallback)) }
+    }
+
+    private fun requestErrorMessage(error: Throwable, fallback: String): String = when {
+        error is HttpException && error.code() == 429 -> "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."
+        error is HttpException && error.code() == 403 -> "현재 관계나 공개 범위에서는 요청할 수 없어요."
+        error is HttpException && error.code() == 404 -> "사용자가 더 이상 주변에 없어요."
+        else -> fallback
+    }
+
     override fun close() {
+        if (locationReceiverRegistered) {
+            runCatching { applicationContext.unregisterReceiver(locationReceiver) }
+            locationReceiverRegistered = false
+        }
         scope.coroutineContext[Job]?.cancel()
     }
 
@@ -595,5 +1151,11 @@ class DemoMelodyRepository(
         rhythm = rhythmCsv.split(",").mapNotNull { it.trim().toIntOrNull() },
         toneJsPreset = toneJsPreset,
         melodyId = melodyId
+    )
+
+    private data class LocationFix(
+        val latitude: Double,
+        val longitude: Double,
+        val accuracyMeters: Float?,
     )
 }
