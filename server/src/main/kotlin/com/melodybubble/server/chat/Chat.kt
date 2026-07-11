@@ -215,6 +215,98 @@ class ChatService(
         return stored
     }
 
+    @Transactional
+    fun read(userId: UUID, roomId: UUID): ChatReadResponse {
+        requireActiveMutual(userId, roomId)
+        // Serialize read markers for this member so concurrent PUT /read calls cannot move the
+        // marker back to an older message selected by an earlier request.
+        jdbc.query(
+            "select user_id from chat_room_members where room_id=? and user_id=? for update",
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            roomId,
+            userId,
+        ).single()
+        val readAt = Instant.now()
+        val latestMessageId = jdbc.query(
+            "select id from chat_messages where room_id=? order by sent_at desc,id desc limit 1",
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            roomId,
+        ).firstOrNull() ?: return ChatReadResponse(roomId, null, readAt)
+        val updated = jdbc.update(
+            """
+            update chat_room_members member set last_read_message_id=?
+            where member.room_id=? and member.user_id=?
+              and member.last_read_message_id is distinct from ?
+            """.trimIndent(),
+            latestMessageId,
+            roomId,
+            userId,
+            latestMessageId,
+        )
+        if (updated == 1) publishMessageRead(userId, roomId, latestMessageId, readAt)
+        return ChatReadResponse(roomId, latestMessageId, readAt)
+    }
+
+    /** Called by the mutual-follow transaction only when a direct-room pair is first inserted. */
+    fun publishRoomCreated(roomId: UUID) {
+        roomMembers(roomId).forEach { memberId ->
+            roomSummary(memberId, roomId)?.let { summary ->
+                realtime.toUserAfterCommit(
+                    memberId,
+                    RealtimeQueues.CHAT,
+                    RealtimeEventTypes.CHAT_ROOM_CREATED,
+                    summary,
+                )
+            }
+        }
+    }
+
+    private fun publishMessageCreated(senderId: UUID, message: DirectChatMessage) {
+        val senderAlias = jdbc.queryForObject(
+            "select display_name from users where id=?",
+            String::class.java,
+            senderId,
+        ) ?: "Listener"
+        roomMembers(message.roomId).forEach { memberId ->
+            realtime.toUserAfterCommit(
+                memberId,
+                RealtimeQueues.CHAT,
+                RealtimeEventTypes.CHAT_MESSAGE_CREATED,
+                ChatMessageCreatedPayload(
+                    messageId = message.messageId,
+                    clientMessageId = requireNotNull(message.clientMessageId),
+                    roomId = message.roomId,
+                    senderAlias = senderAlias,
+                    content = message.content,
+                    sentAt = message.sentAt,
+                    isMine = memberId == senderId,
+                ),
+            )
+            publishRoomUpdated(memberId, message.roomId)
+        }
+    }
+
+    private fun publishMessageRead(readerId: UUID, roomId: UUID, lastReadMessageId: UUID, readAt: Instant) {
+        val readerAlias = jdbc.queryForObject(
+            "select display_name from users where id=?",
+            String::class.java,
+            readerId,
+        ) ?: "Listener"
+        roomMembers(roomId).forEach { memberId ->
+            realtime.toUserAfterCommit(
+                memberId,
+                RealtimeQueues.CHAT,
+                RealtimeEventTypes.CHAT_MESSAGE_READ,
+                ChatMessageReadPayload(
+                    roomId = roomId,
+                    lastReadMessageId = lastReadMessageId,
+                    readerAlias = readerAlias,
+                    readAt = readAt,
+                    isMine = memberId == readerId,
+                ),
+            )
+            publishRoomUpdated(memberId, roomId)
+
     private fun requireActiveMutual(userId: UUID, roomId: UUID) {
         val allowed = jdbc.queryForObject(
             """
