@@ -2,6 +2,7 @@ package com.melodybubble.server.config
 
 import com.melodybubble.server.auth.JwtService
 import com.melodybubble.server.auth.JwtSession
+import com.melodybubble.server.lounge.SubLoungeTopicAuthorizer
 import com.melodybubble.server.realtime.RealtimeSessionPolicy
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -27,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
 class WebSocketConfig(
     private val jwtService: JwtService,
     private val realtimeSessions: RealtimeSessionPolicy,
+    private val subLoungeTopics: SubLoungeTopicAuthorizer,
     @param:Value("\${app.realtime.broker-relay.enabled:false}") private val brokerRelayEnabled: Boolean,
     @param:Value("\${app.realtime.broker-relay.host:localhost}") private val brokerRelayHost: String,
     @param:Value("\${app.realtime.broker-relay.port:61613}") private val brokerRelayPort: Int,
@@ -104,6 +106,13 @@ class WebSocketConfig(
                 if (command == StompCommand.SUBSCRIBE && accessor.destination?.let(::isInternalBrokerTopic) == true) {
                     throw MessagingException("Subscription to internal broker destinations is forbidden")
                 }
+                if (command == StompCommand.SUBSCRIBE && accessor.destination?.startsWith("/topic/sub-lounges/") == true) {
+                    val session = accessor.sessionId?.let(authenticatedSessions::get)
+                        ?: throw MessagingException("Authenticated STOMP session required")
+                    if (!subLoungeTopics.canSubscribe(session.userId, requireNotNull(accessor.destination))) {
+                        throw MessagingException("Active sub lounge membership required")
+                    }
+                }
                 return message
             }
         })
@@ -115,7 +124,14 @@ class WebSocketConfig(
                 val accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor::class.java)
                     ?: return message
                 val session = accessor.sessionId?.let(authenticatedSessions::get) ?: return message
-                return message.takeIf { realtimeSessions.isAllowed(session) }
+                if (!realtimeSessions.isAllowed(session)) return null
+                val destination = accessor.destination
+                if (destination?.startsWith("/topic/sub-lounges/") == true &&
+                    !subLoungeTopics.canSubscribe(session.userId, destination)
+                ) {
+                    return null
+                }
+                return message
             }
         })
     }
