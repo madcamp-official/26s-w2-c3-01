@@ -4,3 +4,4 @@ API_BASE_URL=
 STOMP_WS_URL=
 # Google Cloud Console에서 만든 "웹 애플리케이션" OAuth 클라이언트 ID입니다.
 GOOGLE_WEB_CLIENT_ID=
+GOOGLE_MAPS_API_KEY=

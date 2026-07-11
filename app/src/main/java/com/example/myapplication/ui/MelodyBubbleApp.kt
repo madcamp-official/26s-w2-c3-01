@@ -43,6 +43,7 @@ import com.example.myapplication.data.DemoCatalog
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.ui.components.MelodyBottomNavigationBar
 import com.example.myapplication.ui.screens.ChatScreen
+import com.example.myapplication.ui.screens.BuildingLoungeMapScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
@@ -77,6 +78,7 @@ fun MelodyBubbleApp(
 ) {
     val state by viewModel.uiState.collectAsState()
     val loginState by viewModel.loginState.collectAsState()
+    val buildingLoungeState by viewModel.buildingLoungeState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -155,6 +157,7 @@ fun MelodyBubbleApp(
             composable(Route.MAIN) {
                 MainShell(
                     state = state,
+                    buildingLoungeState = buildingLoungeState,
                     viewModel = viewModel,
                     onStartSharing = ::requestSharingStart,
                     onStopSharing = {
@@ -307,6 +310,7 @@ fun MelodyBubbleApp(
 @Composable
 private fun MainShell(
     state: MelodyUiState,
+    buildingLoungeState: BuildingLoungeUiState,
     viewModel: MelodyViewModel,
     onStartSharing: () -> Unit,
     onStopSharing: () -> Unit,
@@ -357,14 +361,14 @@ private fun MainShell(
                 onReact = { listener, label -> viewModel.react(listener.nearbyHandle, label) },
                 onFollow = { viewModel.follow(it.nearbyHandle) }
             )
-            MainTab.LOUNGE -> LoungeListScreen(
-                lounges = state.lounges,
-                onOpen = onOpenLounge,
-                onJoinAndOpen = { roomId ->
-                    viewModel.joinLounge(roomId)
-                    onOpenLounge(roomId)
-                },
-                modifier = contentModifier.safeDrawingPadding()
+            MainTab.LOUNGE -> BuildingLoungeMapScreen(
+                state = buildingLoungeState,
+                onLocationUpdate = viewModel::refreshBuildingLounges,
+                onHeartbeat = viewModel::heartbeatBuildingLounge,
+                onEnter = viewModel::enterBuildingLounge,
+                onLeave = viewModel::leaveBuildingLounge,
+                onCreateSubLounge = viewModel::createBuildingSubLounge,
+                modifier = contentModifier
             )
             MainTab.INBOX -> InboxScreen(
                 notifications = state.notifications,
