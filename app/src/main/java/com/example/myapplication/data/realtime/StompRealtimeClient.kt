@@ -69,6 +69,7 @@ class StompRealtimeClient(
     private var heartbeatJob: Job? = null
     private var heartbeatWatchdogJob: Job? = null
     private var reconnectStabilityJob: Job? = null
+    private val topicSubscriptions = linkedMapOf<String, String>()
 
     init {
         require(webSocketUrl.startsWith("wss://") || webSocketUrl.startsWith("ws://")) {
@@ -106,12 +107,32 @@ class StompRealtimeClient(
             activeConnectionSerial += 1
             reconnectAttempt = 0
             seenEventIds.clear()
+            topicSubscriptions.clear()
             cancelConnectionJobsLocked()
             _connectionState.value = RealtimeConnectionState.Disconnected
             webSocket.also { webSocket = null }
         }
         socket?.send(stompFrame("DISCONNECT"))
         socket?.close(NORMAL_CLOSE_CODE, "Signed out")
+    }
+
+    fun subscribeTopic(destination: String) {
+        require(SUB_LOUNGE_TOPIC.matches(destination)) { "Unsupported realtime topic" }
+        val (id, socket) = synchronized(lock) {
+            topicSubscriptions.getOrPut(destination) {
+                "topic-${destination.hashCode().toUInt()}"
+            } to webSocket.takeIf { _connectionState.value is RealtimeConnectionState.Connected }
+        }
+        socket?.send(subscribeFrame(id, destination))
+    }
+
+    fun unsubscribeTopic(destination: String) {
+        val (id, socket) = synchronized(lock) {
+            topicSubscriptions.remove(destination) to
+                webSocket.takeIf { _connectionState.value is RealtimeConnectionState.Connected }
+        }
+        id ?: return
+        socket?.send(stompFrame("UNSUBSCRIBE", linkedMapOf("id" to id)))
     }
 
     override fun close() {
@@ -282,16 +303,10 @@ class StompRealtimeClient(
                 }
             }
             RealtimeDestinations.userQueues.forEachIndexed { index, destination ->
-                webSocket.send(
-                    stompFrame(
-                        command = "SUBSCRIBE",
-                        headers = linkedMapOf(
-                            "id" to "user-$index",
-                            "destination" to destination,
-                            "ack" to "auto",
-                        ),
-                    )
-                )
+                webSocket.send(subscribeFrame("user-$index", destination))
+            }
+            synchronized(lock) { topicSubscriptions.toMap() }.forEach { (destination, id) ->
+                webSocket.send(subscribeFrame(id, destination))
             }
             startHeartbeat(webSocket, connection, heartbeat, lastServerActivity)
             if (connection.isReconnect) {
@@ -434,6 +449,7 @@ class StompRealtimeClient(
         private const val MAX_INCOMING_BUFFER_CHARS = 1_000_000
         private const val NORMAL_CLOSE_CODE = 1000
         private const val PROTOCOL_ERROR_CLOSE_CODE = 1002
+        private val SUB_LOUNGE_TOPIC = Regex("/topic/sub-lounges/[0-9a-fA-F-]{36}")
 
         internal fun retryDelay(attempt: Int): Long = when (attempt.coerceAtLeast(1)) {
             1 -> 1_000L
@@ -494,6 +510,15 @@ class StompRealtimeClient(
             }
             append('\n').append(body).append(STOMP_NULL)
         }
+
+        private fun subscribeFrame(id: String, destination: String) = stompFrame(
+            command = "SUBSCRIBE",
+            headers = linkedMapOf(
+                "id" to id,
+                "destination" to destination,
+                "ack" to "auto",
+            ),
+        )
 
         private fun escapeHeader(value: String): String = buildString(value.length) {
             value.forEach { char ->
