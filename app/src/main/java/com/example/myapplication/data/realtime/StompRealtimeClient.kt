@@ -458,3 +458,71 @@ class StompRealtimeClient(
             } else {
                 maxOf(CLIENT_RECEIVE_HEARTBEAT_MILLIS, serverCanSend)
             }
+            return StompHeartbeat(sendEvery, receiveEvery)
+        }
+
+        private fun parseFrame(raw: String): StompFrame {
+            val normalized = raw.replace("\r\n", "\n")
+            val separator = normalized.indexOf("\n\n")
+            val head = if (separator >= 0) normalized.substring(0, separator) else normalized
+            val body = if (separator >= 0) normalized.substring(separator + 2) else ""
+            val lines = head.split('\n')
+            val command = lines.firstOrNull()?.trim().orEmpty()
+            require(command.isNotBlank()) { "Missing STOMP command" }
+            val headers = buildMap {
+                lines.drop(1).filter(String::isNotBlank).forEach { line ->
+                    val colon = line.indexOf(':')
+                    require(colon > 0) { "Malformed STOMP header" }
+                    put(unescapeHeader(line.substring(0, colon)), unescapeHeader(line.substring(colon + 1)))
+                }
+            }
+            return StompFrame(command, headers, body)
+        }
+
+        private fun stompFrame(
+            command: String,
+            headers: Map<String, String> = emptyMap(),
+            body: String = "",
+            escapeHeaders: Boolean = true,
+        ): String = buildString {
+            append(command).append('\n')
+            headers.forEach { (name, value) ->
+                append(if (escapeHeaders) escapeHeader(name) else name)
+                    .append(':')
+                    .append(if (escapeHeaders) escapeHeader(value) else value)
+                    .append('\n')
+            }
+            append('\n').append(body).append(STOMP_NULL)
+        }
+
+        private fun escapeHeader(value: String): String = buildString(value.length) {
+            value.forEach { char ->
+                when (char) {
+                    '\\' -> append("\\\\")
+                    '\r' -> append("\\r")
+                    '\n' -> append("\\n")
+                    ':' -> append("\\c")
+                    else -> append(char)
+                }
+            }
+        }
+
+        private fun unescapeHeader(value: String): String = buildString(value.length) {
+            var index = 0
+            while (index < value.length) {
+                if (value[index] != '\\' || index + 1 >= value.length) {
+                    append(value[index++])
+                    continue
+                }
+                when (val escaped = value[index + 1]) {
+                    '\\' -> append('\\')
+                    'r' -> append('\r')
+                    'n' -> append('\n')
+                    'c' -> append(':')
+                    else -> append(escaped)
+                }
+                index += 2
+            }
+        }
+    }
+}
