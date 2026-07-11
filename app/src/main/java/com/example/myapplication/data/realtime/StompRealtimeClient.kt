@@ -366,3 +366,95 @@ class StompRealtimeClient(
             }
             if (shouldReconnect) openSocket(isReconnect = true, attempt = retry.attempt)
         }
+    }
+
+    private fun emitIfNew(event: RealtimeEvent) {
+        val eventId = event.eventId
+        val duplicate = eventId != null && synchronized(lock) {
+            if (seenEventIds.containsKey(eventId)) true else {
+                seenEventIds[eventId] = Unit
+                false
+            }
+        }
+        if (!duplicate && !_events.tryEmit(event)) {
+            val attempt = synchronized(lock) { reconnectAttempt }
+            _syncRequests.tryEmit(
+                RealtimeSyncRequest.FullSync(System.currentTimeMillis(), attempt)
+            )
+        }
+    }
+
+    private fun isActive(connection: Connection): Boolean = synchronized(lock) {
+        desiredAccessToken != null && connection.serial == activeConnectionSerial
+    }
+
+    private fun cancelConnectionJobsLocked() {
+        reconnectJob?.cancel()
+        connectTimeoutJob?.cancel()
+        heartbeatJob?.cancel()
+        heartbeatWatchdogJob?.cancel()
+        reconnectStabilityJob?.cancel()
+        reconnectJob = null
+        connectTimeoutJob = null
+        heartbeatJob = null
+        heartbeatWatchdogJob = null
+        reconnectStabilityJob = null
+    }
+
+    private data class Connection(
+        val serial: Long,
+        val accessToken: String,
+        val isReconnect: Boolean,
+        val attempt: Int,
+    )
+
+    private data class Retry(
+        val connectionSerial: Long,
+        val attempt: Int,
+        val delayMillis: Long,
+    )
+
+    private data class StompFrame(
+        val command: String,
+        val headers: Map<String, String>,
+        val body: String,
+    )
+
+    companion object {
+        private const val STOMP_VERSION = "1.2"
+        private const val STOMP_NULL = '\u0000'
+        private const val CLIENT_SEND_HEARTBEAT_MILLIS = 10_000L
+        private const val CLIENT_RECEIVE_HEARTBEAT_MILLIS = 10_000L
+        private const val CONNECT_TIMEOUT_MILLIS = 15_000L
+        private const val RECONNECT_STABILITY_RESET_MILLIS = 30_000L
+        private const val MIN_HEARTBEAT_TIMEOUT_MILLIS = 30_000L
+        private const val HEARTBEAT_GRACE_MULTIPLIER = 3L
+        private const val EVENT_BUFFER_CAPACITY = 64
+        private const val EVENT_ID_CACHE_SIZE = 1_024
+        private const val MAX_INCOMING_BUFFER_CHARS = 1_000_000
+        private const val NORMAL_CLOSE_CODE = 1000
+        private const val PROTOCOL_ERROR_CLOSE_CODE = 1002
+
+        internal fun retryDelay(attempt: Int): Long = when (attempt.coerceAtLeast(1)) {
+            1 -> 1_000L
+            2 -> 2_000L
+            3 -> 5_000L
+            4 -> 10_000L
+            5 -> 20_000L
+            else -> 30_000L
+        }
+
+        private fun negotiatedHeartbeat(value: String?): StompHeartbeat {
+            val server = value?.split(',')?.mapNotNull(String::toLongOrNull).orEmpty()
+            val serverCanSend = server.getOrElse(0) { 0L }.coerceAtLeast(0L)
+            val serverWantsReceive = server.getOrElse(1) { 0L }.coerceAtLeast(0L)
+            val sendEvery = if (CLIENT_SEND_HEARTBEAT_MILLIS == 0L || serverWantsReceive == 0L) {
+                0L
+            } else {
+                maxOf(CLIENT_SEND_HEARTBEAT_MILLIS, serverWantsReceive)
+            }
+            val receiveEvery = if (CLIENT_RECEIVE_HEARTBEAT_MILLIS == 0L || serverCanSend == 0L) {
+                0L
+            } else {
+                maxOf(CLIENT_RECEIVE_HEARTBEAT_MILLIS, serverCanSend)
+            }
