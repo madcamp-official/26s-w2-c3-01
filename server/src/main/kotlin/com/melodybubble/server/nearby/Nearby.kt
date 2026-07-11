@@ -544,11 +544,15 @@ class PresenceMessageController(
     fun updateLocation(update: LocationUpdate, principal: Principal): RealtimeEnvelope<Map<String, String>> {
         val userId = UUID.fromString(principal.name)
         nearby.updateLocation(userId, update)
-        messaging.convertAndSendToUser(
-            userId.toString(),
-            "/queue/nearby",
-            Envelope("NEARBY_SNAPSHOT", nearby.snapshot(userId)),
+        realtime.toUserAfterCommit(
+            userId,
+            RealtimeQueues.NEARBY,
+            RealtimeEventTypes.NEARBY_SNAPSHOT,
+            nearby.snapshot(userId),
         )
-        return Envelope("ACK", mapOf("requestId" to update.requestId))
+        return RealtimeEnvelope(
+            type = RealtimeEventTypes.ACK,
+            payload = mapOf("requestId" to update.requestId),
+        )
     }
 }
