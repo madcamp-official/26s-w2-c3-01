@@ -45,12 +45,6 @@ enum class RelationshipStatus {
     BLOCKED
 }
 
-enum class LoungeStatus {
-    LIVE,
-    SCHEDULED,
-    CLOSED
-}
-
 enum class NotificationType {
     REACTION,
     FOLLOW,
@@ -108,14 +102,6 @@ data class PopularTrack(
     val reactionCount: Int
 )
 
-data class MusicCard(
-    val id: String,
-    val senderAlias: String,
-    val track: Track,
-    val reactionCount: Int,
-    val hasReacted: Boolean = false
-)
-
 data class PollOption(
     val id: String,
     val label: String,
@@ -131,18 +117,6 @@ data class LoungePoll(
 ) {
     val totalVotes: Int get() = options.sumOf { it.voteCount }
 }
-
-data class Lounge(
-    val id: String,
-    val name: String,
-    val description: String,
-    val status: LoungeStatus,
-    val memberCount: Int,
-    val vibeTags: List<String>,
-    val cards: List<MusicCard> = emptyList(),
-    val poll: LoungePoll? = null,
-    val isJoined: Boolean = false
-)
 
 data class InboxNotification(
     val id: String,

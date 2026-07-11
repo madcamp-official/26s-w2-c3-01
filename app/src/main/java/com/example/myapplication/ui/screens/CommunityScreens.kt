@@ -94,8 +94,6 @@ import com.example.myapplication.core.model.ChatMessage
 import com.example.myapplication.core.model.ChatPreview
 import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
-import com.example.myapplication.core.model.Lounge
-import com.example.myapplication.core.model.LoungeStatus
 import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.ProfileSettings
