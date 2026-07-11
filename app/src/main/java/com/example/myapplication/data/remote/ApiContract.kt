@@ -28,6 +28,8 @@ object MelodyApiContract {
         const val POPULAR_TRACKS = "/api/v1/nearby/popular-tracks"
         const val LOUNGES = "/api/v1/rooms"
         const val LOUNGE_DETAIL = "/api/v1/rooms/{roomId}"
+        const val BUILDING_LOUNGES = "/api/v1/building-lounges/nearby"
+        const val SUB_LOUNGE = "/api/v1/building-lounges/sub-lounges/{subLoungeId}"
         const val CHAT_ROOMS = "/api/v1/chat/rooms"
         const val CHAT_HISTORY = "/api/v1/chat/rooms/{roomId}/messages"
         const val CHAT_READ = "/api/v1/chat/rooms/{roomId}/read"
@@ -74,6 +76,13 @@ object MelodyApiContract {
         const val NEARBY_MUSIC_UPDATED = "NEARBY_MUSIC_UPDATED"
         const val POPULAR_TRACKS_UPDATED = "POPULAR_TRACKS_UPDATED"
         const val NOTIFICATION_CREATED = "NOTIFICATION_CREATED"
+        const val SUB_LOUNGE_STATE_UPDATED = "SUB_LOUNGE_STATE_UPDATED"
+        const val SUB_LOUNGE_MEMBER_JOINED = "SUB_LOUNGE_MEMBER_JOINED"
+        const val SUB_LOUNGE_MEMBER_LEFT = "SUB_LOUNGE_MEMBER_LEFT"
+        const val LISTENING_STATUS_UPDATED = "LISTENING_STATUS_UPDATED"
+        const val RECOMMENDATION_CARD_CREATED = "RECOMMENDATION_CARD_CREATED"
+        const val RECOMMENDATION_CARD_REACTED = "RECOMMENDATION_CARD_REACTED"
+        const val LOUNGE_POLL_UPDATED = "LOUNGE_POLL_UPDATED"
     }
 }
 
