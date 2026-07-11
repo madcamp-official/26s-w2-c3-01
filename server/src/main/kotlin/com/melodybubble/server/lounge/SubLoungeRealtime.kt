@@ -274,3 +274,95 @@ class SubLoungeRealtimeService(
             throw ResponseStatusException(HttpStatus.CONFLICT, "clientCardId가 다른 카드에 사용되었습니다.")
         }
         if (inserted == 1) {
+            realtime.toTopicAfterCommit(
+                topic(subLoungeId),
+                RealtimeEventTypes.RECOMMENDATION_CARD_CREATED,
+                card,
+            )
+        }
+        return card
+    }
+
+    @Transactional
+    fun react(userId: UUID, cardId: UUID, request: ReactionRequest): LoungeRecommendationCard {
+        val subLoungeId = cardRoom(cardId)
+        requireMember(userId, subLoungeId)
+        rateLimiter.enforce(userId, "LOUNGE_REACTION", 30, Duration.ofMinutes(1))
+        val type = request.reactionType.trim().uppercase()
+        if (type !in REACTION_TYPES) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 리액션입니다.")
+        }
+        jdbc.update(
+            """
+            insert into sub_lounge_card_reactions(card_id,user_id,reaction_type)
+            values (?,?,?) on conflict(card_id,user_id,reaction_type) do nothing
+            """.trimIndent(),
+            cardId,
+            userId,
+            type,
+        )
+        val card = cards(userId, subLoungeId).first { it.id == cardId }
+        realtime.toTopicAfterCommit(
+            topic(subLoungeId),
+            RealtimeEventTypes.RECOMMENDATION_CARD_REACTED,
+            card,
+        )
+        return card
+    }
+
+    @Transactional
+    fun vote(userId: UUID, subLoungeId: UUID, request: LoungeVoteRequest): LoungePollState {
+        requireMember(userId, subLoungeId)
+        rateLimiter.enforce(userId, "LOUNGE_VOTE", 20, Duration.ofMinutes(1))
+        val key = request.targetKey.trim().uppercase()
+        if (key !in POLL_KEYS) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 투표 항목입니다.")
+        jdbc.update(
+            """
+            insert into sub_lounge_votes(sub_lounge_id,user_id,target_key) values (?,?,?)
+            on conflict(sub_lounge_id,user_id) do update set target_key=excluded.target_key,updated_at=now()
+            """.trimIndent(),
+            subLoungeId,
+            userId,
+            key,
+        )
+        val poll = poll(userId, subLoungeId)
+        realtime.toTopicAfterCommit(topic(subLoungeId), RealtimeEventTypes.LOUNGE_POLL_UPDATED, poll)
+        return poll
+    }
+
+    fun cards(userId: UUID, subLoungeId: UUID): List<LoungeRecommendationCard> {
+        requireMember(userId, subLoungeId)
+        return jdbc.query(
+            """
+            select card.id,card.client_card_id,sender.display_name,card.track_title,card.artist_name,
+              card.message,card.created_at,count(reaction.user_id) reaction_count,
+              bool_or(reaction.user_id=?) reacted_by_me
+            from sub_lounge_recommendation_cards card
+            join users sender on sender.id=card.sender_id
+            left join sub_lounge_card_reactions reaction on reaction.card_id=card.id
+            where card.sub_lounge_id=?
+            group by card.id,sender.display_name
+            order by card.created_at desc limit 50
+            """.trimIndent(),
+            { rs, _ ->
+                LoungeRecommendationCard(
+                    id = UUID.fromString(rs.getString("id")),
+                    subLoungeId = subLoungeId,
+                    clientCardId = UUID.fromString(rs.getString("client_card_id")),
+                    senderAlias = rs.getString("display_name"),
+                    trackTitle = rs.getString("track_title"),
+                    artistName = rs.getString("artist_name"),
+                    message = rs.getString("message"),
+                    reactionCount = rs.getInt("reaction_count"),
+                    reactedByMe = rs.getBoolean("reacted_by_me"),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                )
+            },
+            userId,
+            subLoungeId,
+        )
+    }
+
+    private fun snapshotUnchecked(userId: UUID, subLoungeId: UUID): SubLoungeSnapshot {
+        val room = jdbc.query(
+            """
