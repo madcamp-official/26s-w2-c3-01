@@ -90,3 +90,60 @@ class RealtimeEventRouter(
             timestamp = timestamp,
             payload = objectValue.get("payload"),
         )
+    }
+
+    private fun serverError(
+        destination: String,
+        envelope: RealtimeEventEnvelope<JsonElement>,
+    ): RealtimeEvent.ServerError {
+        val payload = if (envelope.payload.isJsonObject) {
+            decode(envelope.payload, RealtimeServerErrorPayload::class.java)
+        } else {
+            RealtimeServerErrorPayload(message = envelope.payload.toString())
+        }
+        return RealtimeEvent.ServerError(destination, envelope.withPayload(payload))
+    }
+
+    private fun decodePopularTracks(payload: JsonElement): PopularTracksUpdatedPayload {
+        require(payload.isJsonObject) { "POPULAR_TRACKS_UPDATED payload must be an object" }
+        val tracksElement = payload.asJsonObject.get("tracks")
+        if (tracksElement == null || tracksElement.isJsonNull) return PopularTracksUpdatedPayload()
+        require(tracksElement.isJsonArray) { "tracks must be an array" }
+        return PopularTracksUpdatedPayload(
+            tracks = tracksElement.asJsonArray.map { decode(it, PopularTrackPayload::class.java) },
+        )
+    }
+
+    private fun <T : Any> decode(payload: JsonElement, type: Class<T>): T {
+        require(payload.isJsonObject) { "${type.simpleName} payload must be an object" }
+        return requireNotNull(gson.fromJson(payload, type)) { "${type.simpleName} payload is null" }
+    }
+
+    private fun <T> RealtimeEventEnvelope<JsonElement>.withPayload(payload: T) =
+        RealtimeEventEnvelope(
+            eventId = eventId,
+            type = type,
+            version = version,
+            timestamp = timestamp,
+            payload = payload,
+        )
+
+    private fun JsonObject.requiredString(name: String): String {
+        val element = get(name) ?: throw IllegalArgumentException("Missing $name")
+        require(element.isJsonPrimitive && element.asJsonPrimitive.isString) { "$name must be a string" }
+        return element.asString.also { require(it.isNotBlank()) { "$name must not be blank" } }
+    }
+
+    companion object {
+        const val TYPE_CHAT_ROOM_CREATED = "CHAT_ROOM_CREATED"
+        const val TYPE_CHAT_MESSAGE_CREATED = "CHAT_MESSAGE_CREATED"
+        const val TYPE_CHAT_MESSAGE_READ = "CHAT_MESSAGE_READ"
+        const val TYPE_CHAT_ROOM_UPDATED = "CHAT_ROOM_UPDATED"
+        const val TYPE_NEARBY_REACTION_CREATED = "NEARBY_REACTION_CREATED"
+        const val TYPE_NEARBY_MUSIC_UPDATED = "NEARBY_MUSIC_UPDATED"
+        const val TYPE_POPULAR_TRACKS_UPDATED = "POPULAR_TRACKS_UPDATED"
+        const val TYPE_NOTIFICATION_CREATED = "NOTIFICATION_CREATED"
+        const val TYPE_ERROR = "ERROR"
+        const val TYPE_SERVER_ERROR = "SERVER_ERROR"
+    }
+}
