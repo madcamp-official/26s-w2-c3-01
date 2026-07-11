@@ -363,8 +363,8 @@ private fun LoungeBottomSheetPanel(
                 Text(
                     when {
                         entered != null -> entered.name
-                        insideLounges.isNotEmpty() -> "${insideLounges.size} available lounge"
-                        else -> "Nearby lounge radar"
+                        insideLounges.isNotEmpty() -> "입장 가능한 실제 건물 ${insideLounges.size}곳"
+                        else -> "주변 실제 건물 라운지"
                     },
                     color = PaleMint,
                     style = MaterialTheme.typography.titleMedium,
@@ -374,11 +374,12 @@ private fun LoungeBottomSheetPanel(
                 )
                 Text(
                     when {
-                        !hasLocationPermission -> "Location permission is needed."
-                        entered != null -> "${state.subLounges.size} recommendation rooms"
-                        insideLounges.isNotEmpty() -> "Tap to choose a room here"
-                        recommended.isNotEmpty() -> "Nearby candidates are in the popup"
-                        else -> "Move to reveal building lounges"
+                        !hasLocationPermission -> "주변 건물을 찾으려면 위치 권한이 필요해요."
+                        entered != null -> "사용자가 만든 하위 라운지 ${state.subLounges.size}개"
+                        insideLounges.isNotEmpty() -> "눌러서 입장할 건물을 선택하세요."
+                        recommended.isNotEmpty() -> "가까운 실제 건물을 확인할 수 있어요."
+                        state.loadFailed -> "서버 연결을 확인하고 다시 시도해 주세요."
+                        else -> "주변에 등록된 실제 건물이 없어요."
                     },
                     color = MutedMint,
                     style = MaterialTheme.typography.labelMedium,
@@ -389,7 +390,7 @@ private fun LoungeBottomSheetPanel(
             if (state.loading) {
                 CircularProgressIndicator(modifier = Modifier.size(22.dp), color = SignalGreen, strokeWidth = 3.dp)
             } else {
-                Text("Open", color = SignalGreen, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                Text("열기", color = SignalGreen, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
         }
     }
