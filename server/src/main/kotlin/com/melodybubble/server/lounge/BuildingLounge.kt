@@ -347,7 +347,9 @@ class BuildingLoungeService(
         rateLimiter.enforce(userId, "LOUNGE_CREATE", 5, Duration.ofHours(1))
         requireActiveBuildingSession(userId, loungeId)
         val title = request.title.trim().take(80)
-        if (title.isBlank()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Title is required")
+        if (title.length < 2) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "하위 라운지 이름은 2자 이상이어야 합니다.")
+        }
         val style = request.style?.trim()?.take(80)?.ifBlank { null }
         val duplicate = jdbc.queryForObject(
             "SELECT EXISTS (SELECT 1 FROM sub_lounges WHERE building_lounge_id=? AND active=true AND lower(title)=lower(?))",
