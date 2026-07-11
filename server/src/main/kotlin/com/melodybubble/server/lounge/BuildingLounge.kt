@@ -3,12 +3,14 @@ package com.melodybubble.server.lounge
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.melodybubble.server.realtime.RealtimeEnvelope
+import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.messaging.simp.SimpMessagingTemplate
 import org.springframework.stereotype.Controller
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.client.RestClient
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.security.Principal
 import java.time.Instant
+import java.time.Duration
 import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -84,6 +87,8 @@ class BuildingLoungeService(
     private val jdbc: JdbcTemplate,
     restClientBuilder: RestClient.Builder,
     private val objectMapper: ObjectMapper,
+    private val rateLimiter: ActionRateLimiter,
+    private val subLoungeRealtime: SubLoungeRealtimeService,
 ) {
     private val overpassClient = restClientBuilder
         .baseUrl("https://overpass-api.de/api")
@@ -327,7 +332,7 @@ class BuildingLoungeService(
             loungeId,
         )
         if (forcedExit) {
-            leaveAllSubLounges(userId, loungeId)
+            subLoungeRealtime.forceLeaveFromBuilding(userId, loungeId)
         }
         return HeartbeatResponse(inside = lounge.inside, outsideCount = nextOutsideCount, forcedExit = forcedExit)
     }
@@ -338,15 +343,19 @@ class BuildingLoungeService(
             userId,
             loungeId,
         )
-        leaveAllSubLounges(userId, loungeId)
+        subLoungeRealtime.forceLeaveFromBuilding(userId, loungeId)
     }
 
     fun subLounges(loungeId: UUID): List<SubLoungeSummary> = jdbc.query(
         """
         SELECT sl.id, sl.building_lounge_id, sl.title, sl.style, sl.created_at,
-               count(m.user_id) FILTER (WHERE m.active = true) AS member_count
+               count(m.user_id) FILTER (
+                 WHERE m.active = true AND session.active = true AND session.expires_at > now()
+               ) AS member_count
         FROM sub_lounges sl
         LEFT JOIN sub_lounge_members m ON m.sub_lounge_id = sl.id
+        LEFT JOIN building_lounge_sessions session
+          ON session.user_id=m.user_id AND session.building_lounge_id=sl.building_lounge_id
         WHERE sl.building_lounge_id = ? AND sl.active = true
         GROUP BY sl.id
         ORDER BY sl.created_at DESC
@@ -364,7 +373,9 @@ class BuildingLoungeService(
         loungeId,
     )
 
+    @Transactional
     fun createSubLounge(userId: UUID, loungeId: UUID, request: CreateSubLoungeRequest): SubLoungeSummary {
+        rateLimiter.enforce(userId, "LOUNGE_CREATE", 5, Duration.ofHours(1))
         requireActiveBuildingSession(userId, loungeId)
         val title = request.title.trim().take(80)
         if (title.isBlank()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Title is required")
@@ -425,8 +436,9 @@ class BuildingLoungeService(
         requireActiveSubLoungeMember(userId, subLoungeId)
         val id = jdbc.query(
             """
-            INSERT INTO sub_lounge_recommendation_cards(sub_lounge_id, sender_id, track_title, artist_name, message)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sub_lounge_recommendation_cards(
+              sub_lounge_id, sender_id, client_card_id, track_title, artist_name, message
+            ) VALUES (?, ?, gen_random_uuid(), ?, ?, ?)
             RETURNING id
             """.trimIndent(),
             { rs, _ -> UUID.fromString(rs.getString("id")) },
@@ -519,19 +531,6 @@ class BuildingLoungeService(
         loungeId,
     ).firstOrNull() ?: 0
 
-    private fun leaveAllSubLounges(userId: UUID, loungeId: UUID) {
-        jdbc.update(
-            """
-            UPDATE sub_lounge_members m
-            SET active=false, last_seen_at=now()
-            FROM sub_lounges sl
-            WHERE sl.id = m.sub_lounge_id AND sl.building_lounge_id = ? AND m.user_id = ?
-            """.trimIndent(),
-            loungeId,
-            userId,
-        )
-    }
-
     private fun buildingLoungeIdForSubLounge(subLoungeId: UUID): UUID = jdbc.query(
         "SELECT building_lounge_id FROM sub_lounges WHERE id=? AND active=true",
         { rs, _ -> UUID.fromString(rs.getString("building_lounge_id")) },
@@ -618,7 +617,10 @@ class BuildingLoungeService(
 
 @RestController
 @RequestMapping("/api/v1/building-lounges")
-class BuildingLoungeController(private val service: BuildingLoungeService) {
+class BuildingLoungeController(
+    private val service: BuildingLoungeService,
+    private val realtimeService: SubLoungeRealtimeService,
+) {
     @GetMapping("/nearby")
     fun nearby(
         @RequestParam latitude: Double,
@@ -660,22 +662,27 @@ class BuildingLoungeController(private val service: BuildingLoungeService) {
 
     @PostMapping("/sub-lounges/{subLoungeId}/join")
     fun joinSubLounge(principal: Principal, @PathVariable subLoungeId: UUID): SubLoungeSummary =
-        service.joinSubLounge(UUID.fromString(principal.name), subLoungeId)
+        realtimeService.join(UUID.fromString(principal.name), subLoungeId).let {
+            SubLoungeSummary(it.id, it.buildingLoungeId, it.title, it.style, it.memberCount, it.generatedAt)
+        }
 
     @GetMapping("/sub-lounges/{subLoungeId}/cards")
-    fun cards(@PathVariable subLoungeId: UUID): List<RecommendationCardSummary> = service.cards(subLoungeId)
+    fun cards(principal: Principal, @PathVariable subLoungeId: UUID): List<LoungeRecommendationCard> =
+        realtimeService.cards(UUID.fromString(principal.name), subLoungeId)
 
     @PostMapping("/sub-lounges/{subLoungeId}/cards")
     fun addCard(
         principal: Principal,
         @PathVariable subLoungeId: UUID,
-        @RequestBody request: RecommendationCardRequest,
-    ): RecommendationCardSummary = service.addCard(UUID.fromString(principal.name), subLoungeId, request)
+        @RequestBody request: CreateLoungeCardRequest,
+    ): LoungeRecommendationCard = realtimeService.addCard(UUID.fromString(principal.name), subLoungeId, request)
 
     @PostMapping("/cards/{cardId}/reactions")
-    fun react(principal: Principal, @PathVariable cardId: UUID, @RequestBody request: ReactionRequest) {
-        service.react(UUID.fromString(principal.name), cardId, request)
-    }
+    fun react(
+        principal: Principal,
+        @PathVariable cardId: UUID,
+        @RequestBody request: ReactionRequest,
+    ): LoungeRecommendationCard = realtimeService.react(UUID.fromString(principal.name), cardId, request)
 }
 
 @Controller
