@@ -49,6 +49,13 @@ object RealtimeEventTypes {
     const val NEARBY_MUSIC_UPDATED = "NEARBY_MUSIC_UPDATED"
     const val POPULAR_TRACKS_UPDATED = "POPULAR_TRACKS_UPDATED"
     const val NOTIFICATION_CREATED = "NOTIFICATION_CREATED"
+    const val SUB_LOUNGE_STATE_UPDATED = "SUB_LOUNGE_STATE_UPDATED"
+    const val SUB_LOUNGE_MEMBER_JOINED = "SUB_LOUNGE_MEMBER_JOINED"
+    const val SUB_LOUNGE_MEMBER_LEFT = "SUB_LOUNGE_MEMBER_LEFT"
+    const val LISTENING_STATUS_UPDATED = "LISTENING_STATUS_UPDATED"
+    const val RECOMMENDATION_CARD_CREATED = "RECOMMENDATION_CARD_CREATED"
+    const val RECOMMENDATION_CARD_REACTED = "RECOMMENDATION_CARD_REACTED"
+    const val LOUNGE_POLL_UPDATED = "LOUNGE_POLL_UPDATED"
     const val ACK = "ACK"
     const val ERROR = "ERROR"
 }
@@ -92,6 +99,21 @@ class RealtimePublisher(private val messaging: SimpMessagingTemplate) {
                     error,
                 )
             }
+        }
+    }
+
+    fun <T : Any> toTopicAfterCommit(destination: String, type: String, payload: T) {
+        val envelope = RealtimeEnvelope(type = type, payload = payload)
+        afterCommit {
+            runCatching { messaging.convertAndSend(destination, envelope) }
+                .onFailure { error ->
+                    logger.warn(
+                        "Realtime topic delivery failed after commit: destination={}, type={}",
+                        destination,
+                        type,
+                        error,
+                    )
+                }
         }
     }
 
