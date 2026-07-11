@@ -270,42 +270,6 @@ fun LoungeDetailScreen(
                 )
             }
         }
-        item { SectionLabel("추천곡 카드") }
-        if (lounge.isJoined) {
-            items(lounge.cards, key = { it.id }) { card ->
-                AppPanel {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TrackGlyph(card.senderAlias, card.track.title.hashCode().toLong())
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(card.track.title, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "${card.track.artist} · ${card.senderAlias}",
-                                color = MutedMint,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                        IconButton(onClick = { onReactToCard(card.id) }) {
-                            Icon(
-                                Icons.Outlined.FavoriteBorder,
-                                contentDescription = if (card.hasReacted) "${card.track.title} 공감 취소" else "${card.track.title} 공감",
-                                tint = if (card.hasReacted) SignalGreen else MutedMint
-                            )
-                        }
-                        Spacer(Modifier.width(5.dp))
-                        Text(card.reactionCount.toString(), style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-            }
-        } else {
-            item {
-                AppPanel {
-                    Text("라운지 입장 후 추천곡을 볼 수 있어요", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(6.dp))
-                    Text("입장하면 추천곡 카드와 실시간 투표에 참여할 수 있어요.", color = MutedMint)
-                }
-            }
-        }
         item {
             Button(
                 onClick = onSendCurrentTrack,
