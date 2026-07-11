@@ -452,13 +452,13 @@ private fun LoungeRoomsSheet(
                 Icon(Icons.Outlined.Map, contentDescription = null, tint = SignalGreen)
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Recommended rooms", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("실제 건물 라운지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
                         when {
-                            !hasLocationPermission -> "Location permission is needed."
-                            entered != null -> "Rooms inside ${entered.name}"
-                            insideLounges.isNotEmpty() -> "Choose a lounge available at your real location."
-                            else -> "Nearby candidates are listed as hints. Move closer to unlock them."
+                            !hasLocationPermission -> "위치 권한을 허용해 주세요."
+                            entered != null -> "${entered.name} 안에서 사용자가 만든 방"
+                            insideLounges.isNotEmpty() -> "현재 위치에서 입장 가능한 건물을 선택하세요."
+                            else -> "가까운 실제 건물입니다. 반경 안으로 이동하면 입장할 수 있어요."
                         },
                         color = MutedMint,
                         style = MaterialTheme.typography.bodyMedium
@@ -487,12 +487,12 @@ private fun LoungeRoomsSheet(
                     ) {
                         Icon(Icons.Outlined.Add, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Sub lounge")
+                        Text("하위 라운지 만들기")
                     }
                     OutlinedButton(onClick = onLeave, modifier = Modifier.weight(1f)) {
                         Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("Leave")
+                        Text("건물 나가기")
                     }
                 }
                 SubLoungeList(state.subLounges, onOpenSubLounge)
