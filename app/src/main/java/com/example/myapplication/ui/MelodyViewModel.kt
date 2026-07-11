@@ -379,7 +379,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         if (token.isNullOrBlank()) {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
-                message = "Login is required to load building lounges."
+                message = "로그인 후 실제 건물 라운지를 확인할 수 있어요."
             )
             return
         }
@@ -425,11 +425,11 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 _buildingLoungeState.value = _buildingLoungeState.value.copy(
                     enteredLoungeId = loungeId,
                     subLounges = subLounges,
-                    message = "Entered ${it.lounge.name}."
+                    message = "${it.lounge.name}에 입장했어요."
                 )
             }.onFailure {
                 _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                    message = "Move inside the lounge circle to enter."
+                    message = "건물 입장 반경 안으로 이동해 주세요."
                 )
             }
         }
@@ -448,7 +448,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         subLounges = if (response.forcedExit) emptyList() else _buildingLoungeState.value.subLounges,
                         selectedSubLoungeId = if (response.forcedExit) null else _buildingLoungeState.value.selectedSubLoungeId,
                         subLoungeSnapshot = if (response.forcedExit) null else _buildingLoungeState.value.subLoungeSnapshot,
-                        message = if (response.forcedExit) "You left the building lounge." else null
+                        message = if (response.forcedExit) "건물 반경을 벗어나 자동 퇴장했어요." else null
                     )
                 }
         }
@@ -465,7 +465,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 subLounges = emptyList(),
                 selectedSubLoungeId = null,
                 subLoungeSnapshot = null,
-                message = "Left the lounge."
+                message = "건물 라운지에서 나왔어요."
             )
         }
     }
@@ -479,12 +479,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         subLounges = subLounges,
-                        message = "Created ${created.title}."
+                        message = "${created.title}을 만들고 입장했어요."
                     )
                     openSubLounge(created.id)
                 }
                 .onFailure {
-                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "Could not create sub lounge.")
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "하위 라운지를 만들지 못했어요.")
                 }
         }
     }
