@@ -213,6 +213,11 @@ fun MelodyBubbleApp(
                         onDismissReactionSheet = { reactionSheetVisible = false },
                         onReact = { selected, label -> viewModel.react(selected.nearbyHandle, label) },
                         onFollow = { viewModel.follow(it.nearbyHandle) },
+                        onOpenChat = { selected ->
+                            state.chats.firstOrNull { it.peerHandle == selected.nearbyHandle }?.let { chat ->
+                                navController.navigate(Route.chat(chat.roomId))
+                            }
+                        },
                         onBlock = {
                             viewModel.block(it.nearbyHandle)
                             navController.popBackStack()
