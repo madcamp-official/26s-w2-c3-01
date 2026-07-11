@@ -13,15 +13,13 @@ import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
+import com.example.myapplication.data.presence.PresenceSyncCoordinator
 
 /**
  * Reads current playback from active MediaSessions exposed to this enabled notification listener.
  * Transport notification text is used only when an app exposes no MediaSession.
  */
 class NowPlayingNotificationListenerService : NotificationListenerService() {
-    private val preferences by lazy(LazyThreadSafetyMode.NONE) {
-        getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-    }
     private val mainHandler by lazy(LazyThreadSafetyMode.NONE) { Handler(Looper.getMainLooper()) }
     private val mediaSessionManager by lazy(LazyThreadSafetyMode.NONE) {
         getSystemService(MediaSessionManager::class.java)
@@ -150,28 +148,23 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
     }
 
     private fun persist(text: NowPlayingText, source: String) {
-        preferences.edit()
-            .putString(KEY_TITLE, text.title)
-            .putString(KEY_TEXT, text.artist)
-            .putString(KEY_SOURCE, source)
-            .putLong(KEY_UPDATED_AT_EPOCH_MS, System.currentTimeMillis())
-            .putBoolean(KEY_ACTIVE, true)
-            .apply()
         publish(text.title, text.artist, source, isPlaying = true)
     }
 
     private fun persistStopped() {
-        preferences.edit()
-            .remove(KEY_TITLE)
-            .remove(KEY_TEXT)
-            .remove(KEY_SOURCE)
-            .remove(KEY_UPDATED_AT_EPOCH_MS)
-            .putBoolean(KEY_ACTIVE, false)
-            .apply()
         publish(null, null, SOURCE_MEDIA_SESSION, isPlaying = false)
     }
 
     private fun publish(title: String?, artist: String?, source: String, isPlaying: Boolean) {
+        val coordinator = PresenceSyncCoordinator.get(this)
+        if (isPlaying && !title.isNullOrBlank() && !artist.isNullOrBlank()) {
+            coordinator.onPlaybackDetected(title, artist, source)
+        } else {
+            coordinator.onPlaybackStopped()
+        }
+
+        // Kept as a package-scoped compatibility signal for older app components. Presence REST
+        // synchronization is owned by the coordinator above and never depends on this broadcast.
         sendBroadcast(
             Intent(ACTION_NOW_PLAYING_CHANGED)
                 .setPackage(packageName)
@@ -197,12 +190,12 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         fun isEnabled(context: Context): Boolean =
             context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
 
-        const val PREFERENCES_NAME = "melody_bubble_now_playing_fallback"
-        const val KEY_TITLE = "title"
-        const val KEY_TEXT = "text"
-        const val KEY_SOURCE = "source"
-        const val KEY_UPDATED_AT_EPOCH_MS = "updated_at_epoch_ms"
-        const val KEY_ACTIVE = "active"
+        const val PREFERENCES_NAME = PresenceSyncCoordinator.PREFERENCES_NAME
+        const val KEY_TITLE = PresenceSyncCoordinator.KEY_TITLE
+        const val KEY_TEXT = PresenceSyncCoordinator.KEY_ARTIST
+        const val KEY_SOURCE = PresenceSyncCoordinator.KEY_SOURCE
+        const val KEY_UPDATED_AT_EPOCH_MS = PresenceSyncCoordinator.KEY_UPDATED_AT_EPOCH_MS
+        const val KEY_ACTIVE = PresenceSyncCoordinator.KEY_ACTIVE
 
         const val ACTION_NOW_PLAYING_CHANGED =
             "com.example.myapplication.service.action.NOW_PLAYING_CHANGED"
