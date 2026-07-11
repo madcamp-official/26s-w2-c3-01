@@ -718,6 +718,61 @@ class DemoMelodyRepository(
         }
     }
 
+    private fun markChatRoomRead(roomId: String) {
+        _state.update { current ->
+            current.copy(
+                chats = current.chats.map { chat ->
+                    if (chat.roomId == roomId) chat.copy(unreadCount = 0) else chat
+                }
+            )
+        }
+        val token = accessToken ?: return
+        synchronized(chatReadLock) {
+            chatReadDirty += roomId
+            if (chatReadJobs[roomId]?.isActive == true) return
+            chatReadJobs[roomId] = scope.launch { syncChatRoomRead(roomId, token) }
+        }
+    }
+
+    private suspend fun syncChatRoomRead(roomId: String, token: String) {
+        var retryDelayMillis = 1_000L
+        try {
+            while (isCurrentSession(token)) {
+                synchronized(chatReadLock) { chatReadDirty -= roomId }
+                val result = runCatching { socialApi.markChatRead("Bearer $token", roomId) }
+                if (!isCurrentSession(token)) return
+                if (result.isSuccess) {
+                    _state.update { current ->
+                        current.copy(
+                            chats = current.chats.map { chat ->
+                                if (chat.roomId == roomId) chat.copy(unreadCount = 0) else chat
+                            }
+                        )
+                    }
+                    retryDelayMillis = 1_000L
+                    if (synchronized(chatReadLock) { roomId !in chatReadDirty }) return
+                    continue
+                }
+                val error = result.exceptionOrNull()
+                if (error is HttpException && error.code() in 400..499 &&
+                    error.code() !in setOf(408, 429)
+                ) {
+                    loadChatRooms()
+                    return
+                }
+                synchronized(chatReadLock) { chatReadDirty += roomId }
+                delay(retryDelayMillis)
+                retryDelayMillis = (retryDelayMillis * 2).coerceAtMost(30_000L)
+            }
+        } finally {
+            val restart = synchronized(chatReadLock) {
+                chatReadJobs.remove(roomId)
+                roomId in chatReadDirty && isCurrentSession(token)
+            }
+            if (restart) markChatRoomRead(roomId)
+        }
+    }
+
     override fun setDiscoverable(enabled: Boolean) {
         _state.update { it.copy(profile = it.profile.copy(discoverable = enabled)) }
         persistProfile(_state.value.profile)
@@ -790,8 +845,13 @@ class DemoMelodyRepository(
                     displayName, "#%06X".format(colorHex and 0xFFFFFF), bio,
                     avatarDataUrl, genres, moods,
                 ))
-            }.onSuccess { applyRemoteProfile(it, "프로필을 변경했어요") }
-                .onFailure { _state.update { state -> state.copy(feedbackMessage = "프로필을 저장하지 못했어요") } }
+            }.onSuccess {
+                if (isCurrentSession(token)) applyRemoteProfile(it, "프로필을 변경했어요")
+            }.onFailure {
+                if (isCurrentSession(token)) {
+                    _state.update { state -> state.copy(feedbackMessage = "프로필을 저장하지 못했어요") }
+                }
+            }
         }
     }
 
@@ -891,7 +951,9 @@ class DemoMelodyRepository(
 
     override fun authenticate(accessToken: String) {
         this.accessToken = accessToken
-        val detectedTrack = persistedNowPlayingTrack()
+        realtimeInboxStore?.activate(accessToken)
+        presenceSyncCoordinator.onSessionAvailable(accessToken)
+        val detectedPlayback = presenceSyncCoordinator.detectedPlayback.value
         preferences.edit().putBoolean("onboarding-complete", false).apply()
         _state.update {
             it.copy(
@@ -899,20 +961,24 @@ class DemoMelodyRepository(
                 nearbyListeners = emptyList(),
                 popularTracks = emptyList(),
                 lounges = emptyList(),
-                notifications = emptyList(),
+                notifications = realtimeInboxStore?.load().orEmpty(),
                 chats = emptyList(),
                 chatMessages = emptyMap(),
-                currentTrack = detectedTrack ?: it.currentTrack,
-                currentTrackPlaying = detectedTrack != null,
+                detectedTrack = detectedPlayback.track,
+                detectedTrackPlaying = detectedPlayback.isPlaying,
                 selectedNearbyHandle = null,
                 selectedLoungeId = null,
                 dataSourceLabel = "SERVER LIVE",
             )
         }
-        scope.launch { runCatching { profileApi.me("Bearer $accessToken") }.onSuccess { applyRemoteProfile(it) } }
+        scope.launch {
+            runCatching { profileApi.me("Bearer $accessToken") }
+                .onSuccess { if (isCurrentSession(accessToken)) applyRemoteProfile(it) }
+        }
         scope.launch {
             runCatching { nearbyApi.presenceSettings("Bearer $accessToken") }
                 .onSuccess { remote ->
+                    if (!isCurrentSession(accessToken)) return@onSuccess
                     _state.update {
                         it.copy(
                             discoveryRadiusMeters = remote.discoveryRadiusMeters,
@@ -931,6 +997,8 @@ class DemoMelodyRepository(
                     }
                 }
         }
+        refreshPopularTracks(accessToken)
+        syncReceivedReactions(accessToken)
         loadBlockedUsers()
         startChatSync(accessToken)
     }
