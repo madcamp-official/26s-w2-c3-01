@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Lyria 3 Music Prompt Lab</title>
+  <style>
+    :root{--ink:#171817;--paper:#f2f0e9;--panel:#fffdf8;--line:#d3cec0;--muted:#666b65;--green:#176c4b;--blue:#315bb8;--red:#b74435;--shadow:0 12px 34px rgba(20,22,20,.08)}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Avenir Next","Pretendard",Arial,sans-serif}button,textarea{font:inherit}.shell{max-width:1060px;margin:auto;padding:26px 18px 56px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;border-top:5px solid var(--ink);padding-top:18px;margin-bottom:20px}.eyebrow,.label{font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}h1{margin:8px 0 0;font-size:clamp(34px,6vw,66px);line-height:.92;letter-spacing:-.04em}.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:14px}.panel{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);padding:18px}.section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}.prompt{width:100%;min-height:460px;border:1px solid var(--line);background:#171917;color:#e9f2e8;padding:16px;resize:vertical;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.prompt:focus,button:focus-visible,audio:focus-visible{outline:3px solid #e5c849;outline-offset:2px}.actions{display:flex;gap:8px;margin-top:12px}button{border:1px solid var(--ink);background:var(--ink);color:white;padding:12px 15px;cursor:pointer}button.secondary{background:white;color:var(--ink)}button:disabled{opacity:.55;cursor:wait}.status{min-height:22px;margin:12px 0;color:var(--muted);font-size:13px}.status.error{color:var(--red)}.loading{display:none;border-top:1px solid var(--line);padding-top:16px;margin-top:16px}.loading.active{display:block}.bar{height:5px;background:#dedbd2;overflow:hidden}.bar::after{content:"";display:block;width:40%;height:100%;background:var(--green);animation:move 1.2s ease-in-out infinite}.result{display:none}.result.active{display:block}.result h2{margin:5px 0 8px;font-size:26px}.result p{color:var(--muted);line-height:1.5;white-space:pre-wrap}.art{aspect-ratio:1;background:linear-gradient(145deg,#173e31,#315bb8 55%,#dfc750);display:grid;place-items:center;color:white;margin-bottom:16px}.art span{font:700 64px/1 ui-monospace,monospace}audio{width:100%;margin:8px 0 14px}.meta{display:flex;justify-content:space-between;padding-top:12px;border-top:1px solid var(--line)}a{color:inherit}@keyframes move{from{transform:translateX(-110%)}to{transform:translateX(260%)}}@media(max-width:780px){.grid{grid-template-columns:1fr}.top{display:block}.prompt{min-height:360px}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div><div class="eyebrow">Internal ops / Gemini music test</div><h1>Lyria 3<br>Prompt Lab</h1></div>
+    <a href="/internal/ops/" class="eyebrow">Back to ops</a>
+  </header>
+  <section class="grid">
+    <article class="panel">
+      <div class="section-title"><span class="label">Editable music prompt</span><span class="label" id="count">0 chars</span></div>
+      <textarea class="prompt" id="prompt" spellcheck="false">Create one expressive 30-second instrumental identity song that communicates "this is my vibe."
+
+Mood: dreamy, warm, quietly confident.
+Instrumentation: mellow electric piano, soft nylon guitar, airy analog synth pad, subtle bass, and restrained brushed percussion.
+Structure: a memorable opening motif, gentle development, and a satisfying ending within 30 seconds.
+Production: polished 48 kHz stereo, intimate and spacious, musical and pleasant, never harsh or alarm-like.
+Instrumental only. No vocals, no spoken words. Do not imitate any existing artist or copyrighted song.</textarea>
+      <div class="actions"><button id="generate">Generate 30-second song</button><button id="reset" class="secondary">Reset prompt</button></div>
+      <div class="status" id="status">프롬프트를 수정한 뒤 생성 버튼을 누르세요.</div>
+      <div class="loading" id="loading"><div class="label">Lyria is composing</div><p>30초 음악을 만들고 있어요. 최대 몇 분 걸릴 수 있습니다.</p><div class="bar"></div></div>
+    </article>
+    <aside class="panel">
+      <div class="result" id="result">
+        <div class="art"><span>L3</span></div>
+        <div class="label">Generated clip</div><h2>Your 30-second song</h2>
+        <audio id="audio" controls preload="metadata"></audio>
+        <p id="description"></p>
+        <div class="meta"><span class="label" id="model"></span><span class="label">MP3 / 30 sec</span></div>
+      </div>
+      <div id="empty"><div class="art"><span>30</span></div><div class="label">One prompt · one song</div><h2>생성 결과가 여기에 나타납니다</h2><p style="color:var(--muted);line-height:1.5">Tone.js 합성 대신 Lyria 3가 완성된 MP3 음악 한 곡을 생성합니다.</p></div>
+    </aside>
+  </section>
+</main>
+<script>
+  const $=id=>document.getElementById(id);const initial=$('prompt').value;
+  function updateCount(){$('count').textContent=`${$('prompt').value.length.toLocaleString()} chars`}
+  function setStatus(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error)}
+  async function generate(){const prompt=$('prompt').value.trim();if(!prompt){setStatus('프롬프트를 입력해 주세요.',true);return}$('generate').disabled=true;$('loading').classList.add('active');$('result').classList.remove('active');$('empty').style.display='block';setStatus('Lyria 3가 음악을 생성하고 있습니다...');try{const response=await fetch('/internal/ops/api/lyria/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt})});if(!response.ok)throw new Error(await response.text());const data=await response.json();$('audio').src=`data:${data.mimeType};base64,${data.audioBase64}`;$('description').textContent=data.description||'Instrumental music generated from your prompt.';$('model').textContent=data.model;$('empty').style.display='none';$('result').classList.add('active');setStatus('30초 음악 생성이 완료됐습니다. 재생 버튼을 눌러 들어보세요.')}catch(error){setStatus(error.message||'음악 생성에 실패했습니다.',true)}finally{$('generate').disabled=false;$('loading').classList.remove('active')}}
+  $('prompt').addEventListener('input',updateCount);$('generate').addEventListener('click',generate);$('reset').addEventListener('click',()=>{$('prompt').value=initial;updateCount();setStatus('기본 프롬프트로 되돌렸습니다.')});updateCount();
+</script>
+</body>
+</html>

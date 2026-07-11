@@ -70,7 +70,7 @@ class MelodyAliasPreviewPlayer {
     }
 
     private fun synthesize(notes: List<String>, rhythmMs: List<Int>, tone: String): ShortArray {
-        val silenceSamples = (SAMPLE_RATE * 0.025).toInt()
+        val silenceSamples = (SAMPLE_RATE * 0.035).toInt()
         val totalSamples = notes.indices.sumOf { index ->
             val durationMs = rhythmMs.getOrElse(index) { 140 }
             (SAMPLE_RATE * durationMs / 1000) + silenceSamples
@@ -81,12 +81,27 @@ class MelodyAliasPreviewPlayer {
             val durationMs = rhythmMs.getOrElse(index) { 140 }
             val noteSamples = SAMPLE_RATE * durationMs / 1000
             val frequency = noteFrequency(note)
+            val pluckBuffer = if (isTone(tone, "기타", "guitar")) {
+                DoubleArray((SAMPLE_RATE / frequency).toInt().coerceAtLeast(2)) { position ->
+                    pseudoNoise(position + index * 97)
+                }
+            } else {
+                null
+            }
             repeat(noteSamples) { sampleIndex ->
                 val t = sampleIndex.toDouble() / SAMPLE_RATE
                 val phase = 2.0 * PI * frequency * t
                 val progress = sampleIndex.toDouble() / noteSamples.coerceAtLeast(1)
                 val envelope = envelope(progress, tone)
-        val wave = waveform(phase, tone)
+                val wave = if (pluckBuffer != null) {
+                    val position = sampleIndex % pluckBuffer.size
+                    val next = (position + 1) % pluckBuffer.size
+                    val value = pluckBuffer[position]
+                    pluckBuffer[position] = (value + pluckBuffer[next]) * 0.493
+                    value
+                } else {
+                    waveform(phase, t, tone)
+                }
                 output[cursor + sampleIndex] = (wave * envelope * 0.64 * Short.MAX_VALUE)
                     .toInt()
                     .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
@@ -97,21 +112,34 @@ class MelodyAliasPreviewPlayer {
         return output
     }
 
-    private fun waveform(phase: Double, tone: String): Double = when (tone) {
-        "피아노" -> sin(phase) * 0.72 + sin(phase * 2.0) * 0.18 + sin(phase * 3.0) * 0.08
-        "기타" -> triangle(phase) * 0.76 + sin(phase * 2.0) * 0.12
-        "벨" -> sin(phase) * 0.64 + sin(phase * 2.7) * 0.24 + sin(phase * 4.2) * 0.12
-        "오르골" -> sin(phase) * 0.56 + sin(phase * 3.0) * 0.26 + sin(phase * 5.0) * 0.1
-        "신스패드" -> sin(phase) * 0.48 + triangle(phase) * 0.28
-        else -> sin(phase) * 0.56 + square(phase) * 0.24
+    private fun waveform(phase: Double, time: Double, tone: String): Double = when {
+        isTone(tone, "피아노", "piano") ->
+            sin(phase) * 0.70 + sin(phase * 2.0) * 0.18 + sin(phase * 3.0) * 0.07
+        isTone(tone, "벨", "bell") ->
+            sin(phase) * 0.55 * kotlin.math.exp(-time * 2.3) +
+                sin(phase * 2.76) * 0.28 * kotlin.math.exp(-time * 3.8) +
+                sin(phase * 5.4) * 0.17 * kotlin.math.exp(-time * 6.2)
+        isTone(tone, "오르골", "glass") ->
+            sin(phase) * 0.60 + sin(phase * 3.5) * 0.20 * kotlin.math.exp(-time * 3.0) +
+                sin(phase * 6.0) * 0.06 * kotlin.math.exp(-time * 5.0)
+        isTone(tone, "신스패드", "pad") ->
+            sin(phase) * 0.62 + sin(phase * 1.005) * 0.18 + triangle(phase * 0.5) * 0.08
+        isTone(tone, "전자음", "synth", "electronic") ->
+            sin(phase) * 0.68 + sin(phase * 1.5) * 0.14 + triangle(phase) * 0.08
+        else -> sin(phase) * 0.76 + triangle(phase) * 0.10
     }
 
     private fun envelope(progress: Double, tone: String): Double {
-        val attack = if (tone == "피아노" || tone == "기타") 0.06 else 0.025
+        val attack = when {
+            isTone(tone, "신스패드", "pad") -> 0.20
+            isTone(tone, "피아노", "piano") -> 0.04
+            else -> 0.012
+        }
         val attackGain = (progress / attack).coerceIn(0.0, 1.0)
-        val decay = when (tone) {
-            "벨" -> (1.0 - progress).coerceAtLeast(0.0).pow(1.8)
-            "기타" -> (1.0 - progress).coerceAtLeast(0.0).pow(1.4)
+        val decay = when {
+            isTone(tone, "벨", "bell") -> (1.0 - progress).coerceAtLeast(0.0).pow(1.25)
+            isTone(tone, "기타", "guitar") -> (1.0 - progress).coerceAtLeast(0.0).pow(1.8)
+            isTone(tone, "신스패드", "pad") -> (1.0 - progress * 0.28).coerceAtLeast(0.0)
             else -> (1.0 - progress * 0.72).coerceAtLeast(0.0)
         }
         return attackGain * decay
@@ -131,6 +159,14 @@ class MelodyAliasPreviewPlayer {
     private fun triangle(phase: Double): Double {
         val normalized = phase / (2.0 * PI)
         return 2.0 * abs(2.0 * (normalized - kotlin.math.floor(normalized + 0.5))) - 1.0
+    }
+
+    private fun isTone(tone: String, vararg names: String): Boolean =
+        names.any { tone.contains(it, ignoreCase = true) }
+
+    private fun pseudoNoise(seed: Int): Double {
+        val value = sin(seed * 12.9898) * 43_758.5453
+        return (value - kotlin.math.floor(value)) * 2.0 - 1.0
     }
 
     private companion object {

@@ -48,6 +48,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -91,6 +93,8 @@ import com.example.myapplication.ui.theme.MossSurfaceHigh
 import com.example.myapplication.ui.theme.MutedMint
 import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
+import com.example.myapplication.ui.MelodyAliasGenerationState
+import com.example.myapplication.ui.LyriaGenerationState
 import kotlin.math.roundToInt
 
 @Composable
@@ -773,36 +777,188 @@ fun MyScreen(
 
 @Composable
 fun MelodyAliasScreen(
+    onBack: () -> Unit,
+    generationState: LyriaGenerationState,
+    onGenerate: (Map<String, Int>, String, List<String>, Int, Int) -> Unit,
+    onPlayFull: () -> Unit,
+    onPlaySelection: (Float) -> Unit,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by rememberSaveable { mutableStateOf<String?>("mood") }
+    var calm by rememberSaveable { mutableFloatStateOf(60f) }
+    var bright by rememberSaveable { mutableFloatStateOf(45f) }
+    var dreamy by rememberSaveable { mutableFloatStateOf(70f) }
+    var dark by rememberSaveable { mutableFloatStateOf(20f) }
+    var genre by rememberSaveable { mutableStateOf("R&B") }
+    var instruments by rememberSaveable { mutableStateOf(setOf("Piano", "Synth")) }
+    var pitch by rememberSaveable { mutableFloatStateOf(50f) }
+    var speed by rememberSaveable { mutableFloatStateOf(50f) }
+    var clipStart by rememberSaveable { mutableFloatStateOf(10f) }
+    val isLoading = generationState is LyriaGenerationState.Loading
+
+    Column(modifier = modifier.fillMaxSize()) {
+        BackHeader(onBack = onBack, title = "멜로디 별칭", subtitle = "나의 바이브를 담은 30초 음악")
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                CollapsibleOption("mood", "무드", "감정의 비율을 조절해 주세요", expanded, { expanded = it }) {
+                    MoodAmount("Calm", calm) { calm = it }
+                    MoodAmount("Bright", bright) { bright = it }
+                    MoodAmount("Dreamy", dreamy) { dreamy = it }
+                    MoodAmount("Dark", dark) { dark = it }
+                }
+            }
+            item {
+                CollapsibleOption("genre", "장르", genre, expanded, { expanded = it }) {
+                    val genres = listOf("팝", "힙합", "R&B", "밴드사운드", "전자음악", "어쿠스틱", "재즈", "락", "클래식")
+                    genres.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            row.forEach { item ->
+                                FilterChip(selected = genre == item, onClick = { genre = item }, label = { Text(item) }, modifier = Modifier.weight(1f))
+                            }
+                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            }
+            item {
+                CollapsibleOption("tone", "톤", "중심이 될 악기를 여러 개 고를 수 있어요", expanded, { expanded = it }) {
+                    Text("선택한 악기가 조금 더 부각되며, 곡을 풍성하게 만드는 다른 악기도 함께 들어갈 수 있어요.", color = MutedMint, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    listOf("Piano", "Guitar", "Synth", "Bass", "Drums", "Bell", "Strings").chunked(2).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { tone ->
+                                FilterChip(
+                                    selected = tone in instruments,
+                                    onClick = { instruments = if (tone in instruments) instruments - tone else instruments + tone },
+                                    label = { Text(tone) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            if (row.size == 1) Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            item {
+                CollapsibleOption("pitch", "피치", "${pitch.roundToInt()} · 낮고 묵직함 ↔ 높고 공기감", expanded, { expanded = it }) {
+                    Slider(value = pitch, onValueChange = { pitch = it }, valueRange = 0f..100f)
+                }
+            }
+            item {
+                CollapsibleOption("speed", "스피드", "${speed.roundToInt()} · 느리고 여유로움 ↔ 빠르고 에너지", expanded, { expanded = it }) {
+                    Slider(value = speed, onValueChange = { speed = it }, valueRange = 0f..100f)
+                }
+            }
+            item {
+                Button(
+                    onClick = {
+                        onGenerate(
+                            mapOf("Calm" to calm.roundToInt(), "Bright" to bright.roundToInt(), "Dreamy" to dreamy.roundToInt(), "Dark" to dark.roundToInt()),
+                            genre,
+                            instruments.toList(),
+                            pitch.roundToInt(),
+                            speed.roundToInt()
+                        )
+                    },
+                    enabled = !isLoading && instruments.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth().height(54.dp)
+                ) { Text(if (isLoading) "음악 생성 중" else "30초 음악 만들기") }
+            }
+            if (isLoading) item { LyriaLoadingPanel() }
+            if (generationState is LyriaGenerationState.Error) item {
+                AppPanel(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .35f)) {
+                    Text("생성에 실패했어요", style = MaterialTheme.typography.titleMedium)
+                    Text(generationState.message, color = MutedMint)
+                }
+            }
+            if (generationState is LyriaGenerationState.Success) {
+                item {
+                    AppPanel(color = SignalGreen.copy(alpha = .09f)) {
+                        Text("30초 음악이 완성됐어요", color = SignalGreen, style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(onClick = onPlayFull, modifier = Modifier.fillMaxWidth()) { Text("전체 30초 듣기") }
+                    }
+                }
+                item {
+                    AppPanel {
+                        Text("사용할 5초 선택", style = MaterialTheme.typography.titleMedium)
+                        Text("막대를 드래그해 시작 지점을 정하세요.", color = MutedMint)
+                        Spacer(Modifier.height(14.dp))
+                        Text("${"%.1f".format(clipStart)}초 - ${"%.1f".format(clipStart + 5f)}초", color = SignalGreen, fontWeight = FontWeight.Bold)
+                        Slider(value = clipStart, onValueChange = { clipStart = it }, valueRange = 0f..25f, steps = 49)
+                        Row(modifier = Modifier.fillMaxWidth()) { Text("0초", color = MutedMint); Spacer(Modifier.weight(1f)); Text("30초", color = MutedMint) }
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { onPlaySelection(clipStart) }, modifier = Modifier.fillMaxWidth()) { Text("선택한 5초 듣기") }
+                    }
+                }
+                item { OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) { Text("조건을 바꿔 다시 만들기") } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleOption(
+    id: String,
+    title: String,
+    summary: String,
+    expanded: String?,
+    onExpanded: (String?) -> Unit,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    AppPanel {
+        Row(modifier = Modifier.fillMaxWidth().clickable { onExpanded(if (expanded == id) null else id) }, verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(summary, color = MutedMint, style = MaterialTheme.typography.bodySmall) }
+            Text(if (expanded == id) "−" else "+", style = MaterialTheme.typography.headlineSmall)
+        }
+        if (expanded == id) { Spacer(Modifier.height(14.dp)); content() }
+    }
+}
+
+@Composable
+private fun MoodAmount(label: String, value: Float, onChange: (Float) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) { Text(label, modifier = Modifier.width(72.dp)); Slider(value = value, onValueChange = onChange, valueRange = 0f..100f, modifier = Modifier.weight(1f)); Text(value.roundToInt().toString(), modifier = Modifier.width(32.dp)) }
+}
+
+@Composable
+private fun LyriaLoadingPanel() {
+    AppPanel(color = SignalGreen.copy(alpha = .10f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(modifier = Modifier.size(30.dp), color = SignalGreen, strokeWidth = 3.dp); Spacer(Modifier.width(14.dp)); Column { Text("나만의 음악을 만드는 중", style = MaterialTheme.typography.titleMedium); Text("Lyria 3가 30초 곡을 작곡하고 있어요.", color = MutedMint) } }
+        Spacer(Modifier.height(14.dp)); LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SignalGreen)
+    }
+}
+
+@Composable
+private fun LegacyMelodyAliasScreen(
     profile: ProfileSettings,
     candidates: List<MelodyAliasCandidate>,
     onBack: () -> Unit,
     onPreview: (MelodyAliasCandidate) -> Unit,
     onPreviewTone: (String) -> Unit,
-    onSelect: (String) -> Unit,
+    generationState: MelodyAliasGenerationState,
+    onGenerate: (String, String, String, String) -> Unit,
+    onResetGeneration: () -> Unit,
+    onSelect: (MelodyAliasCandidate) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
-    var requestedCandidates by rememberSaveable { mutableStateOf(false) }
     var selectedMood by rememberSaveable { mutableStateOf(profile.melodyAliasMood) }
     var selectedTone by rememberSaveable { mutableStateOf(profile.melodyAliasTone) }
     var selectedPitch by rememberSaveable { mutableStateOf(0.5f) }
     var selectedTempo by rememberSaveable { mutableStateOf(tempoLabel(profile.melodyAliasTempo)) }
 
-    val currentCandidate = candidates.firstOrNull { it.id == profile.melodyAliasId }
-        ?: candidates.firstOrNull { it.notes == profile.melodyNotes }
+    val generatedCandidates = (generationState as? MelodyAliasGenerationState.Success)?.candidates.orEmpty()
+    val currentCandidate = (candidates + generatedCandidates).firstOrNull { it.id == profile.melodyAliasId }
+        ?: (candidates + generatedCandidates).firstOrNull { it.notes == profile.melodyNotes }
     val moods = (listOf("밝음", "몽환", "차분", "설렘", "귀여움", "에너지") +
         candidates.map { it.mood }).distinct()
     val tones = (listOf("전자음", "피아노", "기타", "벨", "오르골", "신스패드") +
         candidates.map { it.tone }).distinct()
-    val rankedCandidates = remember(candidates, selectedMood, selectedTone, selectedPitch, selectedTempo) {
-        candidates
-            .sortedWith(
-                compareByDescending<MelodyAliasCandidate> {
-                    melodyCandidateScore(it, selectedMood, selectedTone, selectedPitch, selectedTempo)
-                }.thenBy { kotlin.math.abs(it.tempo - tempoTarget(selectedTempo)) }
-            )
-            .take(5)
-    }
 
     Column(modifier = modifier.fillMaxSize()) {
         BackHeader(onBack = onBack, title = "멜로디 별칭", subtitle = "짧고 또렷한 알림음 시그널")
@@ -837,7 +993,7 @@ fun MelodyAliasScreen(
                         Button(
                             onClick = {
                                 editing = true
-                                requestedCandidates = false
+                                onResetGeneration()
                             },
                             modifier = Modifier.weight(1f)
                         ) {
@@ -847,7 +1003,7 @@ fun MelodyAliasScreen(
                 }
             }
 
-            if (editing && !requestedCandidates) {
+            if (editing && generationState !is MelodyAliasGenerationState.Success) {
                 item { SectionLabel("1. 원하는 무드") }
                 item {
                     ChoiceGrid(
@@ -856,7 +1012,7 @@ fun MelodyAliasScreen(
                         columns = 2,
                         onSelect = {
                             selectedMood = it
-                            requestedCandidates = false
+                            onResetGeneration()
                         }
                     )
                 }
@@ -867,7 +1023,7 @@ fun MelodyAliasScreen(
                         selected = selectedTone,
                         onSelect = {
                             selectedTone = it
-                            requestedCandidates = false
+                            onResetGeneration()
                             onPreviewTone(it)
                         }
                     )
@@ -878,7 +1034,7 @@ fun MelodyAliasScreen(
                         value = selectedPitch,
                         onValueChange = {
                             selectedPitch = it
-                            requestedCandidates = false
+                            onResetGeneration()
                         }
                     )
                 }
@@ -890,30 +1046,50 @@ fun MelodyAliasScreen(
                         columns = 3,
                         onSelect = {
                             selectedTempo = it
-                            requestedCandidates = false
+                            onResetGeneration()
                         }
                     )
                 }
                 item {
                     Button(
-                        onClick = { requestedCandidates = true },
+                        onClick = {
+                            onGenerate(
+                                selectedMood,
+                                selectedTone,
+                                pitchLabel(selectedPitch),
+                                tempoRange(selectedTempo)
+                            )
+                        },
+                        enabled = generationState !is MelodyAliasGenerationState.Loading,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
                     ) {
-                        Text("선택 완료")
+                        Text("AI 멜로디 3개 만들기")
                     }
                 }
-                if (!requestedCandidates) {
+                if (generationState is MelodyAliasGenerationState.Idle) {
                     item {
                         AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
-                            Text("선택 완료를 누르면 후보를 만들어요", style = MaterialTheme.typography.titleMedium)
-                            Text("나중에는 이 지점에서 LLM API를 호출하고, 지금은 DB 데모 후보를 불러옵니다.", color = MutedMint)
+                            Text("선택한 느낌으로 새로운 알림음을 만들어요", style = MaterialTheme.typography.titleMedium)
+                            Text("무드, 톤, 피치, 속도를 OpenAI에 보내 후보 3개를 생성합니다.", color = MutedMint)
+                        }
+                    }
+                }
+                if (generationState is MelodyAliasGenerationState.Loading) {
+                    item { MelodyAliasLoadingPanel() }
+                }
+                if (generationState is MelodyAliasGenerationState.Error) {
+                    item {
+                        AppPanel(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)) {
+                            Text("멜로디 생성에 실패했어요", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(6.dp))
+                            Text(generationState.message, color = MutedMint)
                         }
                     }
                 }
             }
-            if (editing && requestedCandidates) {
+            if (editing && generationState is MelodyAliasGenerationState.Success) {
                 item {
                     AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
                         Text("선택한 조건", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
@@ -926,39 +1102,47 @@ fun MelodyAliasScreen(
                         }
                         Spacer(Modifier.height(12.dp))
                         OutlinedButton(
-                            onClick = { requestedCandidates = false },
+                            onClick = onResetGeneration,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("조건 다시 고르기")
                         }
                     }
                 }
-                if (requestedCandidates) {
-                    item { SectionLabel("추천 후보 5개") }
-                }
-                if (requestedCandidates && rankedCandidates.isEmpty()) {
-                    item {
-                        AppPanel {
-                            Text("아직 DB 후보가 준비되지 않았어요", style = MaterialTheme.typography.titleMedium)
-                            Text("데모 데이터가 로드되면 이곳에 후보가 표시됩니다.", color = MutedMint)
-                        }
-                    }
-                } else if (requestedCandidates) {
-                    items(rankedCandidates, key = { it.id }) { candidate ->
+                item { SectionLabel("AI 추천 후보 3개") }
+                items(generatedCandidates, key = { it.id }) { candidate ->
                         MelodyAliasCandidateCard(
                             candidate = candidate,
                             selected = candidate.id == profile.melodyAliasId,
                             onPreview = { onPreview(candidate) },
                             onSelect = {
-                                onSelect(candidate.id)
+                                onSelect(candidate)
                                 editing = false
-                                requestedCandidates = false
                             }
                         )
-                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MelodyAliasLoadingPanel() {
+    AppPanel(color = SignalGreen.copy(alpha = 0.10f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(30.dp),
+                color = SignalGreen,
+                strokeWidth = 3.dp
+            )
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text("멜로디 생성 중", style = MaterialTheme.typography.titleMedium)
+                Text("AI가 어울리는 음표와 리듬을 조합하고 있어요.", color = MutedMint)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SignalGreen)
     }
 }
 
@@ -1242,6 +1426,12 @@ private fun tempoTarget(label: String): Int = when (label) {
     "느림" -> 96
     "빠름" -> 148
     else -> 124
+}
+
+private fun tempoRange(label: String): String = when (label) {
+    "느림" -> "80-100 BPM"
+    "빠름" -> "130-160 BPM"
+    else -> "100-130 BPM"
 }
 
 @Composable

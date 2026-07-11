@@ -26,6 +26,9 @@ class OpsController(private val jdbc: JdbcTemplate) {
     @GetMapping("", "/")
     fun index() = RedirectView("/internal/ops/index.html")
 
+    @GetMapping("/melody-prompt", "/melody-prompt/")
+    fun melodyPrompt() = "forward:/internal/ops/melody-prompt/index.html"
+
     @GetMapping("/api/summary")
     @ResponseBody
     fun summary(): OpsSummary {

@@ -29,6 +29,7 @@ object MelodyApiContract {
         const val CHAT_HISTORY = "/api/v1/chat/rooms/{roomId}/messages"
         const val NOTIFICATIONS = "/api/v1/notifications"
         const val OFFLINE_SYNC = "/api/v1/offline-exchanges/sync"
+        const val MELODY_ALIAS_GENERATE = "/api/v1/melody-alias/generate"
     }
 
     object Send {

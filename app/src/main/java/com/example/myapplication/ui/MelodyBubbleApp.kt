@@ -272,13 +272,14 @@ fun MelodyBubbleApp(
                 )
             }
             composable(Route.MELODY_ALIAS) {
+                val lyriaState by viewModel.lyriaGenerationState.collectAsState()
                 MelodyAliasScreen(
-                    profile = state.profile,
-                    candidates = state.melodyAliasCandidates,
                     onBack = { navController.popBackStack() },
-                    onPreview = viewModel::previewMelodyAlias,
-                    onPreviewTone = viewModel::previewMelodyTone,
-                    onSelect = viewModel::selectMelodyAlias,
+                    generationState = lyriaState,
+                    onGenerate = viewModel::generateLyriaSong,
+                    onPlayFull = viewModel::playLyriaSong,
+                    onPlaySelection = viewModel::playLyriaSelection,
+                    onReset = viewModel::resetLyriaSong,
                     modifier = Modifier.safeDrawingPadding()
                 )
             }
