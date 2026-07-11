@@ -4,17 +4,25 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.core.model.MainTab
+import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.audio.MelodyAliasPreviewPlayer
 import com.example.myapplication.audio.LyriaClipPlayer
 import com.example.myapplication.data.DemoMelodyRepository
+import com.example.myapplication.MelodyApplication
 import com.example.myapplication.data.MelodyRepository
+import com.example.myapplication.data.presence.PresenceSyncCoordinator
+import com.example.myapplication.data.realtime.RealtimeConnectionState
+import com.example.myapplication.data.realtime.RealtimeDestinations
+import com.example.myapplication.data.realtime.RealtimeEvent
 import com.example.myapplication.data.remote.AuthRepository
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.BuildingLoungeRepository
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
+import com.example.myapplication.data.remote.CreateLoungeCardRequestDto
+import com.example.myapplication.data.remote.SubLoungeSnapshotDto
 import com.example.myapplication.data.remote.MelodyAliasGenerateRequest
 import com.example.myapplication.data.remote.MelodyAliasRepository
 import com.example.myapplication.data.remote.LyriaAliasGenerateRequest
@@ -24,7 +32,12 @@ import com.example.myapplication.data.remote.TokenResponse
 import com.example.myapplication.data.local.SecureTokenStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 sealed interface LoginUiState {
     data object Idle : LoginUiState
@@ -63,6 +76,10 @@ data class BuildingLoungeUiState(
     val lounges: List<BuildingLoungeSummaryDto> = emptyList(),
     val enteredLoungeId: String? = null,
     val subLounges: List<com.example.myapplication.data.remote.SubLoungeSummaryDto> = emptyList(),
+    val selectedSubLoungeId: String? = null,
+    val subLoungeSnapshot: SubLoungeSnapshotDto? = null,
+    val detailLoading: Boolean = false,
+    val realtimeState: ConnectionState = ConnectionState.OFFLINE,
     val message: String? = null
 )
 
@@ -73,11 +90,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val melodyAliasRepository by lazy { MelodyAliasRepository() }
     private val lyriaRepository by lazy { LyriaMusicRepository() }
     private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
+    private val realtimeClient = (application as MelodyApplication).realtimeClient
+    private val presenceCoordinator = PresenceSyncCoordinator.get(application)
     private val lyriaClipPlayer = LyriaClipPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     @Volatile private var accessToken: String? = null
     private var refreshToken: String? = null
     private var removeAccessTokenListener: (() -> Unit)? = null
+    private var restoredSubLoungeSession = false
+    private var loungeFallbackJob: Job? = null
+    private var loungeSnapshotJob: Job? = null
+    private var latestSubLoungeSnapshotAt: String? = null
     private val tokenStore = SecureTokenStore(application)
     private val _melodyAliasGenerationState = MutableStateFlow<MelodyAliasGenerationState>(MelodyAliasGenerationState.Idle)
     private val _lyriaGenerationState = MutableStateFlow<LyriaGenerationState>(LyriaGenerationState.Idle)
@@ -94,6 +117,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope.launch {
                 accessToken = refreshedToken
                 repository.refreshSession(refreshedToken)
+                restoreSubLoungeSession(refreshedToken)
             }
         }
         ApiClient.configureSession(tokenStore) {
@@ -104,6 +128,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             if (storedRefresh == null) {
                 accessToken = stored.accessToken
                 repository.authenticate(stored.accessToken)
+                restoreSubLoungeSession(stored.accessToken)
                 _loginState.value = LoginUiState.Success(
                     expiresInSeconds = 0,
                     onboardingComplete = repository.state.value.isOnboardingComplete,
@@ -119,6 +144,39 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+        viewModelScope.launch {
+            realtimeClient.events.collect { event ->
+                if (event is RealtimeEvent.SubLoungeUpdated &&
+                    event.destination == _buildingLoungeState.value.selectedSubLoungeId
+                        ?.let(RealtimeDestinations::subLounge)
+                ) {
+                    refreshSelectedSubLounge(silent = true)
+                }
+            }
+        }
+        viewModelScope.launch {
+            realtimeClient.connectionState.collect { state ->
+                val connection = when (state) {
+                    RealtimeConnectionState.Disconnected -> ConnectionState.OFFLINE
+                    is RealtimeConnectionState.Connecting -> ConnectionState.CONNECTING
+                    is RealtimeConnectionState.Connected -> ConnectionState.LIVE
+                    is RealtimeConnectionState.Reconnecting -> ConnectionState.RECONNECTING
+                }
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(realtimeState = connection)
+                loungeFallbackJob?.cancel()
+                loungeFallbackJob = null
+                if (state is RealtimeConnectionState.Connected) {
+                    refreshSelectedSubLounge(silent = true)
+                } else {
+                    loungeFallbackJob = viewModelScope.launch {
+                        while (isActive) {
+                            delay(10_000)
+                            refreshSelectedSubLounge(silent = true)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun acceptSession(response: TokenResponse) {
@@ -126,6 +184,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         refreshToken = response.refreshToken
         tokenStore.save(response.accessToken, response.refreshToken)
         repository.authenticate(response.accessToken)
+        restoreSubLoungeSession(response.accessToken)
         if (response.onboardingComplete) repository.completeOnboarding()
         _loginState.value = LoginUiState.Success(
             response.expiresInSeconds,
@@ -171,8 +230,11 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun clearSession() {
+        clearSelectedSubLounge()
         repository.logout()
         accessToken = null
+        restoredSubLoungeSession = false
+        latestSubLoungeSnapshotAt = null
         refreshToken = null
         tokenStore.clear()
         _loginState.value = LoginUiState.Idle
@@ -403,10 +465,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             buildingLoungeRepository.heartbeat(token, loungeId, latitude, longitude, accuracyMeters)
                 .onSuccess { response ->
+                    if (response.forcedExit) clearSelectedSubLounge()
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
                         enteredLoungeId = if (response.forcedExit) null else loungeId,
                         subLounges = if (response.forcedExit) emptyList() else _buildingLoungeState.value.subLounges,
+                        selectedSubLoungeId = if (response.forcedExit) null else _buildingLoungeState.value.selectedSubLoungeId,
+                        subLoungeSnapshot = if (response.forcedExit) null else _buildingLoungeState.value.subLoungeSnapshot,
                         message = if (response.forcedExit) "You left the building lounge." else null
                     )
                 }
@@ -417,10 +482,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val token = accessToken ?: return
         val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
         viewModelScope.launch {
+            clearSelectedSubLounge()
             buildingLoungeRepository.leave(token, loungeId)
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 enteredLoungeId = null,
                 subLounges = emptyList(),
+                selectedSubLoungeId = null,
+                subLoungeSnapshot = null,
                 message = "Left the lounge."
             )
         }
@@ -431,11 +499,10 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
         viewModelScope.launch {
             buildingLoungeRepository.createSubLounge(token, loungeId, title, style)
-                .onSuccess {
+                .onSuccess { created ->
                     val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         subLounges = subLounges,
-                        message = "Created ${it.title}."
                     )
                 }
                 .onFailure {
