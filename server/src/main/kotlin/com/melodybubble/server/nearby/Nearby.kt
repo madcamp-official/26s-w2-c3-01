@@ -383,6 +383,91 @@ class NearbyService(
         sourceUserId,
         sourceUserId,
         sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+    )
+
+    private fun popularTracksFor(userId: UUID): List<PopularTrack> {
+        val radius = discoveryRadius(userId)
+        return jdbc.query(
+            """
+            with my_location as (
+              select location.point
+              from current_locations location
+              join presence_sessions session on session.id=location.session_id
+              where session.user_id=? and session.expires_at>now() and location.expires_at>now()
+              order by location.updated_at desc limit 1
+            ), candidate_users as (
+              select distinct session.user_id,
+                privacy.discoverability_scope,privacy.music_visibility,privacy.share_music,
+                (
+                  exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=session.user_id)
+                  and exists(select 1 from user_follows f where f.follower_id=session.user_id and f.followed_id=?)
+                ) is_mutual
+              from my_location mine
+              join current_locations location
+                on location.expires_at>now()
+               and ST_DWithin(mine.point::geography,location.point::geography,?)
+              join presence_sessions session
+                on session.id=location.session_id and session.expires_at>now() and session.user_id<>?
+              join user_privacy_settings privacy on privacy.user_id=session.user_id
+              where privacy.discoverable=true
+                and privacy.discoverability_scope<>'HIDDEN'
+                and not exists(
+                  select 1 from user_blocks block
+                  where (block.blocker_id=? and block.blocked_id=session.user_id)
+                     or (block.blocker_id=session.user_id and block.blocked_id=?)
+                )
+            ), visible_tracks as (
+              select candidate.user_id,status.track_title,status.artist_name
+              from candidate_users candidate
+              join music_statuses status
+                on status.user_id=candidate.user_id and status.is_playing=true and status.expires_at>now()
+              where (
+                  candidate.discoverability_scope='NEARBY'
+                  or (candidate.discoverability_scope='MUTUALS' and candidate.is_mutual)
+                )
+                and candidate.share_music=true
+                and (
+                  candidate.music_visibility='TITLE_ARTIST'
+                  or (candidate.music_visibility='MUTUALS' and candidate.is_mutual)
+                )
+            )
+            select visible.track_title,visible.artist_name,
+              count(distinct visible.user_id) listener_count,
+              (
+                select count(*) from nearby_reactions reaction
+                join visible_tracks reacted_listener on reacted_listener.user_id=reaction.recipient_id
+                where reaction.track_title=visible.track_title
+                  and reaction.track_artist=visible.artist_name
+                  and reacted_listener.track_title=visible.track_title
+                  and reacted_listener.artist_name=visible.artist_name
+              ) reaction_count
+            from visible_tracks visible
+            group by visible.track_title,visible.artist_name
+            order by listener_count desc,reaction_count desc,visible.track_title,visible.artist_name
+            limit 20
+            """.trimIndent(),
+            { rs, _ ->
+                PopularTrack(
+                    title = rs.getString("track_title"),
+                    artist = rs.getString("artist_name"),
+                    listenerCount = rs.getInt("listener_count"),
+                    reactionCount = rs.getInt("reaction_count"),
+                )
+            },
+            userId,
+            userId,
+            userId,
+            radius,
+            userId,
+            userId,
+            userId,
+        )
     }
 
     private fun discoveryRadius(userId: UUID): Int = (jdbc.queryForObject(
@@ -436,6 +521,9 @@ class NearbyController(private val nearby: NearbyService) {
     fun music(principal: Principal, @RequestBody update: MusicUpdate) =
         nearby.updateMusic(UUID.fromString(principal.name), update)
 
+    @GetMapping("/popular-tracks")
+    fun popularTracks(principal: Principal) = nearby.popularTracks(UUID.fromString(principal.name))
+
     @DeleteMapping("/presence/{clientSessionId}")
     fun stop(principal: Principal, @PathVariable clientSessionId: String) =
         nearby.stop(UUID.fromString(principal.name), clientSessionId)
@@ -450,10 +538,10 @@ class NearbyController(private val nearby: NearbyService) {
 @org.springframework.stereotype.Controller
 class PresenceMessageController(
     private val nearby: NearbyService,
-    private val messaging: SimpMessagingTemplate,
+    private val realtime: RealtimePublisher,
 ) {
     @org.springframework.messaging.simp.annotation.SendToUser("/queue/ack")
-    fun updateLocation(update: LocationUpdate, principal: Principal): Envelope<Map<String, String>> {
+    fun updateLocation(update: LocationUpdate, principal: Principal): RealtimeEnvelope<Map<String, String>> {
         val userId = UUID.fromString(principal.name)
         nearby.updateLocation(userId, update)
         messaging.convertAndSendToUser(
