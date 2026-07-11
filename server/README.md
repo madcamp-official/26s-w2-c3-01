@@ -20,6 +20,8 @@ Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Comp
 - 인증된 `GET /api/v1/nearby/snapshot`, `GET /api/v1/nearby/popular-tracks`, `GET /api/v1/nearby/{handle}`
 - `POST /api/v1/nearby/{handle}/reactions`, 재연결 복구용 `GET /api/v1/nearby/reactions`, 음악 상태 변경 실시간 push
 - 채팅 메시지 저장·읽음 처리와 `/user/queue/chat` 실시간 이벤트
+- 위치 기반 건물 라운지 입장·heartbeat와 하위 라운지 snapshot·카드·리액션·투표
+- 참가자 전용 `/topic/sub-lounges/{id}` 실시간 이벤트와 구독 권한 검사
 - `GET /api/v1/rooms`, `GET /api/v1/rooms/{roomId}`
 - STOMP `/ws`: `Authorization: Bearer {accessToken}` CONNECT 인증, 10초 heartbeat
 - 개인 queue: `/user/queue/chat|reactions|nearby|notifications|errors|ack`
