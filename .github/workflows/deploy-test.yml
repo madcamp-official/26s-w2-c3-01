@@ -82,21 +82,37 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Update ECS Express service
+        id: deploy
         env:
           IMAGE: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.ECR_REPOSITORY }}:${{ github.sha }}
         run: |
-          jq --arg image "$IMAGE" '.primaryContainer.image = $image' \
-            server/deploy/ecs-express-service.json > /tmp/ecs-deploy.json
-          aws ecs update-express-gateway-service \
-            --cli-input-json file:///tmp/ecs-deploy.json
-      - name: Wait for ECS deployment
-        run: |
-          sleep 5
-          deployment_arn="$(aws ecs list-service-deployments \
+          previous_arn="$(aws ecs list-service-deployments \
             --service "${{ vars.ECS_SERVICE_ARN }}" \
             --max-results 1 \
             --query 'serviceDeployments[0].serviceDeploymentArn' \
             --output text)"
+          jq --arg image "$IMAGE" '.primaryContainer.image = $image' \
+            server/deploy/ecs-express-service.json > /tmp/ecs-deploy.json
+          aws ecs update-express-gateway-service \
+            --cli-input-json file:///tmp/ecs-deploy.json
+          for attempt in $(seq 1 30); do
+            deployment_arn="$(aws ecs list-service-deployments \
+              --service "${{ vars.ECS_SERVICE_ARN }}" \
+              --max-results 1 \
+              --query 'serviceDeployments[0].serviceDeploymentArn' \
+              --output text)"
+            if [[ "$deployment_arn" != "$previous_arn" && "$deployment_arn" != "None" ]]; then
+              echo "deployment_arn=$deployment_arn" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Waiting for the new deployment to become visible ($attempt/30)"
+            sleep 5
+          done
+          echo "AWS did not expose a new deployment ARN" >&2
+          exit 1
+      - name: Wait for ECS deployment
+        run: |
+          deployment_arn="${{ steps.deploy.outputs.deployment_arn }}"
           echo "Monitoring $deployment_arn"
           for attempt in $(seq 1 80); do
             status="$(aws ecs describe-service-deployments \
