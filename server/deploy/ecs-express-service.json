@@ -29,6 +29,10 @@
       {
         "name": "OPS_USERNAME",
         "value": "ops"
+      },
+      {
+        "name": "GEMINI_MUSIC_MODEL",
+        "value": "lyria-3-clip-preview"
       }
     ],
     "secrets": [
@@ -43,6 +47,10 @@
       {
         "name": "OPS_PASSWORD",
         "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:OPS_PASSWORD::"
+      },
+      {
+        "name": "GEMINI_API_KEY",
+        "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:GEMINI_API_KEY::"
       }
     ]
   },
