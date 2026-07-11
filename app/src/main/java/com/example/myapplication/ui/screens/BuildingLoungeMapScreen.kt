@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,13 +29,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.Radar
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,6 +74,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.myapplication.BuildConfig
 import com.example.myapplication.R
+import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
 import com.example.myapplication.data.remote.SubLoungeSummaryDto
 import com.example.myapplication.ui.BuildingLoungeUiState
@@ -105,6 +110,12 @@ fun BuildingLoungeMapScreen(
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
     onCreateSubLounge: (String, String?) -> Unit,
+    onOpenSubLounge: (String) -> Unit,
+    onLeaveSubLounge: () -> Unit,
+    onSendTrack: (String?) -> Unit,
+    onReactToCard: (String, String) -> Unit,
+    onVote: (String) -> Unit,
+    onRefreshSubLounge: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -204,7 +215,20 @@ fun BuildingLoungeMapScreen(
             onEnter = onEnter,
             onLeave = onLeave,
             onCreateSubLounge = onCreateSubLounge,
+            onOpenSubLounge = onOpenSubLounge,
             modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+
+    if (state.selectedSubLoungeId != null) {
+        SubLoungeDetailSheet(
+            state = state,
+            onDismiss = onLeaveSubLounge,
+            onLeave = onLeaveSubLounge,
+            onSendTrack = onSendTrack,
+            onReactToCard = onReactToCard,
+            onVote = onVote,
+            onRefresh = onRefreshSubLounge,
         )
     }
 }
@@ -309,6 +333,7 @@ private fun LoungeBottomSheetPanel(
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
     onCreateSubLounge: (String, String?) -> Unit,
+    onOpenSubLounge: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var createSheetVisible by remember { mutableStateOf(false) }
@@ -389,7 +414,11 @@ private fun LoungeBottomSheetPanel(
             onShowCreate = {
                 roomSheetVisible = false
                 createSheetVisible = true
-            }
+            },
+            onOpenSubLounge = { id ->
+                roomSheetVisible = false
+                onOpenSubLounge(id)
+            },
         )
     }
 }
@@ -402,7 +431,8 @@ private fun LoungeRoomsSheet(
     onDismiss: () -> Unit,
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
-    onShowCreate: () -> Unit
+    onShowCreate: () -> Unit,
+    onOpenSubLounge: (String) -> Unit,
 ) {
     val insideLounges = state.lounges.filter { it.inside }
     val entered = state.lounges.firstOrNull { it.id == state.enteredLoungeId }
@@ -459,12 +489,12 @@ private fun LoungeRoomsSheet(
                         Text("Sub lounge")
                     }
                     OutlinedButton(onClick = onLeave, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Outlined.Logout, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("Leave")
                     }
                 }
-                SubLoungeList(state.subLounges)
+                SubLoungeList(state.subLounges, onOpenSubLounge)
             }
         }
     }
@@ -508,7 +538,10 @@ private fun BuildingLoungeRow(
 }
 
 @Composable
-private fun SubLoungeList(subLounges: List<SubLoungeSummaryDto>) {
+private fun SubLoungeList(
+    subLounges: List<SubLoungeSummaryDto>,
+    onOpen: (String) -> Unit,
+) {
     if (subLounges.isEmpty()) {
         Text("No sub lounge yet. Create the first taste room.", color = MutedMint)
         return
@@ -519,7 +552,9 @@ private fun SubLoungeList(subLounges: List<SubLoungeSummaryDto>) {
     ) {
         items(subLounges, key = { it.id }) { room ->
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpen(room.id) },
                 shape = RoundedCornerShape(12.dp),
                 color = MossSurfaceHigh,
                 border = BorderStroke(1.dp, MossOutline)
@@ -534,7 +569,7 @@ private fun SubLoungeList(subLounges: List<SubLoungeSummaryDto>) {
                         Text(room.title, color = PaleMint, fontWeight = FontWeight.Bold)
                         Text(room.style ?: "Free taste room", color = MutedMint, style = MaterialTheme.typography.labelMedium)
                     }
-                    Text("${room.memberCount}", color = MutedMint)
+                    Text("${room.memberCount}명 · 입장", color = SignalGreen, fontWeight = FontWeight.Bold)
                 }
             }
         }
