@@ -48,6 +48,7 @@ import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
 import com.example.myapplication.ui.screens.LoungeDetailScreen
 import com.example.myapplication.ui.screens.LoungeListScreen
+import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MusicSelectScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
@@ -63,6 +64,7 @@ private object Route {
     const val LOUNGE_DETAIL = "lounge-detail"
     const val CHAT = "chat/{roomId}"
     const val MUSIC_SELECT = "music-select"
+    const val MELODY_ALIAS = "melody-alias"
     const val OFFLINE_EXCHANGE = "offline-exchange"
 
     fun chat(roomId: String) = "chat/$roomId"
@@ -169,6 +171,7 @@ fun MelodyBubbleApp(
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
                     onOpenMusicSelect = { navController.navigate(Route.MUSIC_SELECT) },
+                    onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenNotificationAccess = {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     },
@@ -268,6 +271,17 @@ fun MelodyBubbleApp(
                     modifier = Modifier.safeDrawingPadding()
                 )
             }
+            composable(Route.MELODY_ALIAS) {
+                MelodyAliasScreen(
+                    profile = state.profile,
+                    candidates = state.melodyAliasCandidates,
+                    onBack = { navController.popBackStack() },
+                    onPreview = viewModel::previewMelodyAlias,
+                    onPreviewTone = viewModel::previewMelodyTone,
+                    onSelect = viewModel::selectMelodyAlias,
+                    modifier = Modifier.safeDrawingPadding()
+                )
+            }
             composable(Route.OFFLINE_EXCHANGE) {
                 OfflineExchangeScreen(
                     records = state.offlineExchanges,
@@ -299,6 +313,7 @@ private fun MainShell(
     onOpenLounge: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenMusicSelect: () -> Unit,
+    onOpenMelodyAlias: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenOfflineExchange: () -> Unit
 ) {
@@ -364,6 +379,7 @@ private fun MainShell(
                 onAllowReactionsChange = viewModel::setAllowReactions,
                 onOfflineExchangeChange = viewModel::setOfflineExchangeEnabled,
                 onOpenMusicSelect = onOpenMusicSelect,
+                onOpenMelodyAlias = onOpenMelodyAlias,
                 onOpenNotificationAccess = onOpenNotificationAccess,
                 onOpenOfflineExchange = onOpenOfflineExchange,
                 modifier = contentModifier.safeDrawingPadding()
