@@ -92,8 +92,12 @@ class BuildingLoungeService(
         .baseUrl("https://overpass-api.de/api")
         .build()
 
-    fun nearby(latitude: Double, longitude: Double, limit: Int = 30): List<BuildingLoungeSummary> {
+    fun nearby(userId: UUID, latitude: Double, longitude: Double, limit: Int = 30): List<BuildingLoungeSummary> {
         validateCoordinate(latitude, longitude)
+        if (!hasFreshBuildingCache(latitude, longitude)) {
+            rateLimiter.enforce(userId, "LOUNGE_DISCOVERY", 6, Duration.ofMinutes(10))
+            cacheRealBuildings(latitude, longitude)
+        }
         return jdbc.query(
             """
             SELECT bl.id, b.id AS building_id, b.name, b.address,
@@ -123,6 +127,25 @@ class BuildingLoungeService(
             limit.coerceIn(1, 50),
         )
     }
+
+    private fun hasFreshBuildingCache(latitude: Double, longitude: Double): Boolean =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM lounge_buildings
+              WHERE active=true AND google_place_id LIKE 'osm-%'
+                AND updated_at > now() - interval '24 hours'
+                AND ST_DWithin(
+                  point::geography,
+                  ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+                  1600
+                )
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            longitude,
+            latitude,
+        ) == true
 
     fun enter(userId: UUID, loungeId: UUID, request: EnterBuildingLoungeRequest): BuildingLoungeSessionResponse {
         val lounge = requireInside(loungeId, request.latitude, request.longitude)
@@ -567,9 +590,10 @@ class BuildingLoungeController(
 ) {
     @GetMapping("/nearby")
     fun nearby(
+        principal: Principal,
         @RequestParam latitude: Double,
         @RequestParam longitude: Double,
-    ): List<BuildingLoungeSummary> = service.nearby(latitude, longitude)
+    ): List<BuildingLoungeSummary> = service.nearby(UUID.fromString(principal.name), latitude, longitude)
 
     @PostMapping("/{loungeId}/enter")
     fun enter(
