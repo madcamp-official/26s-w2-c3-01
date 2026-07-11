@@ -212,7 +212,7 @@ class BuildingLoungeService(
         }
     }
 
-    private fun realBuildingFixtures(latitude: Double, longitude: Double): List<TestFixture> = runCatching {
+    private fun realBuildingFixtures(latitude: Double, longitude: Double): List<DiscoveredBuilding> = runCatching {
         val query = """
             [out:json][timeout:8];
             (
@@ -237,14 +237,15 @@ class BuildingLoungeService(
             .take(4)
     }.getOrDefault(emptyList())
 
-    private fun JsonNode.toFixture(userLatitude: Double, userLongitude: Double): TestFixture? {
+    private fun JsonNode.toFixture(userLatitude: Double, userLongitude: Double): DiscoveredBuilding? {
         val center = path("center")
         val lat = center.path("lat").asDouble(Double.NaN)
         val lon = center.path("lon").asDouble(Double.NaN)
         if (lat.isNaN() || lon.isNaN()) return null
         val tags = path("tags")
-        val rawName = listOf("name", "name:ko", "addr:housename")
+        val rawName = listOf("name:ko", "name", "addr:housename")
             .firstNotNullOfOrNull { key -> tags.path(key).asText(null)?.takeIf { it.isNotBlank() } }
+        val address = buildAddress(tags)
         val id = path("id").asText()
         val osmType = path("type").asText("building")
         val buildingType = tags.path("building").asText("building")
@@ -264,10 +265,10 @@ class BuildingLoungeService(
             "RESIDENTIAL" -> 120
             else -> 160
         } + if (distance < 80) 80 else 0
-        return TestFixture(
+        return DiscoveredBuilding(
             placeId = "osm-$osmType-$id",
-            name = rawName ?: "OSM Building $id",
-            address = buildAddress(tags),
+            name = rawName ?: address.takeUnless { it == "주소 정보 없음" } ?: "이름 없는 건물",
+            address = address,
             latitude = lat,
             longitude = lon,
             radiusMeters = radius.coerceIn(90, 420),
@@ -544,7 +545,7 @@ class BuildingLoungeService(
     private fun buildAddress(tags: JsonNode): String {
         val parts = listOf("addr:city", "addr:district", "addr:street", "addr:housenumber")
             .mapNotNull { key -> tags.path(key).asText(null)?.takeIf { it.isNotBlank() } }
-        return parts.joinToString(" ").ifBlank { "OpenStreetMap building footprint" }
+        return parts.joinToString(" ").ifBlank { "주소 정보 없음" }
     }
 
     private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
@@ -556,7 +557,7 @@ class BuildingLoungeService(
         return radius * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 
-    private data class TestFixture(
+    private data class DiscoveredBuilding(
         val placeId: String,
         val name: String,
         val address: String,
