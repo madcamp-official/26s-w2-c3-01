@@ -17,8 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import com.example.myapplication.core.model.SharingState
-import com.example.myapplication.core.model.Track
-import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.ui.MelodyViewModel
 import com.example.myapplication.ui.MelodyBubbleApp
@@ -32,24 +30,11 @@ class MainActivity : ComponentActivity() {
 
     private val sharingStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            when (intent?.action) {
-                SharingForegroundService.ACTION_SHARING_STATE_CHANGED -> {
-                    if (intent.getBooleanExtra(SharingForegroundService.EXTRA_SHARING_ACTIVE, false)) {
-                        viewModel.startSharing()
-                    } else {
-                        viewModel.stopSharing()
-                    }
-                }
-                NowPlayingNotificationListenerService.ACTION_NOW_PLAYING_CHANGED -> {
-                    applyDetectedMusic(
-                        title = intent.getStringExtra(NowPlayingNotificationListenerService.EXTRA_TITLE),
-                        artist = intent.getStringExtra(NowPlayingNotificationListenerService.EXTRA_ARTIST),
-                        source = intent.getStringExtra(NowPlayingNotificationListenerService.EXTRA_SOURCE),
-                        isPlaying = intent.getBooleanExtra(
-                            NowPlayingNotificationListenerService.EXTRA_IS_PLAYING,
-                            false,
-                        ),
-                    )
+            if (intent?.action == SharingForegroundService.ACTION_SHARING_STATE_CHANGED) {
+                if (intent.getBooleanExtra(SharingForegroundService.EXTRA_SHARING_ACTIVE, false)) {
+                    viewModel.startSharing()
+                } else {
+                    viewModel.stopSharing()
                 }
             }
         }
@@ -77,12 +62,10 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (!receiverRegistered) {
-            val filter = IntentFilter(SharingForegroundService.ACTION_SHARING_STATE_CHANGED)
-                .apply { addAction(NowPlayingNotificationListenerService.ACTION_NOW_PLAYING_CHANGED) }
             ContextCompat.registerReceiver(
                 this,
                 sharingStateReceiver,
-                filter,
+                IntentFilter(SharingForegroundService.ACTION_SHARING_STATE_CHANGED),
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
             receiverRegistered = true
@@ -92,7 +75,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         reconcileSharingService()
-        applyDetectedMusicFallback()
     }
 
     override fun onStop() {
@@ -119,52 +101,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun applyDetectedMusicFallback() {
-        val preferences = getSharedPreferences(
-            NowPlayingNotificationListenerService.PREFERENCES_NAME,
-            MODE_PRIVATE
-        )
-        if (!preferences.getBoolean(NowPlayingNotificationListenerService.KEY_ACTIVE, false)) {
-            if (preferences.contains(NowPlayingNotificationListenerService.KEY_ACTIVE)) {
-                viewModel.setCurrentMusicPlaying(false)
-            }
-            return
-        }
-        val title = preferences.getString(NowPlayingNotificationListenerService.KEY_TITLE, null)
-            ?.takeIf { it.isNotBlank() }
-        val artist = preferences.getString(NowPlayingNotificationListenerService.KEY_TEXT, null)
-            ?.takeIf { it.isNotBlank() }
-        val source = preferences.getString(
-            NowPlayingNotificationListenerService.KEY_SOURCE,
-            NowPlayingNotificationListenerService.SOURCE_NOTIFICATION_FALLBACK,
-        )
-        applyDetectedMusic(title, artist, source, isPlaying = true)
-    }
-
-    private fun applyDetectedMusic(
-        title: String?,
-        artist: String?,
-        source: String?,
-        isPlaying: Boolean,
-    ) {
-        if (!isPlaying) {
-            viewModel.setCurrentMusicPlaying(false)
-            return
-        }
-        if (title.isNullOrBlank() || artist.isNullOrBlank()) return
-        val current = viewModel.uiState.value.currentTrack
-        if (current.title == title && current.artist == artist) {
-            viewModel.setCurrentMusicPlaying(true)
-            return
-        }
-
-        viewModel.selectTrack(
-            Track(
-                id = "notification-${title.hashCode()}-${artist.hashCode()}",
-                title = title,
-                artist = artist,
-                platform = source ?: NowPlayingNotificationListenerService.SOURCE_MEDIA_SESSION,
-            )
-        )
-    }
 }
