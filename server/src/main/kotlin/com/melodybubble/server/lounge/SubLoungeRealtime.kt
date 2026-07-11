@@ -458,3 +458,95 @@ class SubLoungeRealtimeService(
     private fun memberCount(subLoungeId: UUID): Int = activeMemberCount(jdbc, subLoungeId)
 
     private fun publishState(subLoungeId: UUID) {
+        realtime.toTopicAfterCommit(
+            topic(subLoungeId),
+            RealtimeEventTypes.SUB_LOUNGE_STATE_UPDATED,
+            SubLoungeStatePayload(memberCount(subLoungeId)),
+        )
+    }
+
+    private fun publishMemberChange(subLoungeId: UUID, userId: UUID, joined: Boolean) {
+        val alias = jdbc.queryForObject("select display_name from users where id=?", String::class.java, userId) ?: "Listener"
+        realtime.toTopicAfterCommit(
+            topic(subLoungeId),
+            if (joined) RealtimeEventTypes.SUB_LOUNGE_MEMBER_JOINED else RealtimeEventTypes.SUB_LOUNGE_MEMBER_LEFT,
+            SubLoungeMemberPayload(memberCount(subLoungeId), alias),
+        )
+    }
+
+    private fun listeningPayload(
+        userId: UUID,
+        title: String,
+        artist: String,
+        request: UpdateLoungeListeningRequest,
+    ) = LoungeListeningStatus(
+        listenerAlias = jdbc.queryForObject("select display_name from users where id=?", String::class.java, userId) ?: "Listener",
+        trackTitle = title.ifBlank { null },
+        artistName = artist.ifBlank { null },
+        albumArtUrl = request.albumArtUrl,
+        isPlaying = request.isPlaying,
+        updatedAt = Instant.now(),
+    )
+
+    private fun cardByClientId(userId: UUID, clientCardId: UUID): LoungeRecommendationCard {
+        val roomId = jdbc.queryForObject(
+            "select sub_lounge_id from sub_lounge_recommendation_cards where sender_id=? and client_card_id=?",
+            UUID::class.java,
+            userId,
+            clientCardId,
+        ) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "추천 카드를 찾을 수 없습니다.")
+        return cards(userId, roomId).first { it.clientCardId == clientCardId }
+    }
+
+    private fun cardRoom(cardId: UUID): UUID = jdbc.queryForObject(
+        "select sub_lounge_id from sub_lounge_recommendation_cards where id=?",
+        UUID::class.java,
+        cardId,
+    ) ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "추천 카드를 찾을 수 없습니다.")
+
+    companion object {
+        private val REACTION_TYPES = setOf("LIKE", "LOVE", "FIRE", "SAME_TASTE")
+        private val POLL_KEYS = listOf("CHILL", "FOCUS", "ENERGY")
+        fun topic(subLoungeId: UUID) = "/topic/sub-lounges/$subLoungeId"
+    }
+}
+
+@RestController
+@RequestMapping("/api/v1/building-lounges/sub-lounges")
+class SubLoungeRealtimeController(private val service: SubLoungeRealtimeService) {
+    @GetMapping("/active")
+    fun active(principal: Principal) = service.activeSnapshot(UUID.fromString(principal.name))
+
+    @GetMapping("/{subLoungeId}")
+    fun snapshot(principal: Principal, @PathVariable subLoungeId: UUID) =
+        service.snapshot(UUID.fromString(principal.name), subLoungeId)
+
+    @PostMapping("/{subLoungeId}/leave")
+    fun leave(principal: Principal, @PathVariable subLoungeId: UUID) =
+        service.leave(UUID.fromString(principal.name), subLoungeId)
+
+    @PutMapping("/{subLoungeId}/listening")
+    fun listening(
+        principal: Principal,
+        @PathVariable subLoungeId: UUID,
+        @RequestBody request: UpdateLoungeListeningRequest,
+    ) = service.updateListening(UUID.fromString(principal.name), subLoungeId, request)
+
+    @PutMapping("/{subLoungeId}/vote")
+    fun vote(
+        principal: Principal,
+        @PathVariable subLoungeId: UUID,
+        @RequestBody request: LoungeVoteRequest,
+    ) = service.vote(UUID.fromString(principal.name), subLoungeId, request)
+}
+
+internal fun hasActiveMembership(jdbc: JdbcTemplate, userId: UUID, subLoungeId: UUID): Boolean =
+    jdbc.queryForObject(
+        """
+        select exists(
+          select 1 from sub_lounge_members member
+          join sub_lounges room on room.id=member.sub_lounge_id and room.active=true
+          join building_lounge_sessions session
+            on session.building_lounge_id=room.building_lounge_id and session.user_id=member.user_id
+          where member.user_id=? and member.sub_lounge_id=? and member.active=true
+            and session.active=true and session.expires_at>now()
