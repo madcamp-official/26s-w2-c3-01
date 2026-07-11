@@ -44,6 +44,17 @@ class SharingForegroundService : Service() {
                 .putLong(KEY_LAST_LOCATION_UPDATE_EPOCH_MS, System.currentTimeMillis())
                 .putString(KEY_LAST_LOCATION_ACCURACY_QUALITY, accuracyQuality(location))
                 .apply()
+            sendBroadcast(
+                Intent(ACTION_LOCATION_FIX)
+                    .setPackage(packageName)
+                    .putExtra(EXTRA_LATITUDE, location.latitude)
+                    .putExtra(EXTRA_LONGITUDE, location.longitude)
+                    .putExtra(
+                        EXTRA_ACCURACY_METERS,
+                        if (location.hasAccuracy()) location.accuracy else Float.NaN,
+                    )
+                    .putExtra(EXTRA_LOCATION_TIME_EPOCH_MS, location.time)
+            )
         }
 
         override fun onProviderEnabled(provider: String) = Unit
@@ -250,7 +261,13 @@ class SharingForegroundService : Service() {
 
         const val ACTION_SHARING_STATE_CHANGED =
             "com.example.myapplication.service.action.SHARING_STATE_CHANGED"
+        const val ACTION_LOCATION_FIX =
+            "com.example.myapplication.service.action.LOCATION_FIX"
         const val EXTRA_SHARING_ACTIVE = "sharing_active"
+        const val EXTRA_LATITUDE = "latitude"
+        const val EXTRA_LONGITUDE = "longitude"
+        const val EXTRA_ACCURACY_METERS = "accuracy_meters"
+        const val EXTRA_LOCATION_TIME_EPOCH_MS = "location_time_epoch_ms"
 
         const val ACCURACY_EXCELLENT = "excellent"
         const val ACCURACY_GOOD = "good"

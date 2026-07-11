@@ -32,11 +32,25 @@ class MainActivity : ComponentActivity() {
 
     private val sharingStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != SharingForegroundService.ACTION_SHARING_STATE_CHANGED) return
-            if (intent.getBooleanExtra(SharingForegroundService.EXTRA_SHARING_ACTIVE, false)) {
-                viewModel.startSharing()
-            } else {
-                viewModel.stopSharing()
+            when (intent?.action) {
+                SharingForegroundService.ACTION_SHARING_STATE_CHANGED -> {
+                    if (intent.getBooleanExtra(SharingForegroundService.EXTRA_SHARING_ACTIVE, false)) {
+                        viewModel.startSharing()
+                    } else {
+                        viewModel.stopSharing()
+                    }
+                }
+                NowPlayingNotificationListenerService.ACTION_NOW_PLAYING_CHANGED -> {
+                    applyDetectedMusic(
+                        title = intent.getStringExtra(NowPlayingNotificationListenerService.EXTRA_TITLE),
+                        artist = intent.getStringExtra(NowPlayingNotificationListenerService.EXTRA_ARTIST),
+                        source = intent.getStringExtra(NowPlayingNotificationListenerService.EXTRA_SOURCE),
+                        isPlaying = intent.getBooleanExtra(
+                            NowPlayingNotificationListenerService.EXTRA_IS_PLAYING,
+                            false,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -64,6 +78,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         if (!receiverRegistered) {
             val filter = IntentFilter(SharingForegroundService.ACTION_SHARING_STATE_CHANGED)
+                .apply { addAction(NowPlayingNotificationListenerService.ACTION_NOW_PLAYING_CHANGED) }
             ContextCompat.registerReceiver(
                 this,
                 sharingStateReceiver,
@@ -109,21 +124,44 @@ class MainActivity : ComponentActivity() {
             NowPlayingNotificationListenerService.PREFERENCES_NAME,
             MODE_PRIVATE
         )
-        if (!preferences.getBoolean(NowPlayingNotificationListenerService.KEY_ACTIVE, false)) return
+        if (!preferences.getBoolean(NowPlayingNotificationListenerService.KEY_ACTIVE, false)) {
+            viewModel.setCurrentMusicPlaying(false)
+            return
+        }
         val title = preferences.getString(NowPlayingNotificationListenerService.KEY_TITLE, null)
             ?.takeIf { it.isNotBlank() }
-            ?: return
         val artist = preferences.getString(NowPlayingNotificationListenerService.KEY_TEXT, null)
             ?.takeIf { it.isNotBlank() }
-            ?: return
-        if (viewModel.uiState.value.currentTrack.title == title) return
+        val source = preferences.getString(
+            NowPlayingNotificationListenerService.KEY_SOURCE,
+            NowPlayingNotificationListenerService.SOURCE_NOTIFICATION_FALLBACK,
+        )
+        applyDetectedMusic(title, artist, source, isPlaying = true)
+    }
+
+    private fun applyDetectedMusic(
+        title: String?,
+        artist: String?,
+        source: String?,
+        isPlaying: Boolean,
+    ) {
+        if (!isPlaying) {
+            viewModel.setCurrentMusicPlaying(false)
+            return
+        }
+        if (title.isNullOrBlank() || artist.isNullOrBlank()) return
+        val current = viewModel.uiState.value.currentTrack
+        if (current.title == title && current.artist == artist) {
+            viewModel.setCurrentMusicPlaying(true)
+            return
+        }
 
         viewModel.selectTrack(
             Track(
                 id = "notification-${title.hashCode()}-${artist.hashCode()}",
                 title = title,
                 artist = artist,
-                platform = "MEDIA_NOTIFICATION"
+                platform = source ?: NowPlayingNotificationListenerService.SOURCE_MEDIA_SESSION,
             )
         )
     }
