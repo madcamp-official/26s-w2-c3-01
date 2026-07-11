@@ -1492,6 +1492,98 @@ class DemoMelodyRepository(
                     if (listener.nearbyHandle != handle) return@map listener
                     found = true
                     listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
+                },
+                snapshotSequence = current.snapshotSequence + 1,
+            )
+        }
+        if (!found) refreshNearbySnapshot()
+    }
+
+    private fun applyPopularTracksUpdated(event: RealtimeEvent.PopularTracksUpdated) {
+        val tracks = event.envelope.payload.tracks.mapNotNull { remote ->
+            val title = remote.title?.trim()?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
+            val artist = remote.artist?.trim()?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
+            PopularTrack(
+                track = Track(
+                    id = "popular-${title.hashCode()}-${artist.hashCode()}",
+                    title = title,
+                    artist = artist,
+                    platform = "SERVER_AGGREGATE",
+                ),
+                listenerCount = remote.listenerCount?.coerceAtLeast(0) ?: 0,
+                reactionCount = remote.reactionCount?.coerceAtLeast(0) ?: 0,
+            )
+        }
+        _state.update { it.copy(popularTracks = tracks) }
+    }
+
+    private fun applyNotificationCreated(event: RealtimeEvent.NotificationCreated) {
+        val payload = event.envelope.payload
+        val preview = payload.body?.takeIf(String::isNotBlank)
+            ?: payload.title?.takeIf(String::isNotBlank)
+            ?: return
+        val notification = InboxNotification(
+            id = payload.notificationId?.takeIf(String::isNotBlank) ?: event.envelope.eventId,
+            type = NotificationType.SYSTEM,
+            actorAlias = null,
+            actorColorHex = null,
+            preview = preview,
+            relativeTime = "방금",
+        )
+        _state.update { current ->
+            current.copy(
+                notifications = listOf(notification) + current.notifications
+                    .filterNot { it.id == notification.id }
+            )
+        }
+    }
+
+    private fun performFullRealtimeSync() {
+        loadChatRooms()
+        refreshPopularTracks()
+        syncReceivedReactions()
+        refreshNearbySnapshot()
+        loadBlockedUsers()
+        activeChatRoomId?.let(::markChatRoomRead)
+    }
+
+    private fun refreshNearbySnapshot() {
+        val token = accessToken ?: return
+        val versionAtRequest = nearbyRealtimeVersion.get()
+        scope.launch {
+            runCatching { nearbyApi.snapshot("Bearer $token") }
+                .onSuccess { snapshot ->
+                    if (!isCurrentSession(token)) return@onSuccess
+                    _state.update { current ->
+                        val remoteListeners = snapshot.items.map { it.toDomain() }
+                        val listeners = if (nearbyRealtimeVersion.get() == versionAtRequest) {
+                            remoteListeners
+                        } else {
+                            val currentByHandle = current.nearbyListeners.associateBy { it.nearbyHandle }
+                            remoteListeners.map { remote ->
+                                currentByHandle[remote.nearbyHandle]?.let { latest ->
+                                    remote.copy(
+                                        isPlaying = latest.isPlaying,
+                                        currentTrack = latest.currentTrack,
+                                    )
+                                } ?: remote
+                            }
+                        }
+                        current.copy(
+                            nearbyListeners = listeners,
+                            discoveryRadiusMeters = snapshot.radiusMeters
+                                ?: current.discoveryRadiusMeters,
+                            nearbyLoadState = if (snapshot.items.isEmpty()) {
+                                NearbyLoadState.EMPTY
+                            } else NearbyLoadState.READY,
+                            nearbyErrorMessage = null,
+                            snapshotSequence = current.snapshotSequence + 1,
+                        )
+                    }
+                }
+        }
+    }
+
     private fun startChatSync(token: String) {
         chatSyncJob?.cancel()
         chatSyncJob = scope.launch {
