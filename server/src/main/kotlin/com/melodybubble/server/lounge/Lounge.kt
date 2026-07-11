@@ -1,6 +1,6 @@
 package com.melodybubble.server.lounge
 
-import com.melodybubble.server.nearby.Envelope
+import com.melodybubble.server.realtime.RealtimeEnvelope
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.messaging.simp.SimpMessagingTemplate
 import org.springframework.stereotype.Controller
@@ -32,7 +32,14 @@ class LoungeMessageController(private val jdbc: JdbcTemplate, private val messag
     fun vote(vote: LoungeVote, principal: Principal) {
         jdbc.update("""insert into lounge_votes(lounge_id,voter_id,vote_type,target_key) values (?,?,?,?)
             on conflict(lounge_id,voter_id,vote_type) do update set target_key=excluded.target_key,updated_at=now()""", vote.roomId, UUID.fromString(principal.name), vote.voteType, vote.targetKey)
-        messaging.convertAndSend("/topic/room/${vote.roomId}/votes", Envelope("VOTE_STATE", loungeController.votes(vote.roomId)))
-        messaging.convertAndSendToUser(principal.name, "/queue/ack", Envelope("ACK", mapOf("requestId" to vote.requestId)))
+        messaging.convertAndSend(
+            "/topic/room/${vote.roomId}/votes",
+            RealtimeEnvelope(type = "VOTE_STATE", payload = loungeController.votes(vote.roomId)),
+        )
+        messaging.convertAndSendToUser(
+            principal.name,
+            "/queue/ack",
+            RealtimeEnvelope(type = "ACK", payload = mapOf("requestId" to vote.requestId)),
+        )
     }
 }
