@@ -564,7 +564,10 @@ private fun SubLoungeList(
     onOpen: (String) -> Unit,
 ) {
     if (subLounges.isEmpty()) {
-        Text("No sub lounge yet. Create the first taste room.", color = MutedMint)
+        EmptyLoungePanel(
+            "아직 하위 라운지가 없어요",
+            "위의 ‘하위 라운지 만들기’를 눌러 첫 번째 방을 만들어 보세요.",
+        )
         return
     }
     LazyColumn(
@@ -588,7 +591,7 @@ private fun SubLoungeList(
                     Spacer(Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(room.title, color = PaleMint, fontWeight = FontWeight.Bold)
-                        Text(room.style ?: "Free taste room", color = MutedMint, style = MaterialTheme.typography.labelMedium)
+                        Text(room.style ?: "자유 음악방", color = MutedMint, style = MaterialTheme.typography.labelMedium)
                     }
                     Text("${room.memberCount}명 · 입장", color = SignalGreen, fontWeight = FontWeight.Bold)
                 }
