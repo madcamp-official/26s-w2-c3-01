@@ -28,6 +28,9 @@ import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.UUID
 import javax.crypto.SecretKey
+import jakarta.servlet.http.HttpServletRequest
+import org.springframework.http.HttpHeaders
+import com.melodybubble.server.realtime.RealtimeSessionPolicy
 
 data class LoginRequest(val email: String, val password: String)
 data class SignupRequest(val email: String, val password: String, val displayName: String)
@@ -49,6 +52,13 @@ data class TokenResponse(
     val onboardingComplete: Boolean = false,
 )
 
+data class JwtSession(
+    val userId: UUID,
+    val tokenId: String,
+    val issuedAt: Instant,
+    val expiresAt: Instant,
+)
+
 @Component
 class JwtService(
     @Value("\${app.jwt.secret}") private val rawSecret: String,
@@ -60,12 +70,21 @@ class JwtService(
         }
         return Keys.hmacShaKeyFor(rawSecret.toByteArray(StandardCharsets.UTF_8))
     }
-    fun issue(userId: UUID): String = Jwts.builder().subject(userId.toString())
+    fun issue(userId: UUID): String = Jwts.builder().subject(userId.toString()).id(UUID.randomUUID().toString())
         .issuedAt(Date()).expiration(Date.from(Instant.now().plus(accessMinutes, ChronoUnit.MINUTES)))
         .signWith(key()).compact()
-    fun parse(token: String): UUID? = runCatching {
-        UUID.fromString(Jwts.parser().verifyWith(key()).build().parseSignedClaims(token).payload.subject)
+    fun parseSession(token: String): JwtSession? = runCatching {
+        val claims = Jwts.parser().verifyWith(key()).build().parseSignedClaims(token).payload
+        JwtSession(
+            userId = UUID.fromString(claims.subject),
+            tokenId = claims.id ?: MessageDigest.getInstance("SHA-256")
+                .digest(token.toByteArray(StandardCharsets.UTF_8))
+                .joinToString("") { "%02x".format(it) },
+            issuedAt = claims.issuedAt.toInstant(),
+            expiresAt = claims.expiration.toInstant(),
+        )
     }.getOrNull()
+    fun parse(token: String): UUID? = parseSession(token)?.userId
     fun ttlSeconds() = accessMinutes * 60
 }
 
@@ -90,9 +109,12 @@ class AuthService(
     private val jdbc: JdbcTemplate,
     private val jwt: JwtService,
     private val googleTokens: GoogleTokenVerifier,
+    private val realtimeSessions: RealtimeSessionPolicy,
 ) {
     private val encoder = BCryptPasswordEncoder()
     private val refreshDays = 30L
+
+    fun parseAccessSession(token: String): JwtSession? = jwt.parseSession(token)
 
     private fun tokenHash(token: String): String = MessageDigest.getInstance("SHA-256")
         .digest(token.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -162,12 +184,13 @@ class AuthService(
     }
 
     @Transactional
-    fun logout(userId: UUID, request: LogoutRequest) {
+    fun logout(userId: UUID, request: LogoutRequest, accessSession: JwtSession?) {
         if (request.refreshToken.isNullOrBlank()) {
             jdbc.update("update refresh_tokens set revoked_at=now() where user_id=? and revoked_at is null", userId)
         } else {
             jdbc.update("update refresh_tokens set revoked_at=now() where user_id=? and token_hash=?", userId, tokenHash(request.refreshToken))
         }
+        accessSession?.takeIf { it.userId == userId }?.let(realtimeSessions::revoke)
     }
 
     @Transactional
@@ -233,8 +256,18 @@ class AuthController(private val authService: AuthService) {
     @PostMapping("/signup") fun signup(@RequestBody request: SignupRequest) = authService.signup(request)
     @PostMapping("/google") fun googleLogin(@RequestBody request: GoogleLoginRequest) = authService.googleLogin(request)
     @PostMapping("/refresh") fun refresh(@RequestBody request: RefreshRequest) = authService.refresh(request)
-    @PostMapping("/logout") fun logout(principal: Principal, @RequestBody request: LogoutRequest) =
-        authService.logout(UUID.fromString(principal.name), request)
+    @PostMapping("/logout")
+    fun logout(
+        principal: Principal,
+        servletRequest: HttpServletRequest,
+        @RequestBody request: LogoutRequest,
+    ) = authService.logout(
+        UUID.fromString(principal.name),
+        request,
+        servletRequest.getHeader(HttpHeaders.AUTHORIZATION)
+            ?.removePrefix("Bearer ")
+            ?.let(authService::parseAccessSession),
+    )
     @PutMapping("/onboarding") fun onboarding(principal: Principal, @RequestBody request: OnboardingRequest) =
         authService.completeOnboarding(UUID.fromString(principal.name), request)
     @DeleteMapping("/account") fun deleteAccount(principal: Principal) =
