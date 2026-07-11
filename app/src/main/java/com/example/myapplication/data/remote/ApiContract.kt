@@ -23,10 +23,14 @@ object MelodyApiContract {
         const val PRIVACY = "/api/v1/me/privacy"
         const val NEARBY_SNAPSHOT = "/api/v1/nearby/snapshot"
         const val NEARBY_DETAIL = "/api/v1/nearby/{nearbyHandle}"
+        const val NEARBY_REACTION = "/api/v1/nearby/{nearbyHandle}/reactions"
+        const val RECEIVED_NEARBY_REACTIONS = "/api/v1/nearby/reactions"
+        const val POPULAR_TRACKS = "/api/v1/nearby/popular-tracks"
         const val LOUNGES = "/api/v1/rooms"
         const val LOUNGE_DETAIL = "/api/v1/rooms/{roomId}"
         const val CHAT_ROOMS = "/api/v1/chat/rooms"
         const val CHAT_HISTORY = "/api/v1/chat/rooms/{roomId}/messages"
+        const val CHAT_READ = "/api/v1/chat/rooms/{roomId}/read"
         const val NOTIFICATIONS = "/api/v1/notifications"
         const val OFFLINE_SYNC = "/api/v1/offline-exchanges/sync"
         const val MELODY_ALIAS_GENERATE = "/api/v1/melody-alias/generate"
@@ -60,14 +64,23 @@ object MelodyApiContract {
         fun roomCards(roomId: String) = "/topic/room/$roomId/cards"
         fun roomVotes(roomId: String) = "/topic/room/$roomId/votes"
     }
+
+    object EventType {
+        const val CHAT_ROOM_CREATED = "CHAT_ROOM_CREATED"
+        const val CHAT_MESSAGE_CREATED = "CHAT_MESSAGE_CREATED"
+        const val CHAT_MESSAGE_READ = "CHAT_MESSAGE_READ"
+        const val CHAT_ROOM_UPDATED = "CHAT_ROOM_UPDATED"
+        const val NEARBY_REACTION_CREATED = "NEARBY_REACTION_CREATED"
+        const val NEARBY_MUSIC_UPDATED = "NEARBY_MUSIC_UPDATED"
+        const val POPULAR_TRACKS_UPDATED = "POPULAR_TRACKS_UPDATED"
+        const val NOTIFICATION_CREATED = "NOTIFICATION_CREATED"
+    }
 }
 
 data class EventEnvelope<T>(
     val eventId: String,
-    val requestId: String?,
     val type: String,
     val version: Int,
-    val sequence: Long?,
     val timestamp: String,
     val payload: T
 )
