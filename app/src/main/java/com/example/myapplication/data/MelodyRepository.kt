@@ -393,18 +393,45 @@ class DemoMelodyRepository(
                 } else {
                     socialApi.follow("Bearer $token", handle)
                 }
-            }.onSuccess { applyFollowResponse(handle, it) }
-                .onFailure { error -> showRequestError(error, "팔로우 상태를 변경하지 못했어요") }
+            }.onSuccess { if (isCurrentSession(token)) applyFollowResponse(handle, it) }
+                .onFailure { error ->
+                    if (isCurrentSession(token)) showRequestError(error, "팔로우 상태를 변경하지 못했어요")
+                }
         }
     }
 
     override fun react(handle: String, reactionLabel: String) {
-        val alias = _state.value.nearbyListeners
-            .firstOrNull { it.nearbyHandle == handle }
-            ?.displayAlias
+        val target = _state.value.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
             ?: return
-        _state.update {
-            it.copy(feedbackMessage = "$alias 님에게 ‘$reactionLabel’ 리액션을 보냈어요")
+        val reactionType = reactionTypeForLabel(reactionLabel)
+        if (reactionType == null) {
+            _state.update { it.copy(feedbackMessage = "지원하지 않는 리액션이에요") }
+            return
+        }
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching {
+                nearbyApi.sendReaction(
+                    authorization = "Bearer $token",
+                    nearbyHandle = handle,
+                    request = NearbyReactionRequest(
+                        clientReactionId = UUID.randomUUID().toString(),
+                        reactionType = reactionType,
+                        trackTitle = target.currentTrack?.title,
+                        trackArtist = target.currentTrack?.artist,
+                    ),
+                )
+            }.onSuccess {
+                if (!isCurrentSession(token)) return@onSuccess
+                _state.update { state ->
+                    state.copy(
+                        feedbackMessage = "${target.displayAlias} 님에게 ‘$reactionLabel’ 리액션을 보냈어요"
+                    )
+                }
+                refreshPopularTracks(token)
+            }.onFailure { error ->
+                if (isCurrentSession(token)) showRequestError(error, "리액션을 보내지 못했어요")
+            }
         }
     }
 
@@ -416,6 +443,7 @@ class DemoMelodyRepository(
         scope.launch {
             runCatching { socialApi.block("Bearer $token", handle) }
                 .onSuccess { blocked ->
+                    if (!isCurrentSession(token)) return@onSuccess
                     _state.update { current ->
                         current.copy(
                             nearbyListeners = current.nearbyListeners.filterNot { it.nearbyHandle == handle },
@@ -427,7 +455,9 @@ class DemoMelodyRepository(
                         )
                     }
                 }
-                .onFailure { error -> showRequestError(error, "사용자를 차단하지 못했어요") }
+                .onFailure { error ->
+                    if (isCurrentSession(token)) showRequestError(error, "사용자를 차단하지 못했어요")
+                }
         }
     }
 
@@ -444,8 +474,11 @@ class DemoMelodyRepository(
                     ReportSubmitRequest(UUID.randomUUID().toString(), reason.name, description),
                 )
             }.onSuccess {
+                if (!isCurrentSession(token)) return@onSuccess
                 _state.update { state -> state.copy(feedbackMessage = "$alias 님에 대한 신고를 제출했어요") }
-            }.onFailure { error -> showRequestError(error, "신고를 제출하지 못했어요") }
+            }.onFailure { error ->
+                if (isCurrentSession(token)) showRequestError(error, "신고를 제출하지 못했어요")
+            }
         }
     }
 
@@ -453,8 +486,14 @@ class DemoMelodyRepository(
         val token = accessToken ?: return
         scope.launch {
             runCatching { socialApi.blocks("Bearer $token") }
-                .onSuccess { users -> _state.update { it.copy(blockedUsers = users.map { user -> user.toDomain() }) } }
-                .onFailure { error -> showRequestError(error, "차단 목록을 불러오지 못했어요") }
+                .onSuccess { users ->
+                    if (isCurrentSession(token)) {
+                        _state.update { it.copy(blockedUsers = users.map { user -> user.toDomain() }) }
+                    }
+                }
+                .onFailure { error ->
+                    if (isCurrentSession(token)) showRequestError(error, "차단 목록을 불러오지 못했어요")
+                }
         }
     }
 
@@ -463,13 +502,16 @@ class DemoMelodyRepository(
         scope.launch {
             runCatching { socialApi.unblock("Bearer $token", blockId) }
                 .onSuccess {
+                    if (!isCurrentSession(token)) return@onSuccess
                     _state.update { state ->
                         state.copy(
                             blockedUsers = state.blockedUsers.filterNot { it.blockId == blockId },
                             feedbackMessage = "차단을 해제했어요",
                         )
                     }
-                }.onFailure { error -> showRequestError(error, "차단을 해제하지 못했어요") }
+                }.onFailure { error ->
+                    if (isCurrentSession(token)) showRequestError(error, "차단을 해제하지 못했어요")
+                }
         }
     }
 
@@ -613,6 +655,7 @@ class DemoMelodyRepository(
                     )
                 }
             }
+            if (token == null || !isCurrentSession(token)) return@launch
             result.onSuccess { remote ->
                 _state.update { current ->
                     current.copy(
@@ -621,7 +664,9 @@ class DemoMelodyRepository(
                                 if (message.clientMessageId == clientId) {
                                     message.copy(
                                         messageId = remote.messageId,
-                                        deliveryState = DeliveryState.SENT,
+                                        deliveryState = if (message.deliveryState == DeliveryState.READ) {
+                                            DeliveryState.READ
+                                        } else DeliveryState.SENT,
                                     )
                                 } else message
                             }
@@ -629,18 +674,23 @@ class DemoMelodyRepository(
                     )
                 }
             }.onFailure { error ->
+                var markedFailed = false
                 _state.update { current ->
                     current.copy(
                         chatMessages = current.chatMessages + (
                             roomId to current.chatMessages[roomId].orEmpty().map { message ->
-                                if (message.clientMessageId == clientId) {
+                                if (message.clientMessageId == clientId &&
+                                    message.deliveryState == DeliveryState.PENDING &&
+                                    message.messageId.startsWith("pending-")
+                                ) {
+                                    markedFailed = true
                                     message.copy(deliveryState = DeliveryState.FAILED)
                                 } else message
                             }
                         )
                     )
                 }
-                showRequestError(error, "메시지를 보내지 못했어요")
+                if (markedFailed) showRequestError(error, "메시지를 보내지 못했어요")
             }
         }
     }
@@ -653,19 +703,17 @@ class DemoMelodyRepository(
                 feedbackMessage = "${track.title}을(를) 현재 음악으로 선택했어요"
             )
         }
-        syncMusicIfSharing()
     }
 
     override fun setCurrentMusicPlaying(isPlaying: Boolean) {
         _state.update { it.copy(currentTrackPlaying = isPlaying) }
-        syncMusicIfSharing()
     }
 
     override fun markInboxRead() {
+        realtimeInboxStore?.markAllRead()
         _state.update { current ->
             current.copy(
                 notifications = current.notifications.map { it.copy(isRead = true) },
-                chats = current.chats.map { it.copy(unreadCount = 0) }
             )
         }
     }
