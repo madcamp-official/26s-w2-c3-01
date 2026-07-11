@@ -1584,26 +1584,85 @@ class DemoMelodyRepository(
         }
     }
 
+    private fun syncReceivedReactions(token: String? = accessToken) {
+        if (token.isNullOrBlank()) return
+        scope.launch {
+            runCatching { nearbyApi.receivedReactions("Bearer $token") }
+                .onSuccess { reactions ->
+                    if (!isCurrentSession(token)) return@onSuccess
+                    reactions.asReversed().forEach { reaction ->
+                        realtimeInboxStore?.recordReaction(
+                            reactionId = reaction.reactionId,
+                            senderAlias = reaction.senderAlias,
+                            reactionType = reaction.reactionType,
+                            trackTitle = reaction.trackTitle,
+                        )
+                    }
+                    val remoteNotifications = reactions.map { reaction ->
+                        val label = reactionLabelForType(reaction.reactionType)
+                        InboxNotification(
+                            id = reaction.reactionId,
+                            type = NotificationType.REACTION,
+                            actorAlias = reaction.senderAlias,
+                            actorColorHex = null,
+                            preview = reaction.trackTitle?.takeIf(String::isNotBlank)?.let {
+                                "$label · ‘$it’"
+                            } ?: label,
+                            relativeTime = "최근",
+                        )
+                    }
+                    val durable = realtimeInboxStore?.load() ?: remoteNotifications
+                    _state.update { current ->
+                        val durableIds = durable.map(InboxNotification::id).toSet()
+                        current.copy(
+                            notifications = durable + current.notifications
+                                .filterNot { it.id in durableIds }
+                        )
+                    }
+                }
+        }
+    }
+
     private fun startChatSync(token: String) {
         chatSyncJob?.cancel()
+        loadChatRooms()
         chatSyncJob = scope.launch {
             while (isActive && accessToken == token) {
-                loadChatRooms()
-                delay(CHAT_SYNC_INTERVAL_MILLIS)
+                delay(CHAT_FALLBACK_SYNC_INTERVAL_MILLIS)
+                if (realtimeClient.connectionState.value !is RealtimeConnectionState.Connected) {
+                    loadChatRooms()
+                }
             }
         }
     }
 
     private fun loadChatRooms() {
         val token = accessToken ?: return
+        val realtimeVersionAtRequest = chatRealtimeVersion.get()
         scope.launch {
             runCatching { socialApi.chatRooms("Bearer $token") }
                 .onSuccess { rooms ->
-                    _state.update { current -> current.copy(chats = rooms.map { room -> room.toDomain() }) }
+                    if (!isCurrentSession(token)) return@onSuccess
+                    val remoteRooms = rooms.map { room -> room.toDomain() }
+                    _state.update { current ->
+                        val realtimeAdvanced = chatRealtimeVersion.get() != realtimeVersionAtRequest
+                        if (!realtimeAdvanced) {
+                            current.copy(chats = remoteRooms)
+                        } else {
+                            val currentById = current.chats.associateBy(ChatPreview::roomId)
+                            val remoteIds = remoteRooms.map(ChatPreview::roomId).toSet()
+                            current.copy(
+                                chats = remoteRooms.map { remote ->
+                                    currentById[remote.roomId] ?: remote
+                                } + current.chats.filter { it.roomId !in remoteIds }
+                            )
+                        }
+                    }
                     rooms.forEach { room ->
                         scope.launch {
                             runCatching { socialApi.chatMessages("Bearer $token", room.roomId) }
                                 .onSuccess { messages ->
+                                    if (!isCurrentSession(token)) return@onSuccess
                                     _state.update { current ->
                                         current.copy(
                                             chatMessages = current.chatMessages + (
