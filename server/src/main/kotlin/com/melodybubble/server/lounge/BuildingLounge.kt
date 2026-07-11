@@ -349,6 +349,15 @@ class BuildingLoungeService(
         val title = request.title.trim().take(80)
         if (title.isBlank()) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Title is required")
         val style = request.style?.trim()?.take(80)?.ifBlank { null }
+        val duplicate = jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM sub_lounges WHERE building_lounge_id=? AND active=true AND lower(title)=lower(?))",
+            Boolean::class.java,
+            loungeId,
+            title,
+        ) == true
+        if (duplicate) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "같은 이름의 하위 라운지가 이미 있어요.")
+        }
         val id = jdbc.query(
             "INSERT INTO sub_lounges(building_lounge_id, creator_user_id, title, style) VALUES (?, ?, ?, ?) RETURNING id",
             { rs, _ -> UUID.fromString(rs.getString("id")) },
