@@ -174,7 +174,7 @@ class BuildingLoungeService(
 
     private fun cacheRealBuildings(latitude: Double, longitude: Double) {
         validateCoordinate(latitude, longitude)
-        realBuildingFixtures(latitude, longitude).forEach { fixture ->
+        discoverRealBuildings(latitude, longitude).forEach { building ->
             val buildingId = jdbc.query(
                 """
                 INSERT INTO lounge_buildings(name, address, google_place_id, point, radius_m, category, active)
@@ -190,13 +190,13 @@ class BuildingLoungeService(
                 RETURNING id
                 """.trimIndent(),
                 { rs, _ -> UUID.fromString(rs.getString("id")) },
-                fixture.name,
-                fixture.address,
-                fixture.placeId,
-                fixture.longitude,
-                fixture.latitude,
-                fixture.radiusMeters,
-                fixture.category,
+                building.name,
+                building.address,
+                building.placeId,
+                building.longitude,
+                building.latitude,
+                building.radiusMeters,
+                building.category,
             ).first()
             val loungeId = jdbc.query(
                 """
@@ -207,12 +207,12 @@ class BuildingLoungeService(
                 """.trimIndent(),
                 { rs, _ -> UUID.fromString(rs.getString("id")) },
                 buildingId,
-                fixture.name,
+                building.name,
             ).first()
         }
     }
 
-    private fun realBuildingFixtures(latitude: Double, longitude: Double): List<DiscoveredBuilding> = runCatching {
+    private fun discoverRealBuildings(latitude: Double, longitude: Double): List<DiscoveredBuilding> = runCatching {
         val query = """
             [out:json][timeout:8];
             (
@@ -231,13 +231,13 @@ class BuildingLoungeService(
         val root = objectMapper.readTree(body)
         root.path("elements")
             .filter { it.has("center") }
-            .mapNotNull { it.toFixture(latitude, longitude) }
+            .mapNotNull { it.toDiscoveredBuilding(latitude, longitude) }
             .sortedBy { distanceMeters(latitude, longitude, it.latitude, it.longitude) }
             .distinctBy { it.placeId }
             .take(4)
     }.getOrDefault(emptyList())
 
-    private fun JsonNode.toFixture(userLatitude: Double, userLongitude: Double): DiscoveredBuilding? {
+    private fun JsonNode.toDiscoveredBuilding(userLatitude: Double, userLongitude: Double): DiscoveredBuilding? {
         val center = path("center")
         val lat = center.path("lat").asDouble(Double.NaN)
         val lon = center.path("lon").asDouble(Double.NaN)
