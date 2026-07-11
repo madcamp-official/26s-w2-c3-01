@@ -247,7 +247,6 @@ data class MelodyUiState(
     val detectedTrackPlaying: Boolean = false,
     val nearbyListeners: List<NearbyListener>,
     val popularTracks: List<PopularTrack>,
-    val lounges: List<Lounge>,
     val notifications: List<InboxNotification>,
     val chats: List<ChatPreview>,
     val chatMessages: Map<String, List<ChatMessage>>,
@@ -261,15 +260,11 @@ data class MelodyUiState(
     val nearbyLoadState: NearbyLoadState = NearbyLoadState.IDLE,
     val nearbyErrorMessage: String? = null,
     val selectedNearbyHandle: String? = null,
-    val selectedLoungeId: String? = null,
     val feedbackMessage: String? = null,
     val dataSourceLabel: String = "DEMO LIVE"
 ) {
     val selectedNearby: NearbyListener?
         get() = nearbyListeners.firstOrNull { it.nearbyHandle == selectedNearbyHandle }
-
-    val selectedLounge: Lounge?
-        get() = lounges.firstOrNull { it.id == selectedLoungeId }
 
     val unreadNotificationCount: Int
         get() = notifications.count { !it.isRead } + chats.sumOf { it.unreadCount }

@@ -5,14 +5,9 @@ import com.example.myapplication.core.model.ChatPreview
 import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.DisplayPosition
 import com.example.myapplication.core.model.InboxNotification
-import com.example.myapplication.core.model.Lounge
-import com.example.myapplication.core.model.LoungePoll
-import com.example.myapplication.core.model.LoungeStatus
 import com.example.myapplication.core.model.MelodyUiState
-import com.example.myapplication.core.model.MusicCard
 import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.NotificationType
-import com.example.myapplication.core.model.PollOption
 import com.example.myapplication.core.model.PopularTrack
 import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.Proximity
@@ -104,50 +99,6 @@ object DemoCatalog {
             )
         )
 
-        val campusPoll = LoungePoll(
-            id = "poll-campus-vibe",
-            question = "지금 분위기에 맞는 장르는?",
-            options = listOf(
-                PollOption("indie", "Indie", 46),
-                PollOption("rnb", "R&B", 31),
-                PollOption("pop", "Pop", 23)
-            )
-        )
-
-        val lounges = listOf(
-            Lounge(
-                id = "campus-lounge",
-                name = "캠퍼스 라운지",
-                description = "현재 지역의 익명 음악 카드와 투표",
-                status = LoungeStatus.LIVE,
-                memberCount = 42,
-                vibeTags = listOf("Indie", "Calm", "Night"),
-                cards = listOf(
-                    MusicCard("card-blue-night", "Mint", blueNight, 12),
-                    MusicCard("card-late-drive", "Wave", lateDrive, 17),
-                    MusicCard("card-summer-end", "Nova", summerEnd, 22)
-                ),
-                poll = campusPoll,
-                isJoined = true
-            ),
-            Lounge(
-                id = "library-lounge",
-                name = "도서관 라운지",
-                description = "집중할 때 함께 듣는 음악",
-                status = LoungeStatus.LIVE,
-                memberCount = 18,
-                vibeTags = listOf("Ambient", "Piano")
-            ),
-            Lounge(
-                id = "festival-lounge",
-                name = "축제 라운지",
-                description = "오늘 18:00에 열려요",
-                status = LoungeStatus.SCHEDULED,
-                memberCount = 0,
-                vibeTags = listOf("Pop", "Dance")
-            )
-        )
-
         val notifications = listOf(
             InboxNotification(
                 id = "notification-reaction",
@@ -230,7 +181,6 @@ object DemoCatalog {
                 PopularTrack(lateDrive, listenerCount = 9, reactionCount = 5),
                 PopularTrack(indieRain, listenerCount = 7, reactionCount = 4)
             ),
-            lounges = lounges,
             notifications = notifications,
             chats = chats,
             chatMessages = messages,
