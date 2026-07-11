@@ -14,11 +14,15 @@ import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.security.Principal
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Date
@@ -26,12 +30,23 @@ import java.util.UUID
 import javax.crypto.SecretKey
 
 data class LoginRequest(val email: String, val password: String)
+data class SignupRequest(val email: String, val password: String, val displayName: String)
 data class GoogleLoginRequest(val idToken: String)
+data class RefreshRequest(val refreshToken: String)
+data class LogoutRequest(val refreshToken: String?)
+data class OnboardingRequest(
+    val acceptedTerms: Boolean,
+    val termsVersion: String,
+    val genres: List<String>,
+    val moods: List<String>,
+)
 data class TokenResponse(
     val accessToken: String,
+    val refreshToken: String,
     val tokenType: String = "Bearer",
     val expiresInSeconds: Long,
     val isNewUser: Boolean = false,
+    val onboardingComplete: Boolean = false,
 )
 
 @Component
@@ -77,11 +92,46 @@ class AuthService(
     private val googleTokens: GoogleTokenVerifier,
 ) {
     private val encoder = BCryptPasswordEncoder()
+    private val refreshDays = 30L
+
+    private fun tokenHash(token: String): String = MessageDigest.getInstance("SHA-256")
+        .digest(token.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+
+    private fun issueSession(userId: UUID, isNewUser: Boolean = false): TokenResponse {
+        val refreshToken = "${UUID.randomUUID()}.${UUID.randomUUID()}"
+        jdbc.update(
+            "insert into refresh_tokens(id,user_id,token_hash,expires_at) values (?,?,?,?)",
+            UUID.randomUUID(), userId, tokenHash(refreshToken),
+            java.sql.Timestamp.from(Instant.now().plus(refreshDays, ChronoUnit.DAYS)),
+        )
+        val completed = jdbc.queryForObject(
+            "select onboarding_completed from users where id=?", Boolean::class.java, userId,
+        ) ?: false
+        return TokenResponse(jwt.issue(userId), refreshToken, expiresInSeconds = jwt.ttlSeconds(),
+            isNewUser = isNewUser, onboardingComplete = completed)
+    }
     fun login(request: LoginRequest): TokenResponse {
         val row = jdbc.query("select id, password_hash from users where email = ?", { rs, _ -> UUID.fromString(rs.getString("id")) to rs.getString("password_hash") }, request.email).firstOrNull()
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password")
         if (row.second == null || !encoder.matches(request.password, row.second)) throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password")
-        return TokenResponse(jwt.issue(row.first), expiresInSeconds = jwt.ttlSeconds())
+        return issueSession(row.first)
+    }
+
+    @Transactional
+    fun signup(request: SignupRequest): TokenResponse {
+        val email = request.email.trim().lowercase()
+        val displayName = request.displayName.trim()
+        if (email.isBlank() || request.password.length < 6 || displayName.length !in 2..40) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Email, password (6+), and display name are required")
+        }
+        val userId = UUID.randomUUID()
+        val inserted = jdbc.update(
+            "insert into users(id,email,password_hash,display_name) values (?,?,?,?) on conflict(email) do nothing",
+            userId, email, encoder.encode(request.password), displayName,
+        )
+        if (inserted != 1) throw ResponseStatusException(HttpStatus.CONFLICT, "Email is already registered")
+        jdbc.update("insert into user_privacy_settings(user_id) values (?)", userId)
+        return issueSession(userId, isNewUser = true)
     }
 
     @Transactional
@@ -97,11 +147,47 @@ class AuthService(
         ).firstOrNull()
         val (userId, isNewUser) = existingIdentity?.let { it to false }
             ?: linkOrCreateGoogleUser(payload)
-        return TokenResponse(
-            jwt.issue(userId),
-            expiresInSeconds = jwt.ttlSeconds(),
-            isNewUser = isNewUser,
-        )
+        return issueSession(userId, isNewUser)
+    }
+
+    @Transactional
+    fun refresh(request: RefreshRequest): TokenResponse {
+        val hash = tokenHash(request.refreshToken)
+        val userId = jdbc.query(
+            "select user_id from refresh_tokens where token_hash=? and revoked_at is null and expires_at>now()",
+            { rs, _ -> UUID.fromString(rs.getString(1)) }, hash,
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is invalid")
+        jdbc.update("update refresh_tokens set revoked_at=now() where token_hash=?", hash)
+        return issueSession(userId)
+    }
+
+    @Transactional
+    fun logout(userId: UUID, request: LogoutRequest) {
+        if (request.refreshToken.isNullOrBlank()) {
+            jdbc.update("update refresh_tokens set revoked_at=now() where user_id=? and revoked_at is null", userId)
+        } else {
+            jdbc.update("update refresh_tokens set revoked_at=now() where user_id=? and token_hash=?", userId, tokenHash(request.refreshToken))
+        }
+    }
+
+    @Transactional
+    fun completeOnboarding(userId: UUID, request: OnboardingRequest) {
+        if (!request.acceptedTerms || request.termsVersion.isBlank()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Terms must be accepted")
+        }
+        val genres = request.genres.map(String::trim).filter(String::isNotBlank).distinct().take(8)
+        val moods = request.moods.map(String::trim).filter(String::isNotBlank).distinct().take(8)
+        if (genres.isEmpty() || moods.isEmpty()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one genre and mood are required")
+        }
+        jdbc.update("""update users set onboarding_completed=true,terms_accepted_at=now(),terms_version=?,
+            preferred_genres=?,mood_tags=?,updated_at=now() where id=?""",
+            request.termsVersion.take(32), genres.joinToString(","), moods.joinToString(","), userId)
+    }
+
+    @Transactional
+    fun deleteAccount(userId: UUID) {
+        jdbc.update("delete from users where id=?", userId)
     }
 
     private fun linkOrCreateGoogleUser(payload: GoogleIdToken.Payload): Pair<UUID, Boolean> {
@@ -144,5 +230,13 @@ class AuthService(
 @RequestMapping("/api/v1/auth")
 class AuthController(private val authService: AuthService) {
     @PostMapping("/login") fun login(@RequestBody request: LoginRequest) = authService.login(request)
+    @PostMapping("/signup") fun signup(@RequestBody request: SignupRequest) = authService.signup(request)
     @PostMapping("/google") fun googleLogin(@RequestBody request: GoogleLoginRequest) = authService.googleLogin(request)
+    @PostMapping("/refresh") fun refresh(@RequestBody request: RefreshRequest) = authService.refresh(request)
+    @PostMapping("/logout") fun logout(principal: Principal, @RequestBody request: LogoutRequest) =
+        authService.logout(UUID.fromString(principal.name), request)
+    @PutMapping("/onboarding") fun onboarding(principal: Principal, @RequestBody request: OnboardingRequest) =
+        authService.completeOnboarding(UUID.fromString(principal.name), request)
+    @DeleteMapping("/account") fun deleteAccount(principal: Principal) =
+        authService.deleteAccount(UUID.fromString(principal.name))
 }

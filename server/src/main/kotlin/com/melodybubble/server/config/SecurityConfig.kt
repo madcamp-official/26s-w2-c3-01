@@ -46,7 +46,15 @@ class SecurityConfig(private val jwtService: JwtService) {
         .csrf { it.disable() }
         .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
         .authorizeHttpRequests {
-            it.requestMatchers("/actuator/health", "/api/v1/auth/**", "/ws/**").permitAll()
+            it.requestMatchers(
+                "/actuator/health",
+                "/error",
+                "/api/v1/auth/login",
+                "/api/v1/auth/signup",
+                "/api/v1/auth/google",
+                "/api/v1/auth/refresh",
+                "/ws/**",
+            ).permitAll()
                 .requestMatchers("/internal/ops/**").hasRole("OPS")
                 .anyRequest().authenticated()
         }
