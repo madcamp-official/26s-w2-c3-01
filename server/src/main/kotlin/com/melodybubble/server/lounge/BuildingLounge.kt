@@ -151,34 +151,7 @@ class BuildingLoungeService(
 
     private fun cacheRealBuildings(latitude: Double, longitude: Double) {
         validateCoordinate(latitude, longitude)
-        jdbc.update(
-            """
-            UPDATE lounge_buildings
-            SET active=false, updated_at=now()
-            WHERE google_place_id IN (
-              'test-fixture-current-mall',
-              'test-fixture-nearby-cafe',
-              'test-fixture-music-hall'
-            )
-            """.trimIndent()
-        )
-
-        val fixtures = realBuildingFixtures(latitude, longitude).ifEmpty {
-            listOf(
-                TestFixture(
-                    placeId = "test-fixture-fallback-current-building",
-                    name = "Current Area Building",
-                    address = "Location based fallback",
-                    latitude = latitude,
-                    longitude = longitude,
-                    radiusMeters = 180,
-                    category = "BUILDING",
-                    subLounges = listOf("Local Picks" to "Mixed", "Focus Room" to "Focus")
-                )
-            )
-        }
-
-        fixtures.forEach { fixture ->
+        realBuildingFixtures(latitude, longitude).forEach { fixture ->
             val buildingId = jdbc.query(
                 """
                 INSERT INTO lounge_buildings(name, address, google_place_id, point, radius_m, category, active)
