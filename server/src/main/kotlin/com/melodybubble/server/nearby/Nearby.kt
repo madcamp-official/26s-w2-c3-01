@@ -293,6 +293,98 @@ class NearbyService(
         jdbc.update("delete from presence_sessions where user_id=? and client_session_id=?", userId, clientSessionId.take(128))
     }
 
+    private fun currentMusic(userId: UUID): CurrentMusic? = jdbc.query(
+        """
+        select track_title,artist_name from music_statuses
+        where user_id=? and is_playing=true and expires_at>now()
+        """.trimIndent(),
+        { rs, _ -> CurrentMusic(rs.getString(1), rs.getString(2)) },
+        userId,
+    ).firstOrNull()
+
+    private fun publishMusicChanged(userId: UUID, isPlaying: Boolean, track: TrackSummary?) {
+        musicAudience(userId).forEach { audience ->
+            realtime.toUserAfterCommit(
+                audience.userId,
+                RealtimeQueues.NEARBY,
+                RealtimeEventTypes.NEARBY_MUSIC_UPDATED,
+                NearbyMusicUpdatedPayload(
+                    nearbyHandle = audience.sourceHandle,
+                    isPlaying = isPlaying,
+                    track = track,
+                ),
+            )
+            realtime.toUserAfterCommit(
+                audience.userId,
+                RealtimeQueues.NEARBY,
+                RealtimeEventTypes.POPULAR_TRACKS_UPDATED,
+                PopularTracksUpdatedPayload(popularTracksFor(audience.userId)),
+            )
+        }
+    }
+
+    private fun musicAudience(sourceUserId: UUID): List<MusicAudienceMember> = jdbc.query(
+        """
+        with source_locations as (
+          select session.nearby_handle,location.point,session.last_seen_at
+          from presence_sessions session
+          join current_locations location on location.session_id=session.id
+          where session.user_id=? and session.expires_at>now() and location.expires_at>now()
+        )
+        select distinct on (recipient_session.user_id)
+          recipient_session.user_id recipient_id,source.nearby_handle
+        from source_locations source
+        join current_locations recipient_location
+          on recipient_location.expires_at>now()
+        join presence_sessions recipient_session
+          on recipient_session.id=recipient_location.session_id
+         and recipient_session.expires_at>now()
+         and recipient_session.user_id<>?
+        join user_privacy_settings recipient_privacy
+          on recipient_privacy.user_id=recipient_session.user_id
+        join user_privacy_settings source_privacy on source_privacy.user_id=?
+        where ST_DWithin(
+            source.point::geography,
+            recipient_location.point::geography,
+            recipient_privacy.discovery_radius_meters
+          )
+          and source_privacy.discoverable=true
+          and source_privacy.share_music=true
+          and source_privacy.discoverability_scope<>'HIDDEN'
+          and source_privacy.music_visibility<>'HIDDEN'
+          and (
+            source_privacy.discoverability_scope='NEARBY' or (
+              source_privacy.discoverability_scope='MUTUALS'
+              and exists(select 1 from user_follows f where f.follower_id=recipient_session.user_id and f.followed_id=?)
+              and exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=recipient_session.user_id)
+            )
+          )
+          and (
+            source_privacy.music_visibility='TITLE_ARTIST' or (
+              source_privacy.music_visibility='MUTUALS'
+              and exists(select 1 from user_follows f where f.follower_id=recipient_session.user_id and f.followed_id=?)
+              and exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=recipient_session.user_id)
+            )
+          )
+          and not exists(
+            select 1 from user_blocks block
+            where (block.blocker_id=? and block.blocked_id=recipient_session.user_id)
+               or (block.blocker_id=recipient_session.user_id and block.blocked_id=?)
+          )
+        order by recipient_session.user_id,
+          ST_DistanceSphere(source.point,recipient_location.point),source.last_seen_at desc
+        """.trimIndent(),
+        { rs, _ ->
+            MusicAudienceMember(
+                userId = UUID.fromString(rs.getString("recipient_id")),
+                sourceHandle = rs.getString("nearby_handle"),
+            )
+        },
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+    }
+
     private fun discoveryRadius(userId: UUID): Int = (jdbc.queryForObject(
         "select coalesce(discovery_radius_meters,300) from user_privacy_settings where user_id=?",
         Int::class.java,
