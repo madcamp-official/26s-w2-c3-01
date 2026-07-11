@@ -733,13 +733,13 @@ class DemoMelodyRepository(
     }
 
     override fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>) {
+        val token = accessToken ?: return
         val previousProfile = _state.value.profile
-        _state.update { current -> current.copy(profile = current.profile.copy(
+        _state.update { current -> current.copy(profileSaving = true, profile = current.profile.copy(
             accountAlias = displayName.trim(), nearbyDisplayAlias = displayName.trim(), colorHex = colorHex,
             bio = bio.trim(), avatarDataUrl = avatarDataUrl, genres = genres, moods = moods,
         )) }
         persistProfile(_state.value.profile)
-        val token = accessToken ?: return
         scope.launch {
             runCatching {
                 profileApi.update("Bearer $token", ProfileUpdateRequest(
@@ -752,6 +752,7 @@ class DemoMelodyRepository(
                 if (isCurrentSession(token)) {
                     _state.update { state -> state.copy(
                         profile = previousProfile,
+                        profileSaving = false,
                         feedbackMessage = "프로필을 저장하지 못해 이전 값으로 되돌렸어요",
                     ) }
                     persistProfile(previousProfile)
@@ -972,7 +973,7 @@ class DemoMelodyRepository(
     }
 
     private fun applyRemoteProfile(remote: RemoteProfile, feedback: String? = null) {
-        _state.update { current -> current.copy(profile = current.profile.copy(
+        _state.update { current -> current.copy(profileSaving = false, profile = current.profile.copy(
             accountAlias = remote.displayName,
             nearbyDisplayAlias = remote.displayName,
             colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,

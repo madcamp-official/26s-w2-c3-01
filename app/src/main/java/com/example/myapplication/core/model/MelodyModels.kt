@@ -234,6 +234,7 @@ data class MelodyUiState(
     val nearbyLoadState: NearbyLoadState = NearbyLoadState.IDLE,
     val nearbyErrorMessage: String? = null,
     val selectedNearbyHandle: String? = null,
+    val profileSaving: Boolean = false,
     val feedbackMessage: String? = null,
     val dataSourceLabel: String = "DEMO LIVE"
 ) {
