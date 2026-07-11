@@ -75,8 +75,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
     private val lyriaClipPlayer = LyriaClipPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
-    private var accessToken: String? = null
+    @Volatile private var accessToken: String? = null
     private var refreshToken: String? = null
+    private var removeAccessTokenListener: (() -> Unit)? = null
     private val tokenStore = SecureTokenStore(application)
     private val _melodyAliasGenerationState = MutableStateFlow<MelodyAliasGenerationState>(MelodyAliasGenerationState.Idle)
     private val _lyriaGenerationState = MutableStateFlow<LyriaGenerationState>(LyriaGenerationState.Idle)
@@ -89,6 +90,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     val buildingLoungeState = _buildingLoungeState.asStateFlow()
 
     init {
+        removeAccessTokenListener = ApiClient.addAccessTokenListener { refreshedToken ->
+            viewModelScope.launch {
+                accessToken = refreshedToken
+                repository.refreshSession(refreshedToken)
+            }
+        }
         ApiClient.configureSession(tokenStore) {
             viewModelScope.launch { clearSession() }
         }
@@ -107,8 +114,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     authRepository.refresh(storedRefresh)
                         .onSuccess(::acceptSession)
                         .onFailure {
-                            tokenStore.clear()
-                            _loginState.value = LoginUiState.Idle
+                            clearSession()
                         }
                 }
             }
@@ -155,8 +161,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
-        val access = accessToken
-        val refresh = refreshToken
+        val stored = tokenStore.load()
+        val access = stored?.accessToken ?: accessToken
+        val refresh = stored?.refreshToken ?: refreshToken
         viewModelScope.launch {
             if (access != null) authRepository.logout(access, refresh)
             clearSession()
@@ -172,7 +179,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteAccount() {
-        val access = accessToken ?: return
+        val access = tokenStore.load()?.accessToken ?: accessToken ?: return
         viewModelScope.launch {
             authRepository.deleteAccount(access)
                 .onSuccess { clearSession() }
@@ -211,6 +218,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
     fun selectNearby(handle: String?) = repository.selectNearby(handle)
     fun selectLounge(roomId: String?) = repository.selectLounge(roomId)
+    fun openChat(roomId: String) = repository.openChat(roomId)
+    fun closeChat(roomId: String) = repository.closeChat(roomId)
     fun startSharing() = repository.startSharing()
     fun stopSharing() = repository.stopSharing()
     fun sharingPermissionRequired() = repository.setSharingPermissionRequired()
@@ -442,6 +451,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun clearFeedback() = repository.clearFeedback()
 
     override fun onCleared() {
+        removeAccessTokenListener?.invoke()
+        removeAccessTokenListener = null
         melodyAliasPreviewPlayer.release()
         lyriaClipPlayer.release()
         repository.close()
