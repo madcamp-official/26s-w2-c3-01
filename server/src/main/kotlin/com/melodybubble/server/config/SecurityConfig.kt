@@ -1,6 +1,7 @@
 package com.melodybubble.server.config
 
 import com.melodybubble.server.auth.JwtService
+import com.melodybubble.server.realtime.RealtimeSessionPolicy
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -23,7 +24,10 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.filter.OncePerRequestFilter
 
 @Configuration
-class SecurityConfig(private val jwtService: JwtService) {
+class SecurityConfig(
+    private val jwtService: JwtService,
+    private val realtimeSessions: RealtimeSessionPolicy,
+) {
     @Bean
     fun passwordEncoder(): PasswordEncoder = BCryptPasswordEncoder()
 
@@ -59,16 +63,19 @@ class SecurityConfig(private val jwtService: JwtService) {
                 .anyRequest().authenticated()
         }
         .httpBasic(Customizer.withDefaults())
-        .addFilterBefore(BearerFilter(jwtService), UsernamePasswordAuthenticationFilter::class.java)
+        .addFilterBefore(BearerFilter(jwtService, realtimeSessions), UsernamePasswordAuthenticationFilter::class.java)
         .build()
 }
 
-private class BearerFilter(private val jwtService: JwtService) : OncePerRequestFilter() {
+private class BearerFilter(
+    private val jwtService: JwtService,
+    private val realtimeSessions: RealtimeSessionPolicy,
+) : OncePerRequestFilter() {
     override fun doFilterInternal(request: HttpServletRequest, response: HttpServletResponse, chain: FilterChain) {
         val token = request.getHeader(HttpHeaders.AUTHORIZATION)?.removePrefix("Bearer ")
         if (!token.isNullOrBlank()) {
-            jwtService.parse(token)?.let { userId ->
-                SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(userId.toString(), null, emptyList())
+            jwtService.parseSession(token)?.takeIf(realtimeSessions::isAllowed)?.let { session ->
+                SecurityContextHolder.getContext().authentication = UsernamePasswordAuthenticationToken(session.userId.toString(), null, emptyList())
             }
         }
         chain.doFilter(request, response)
