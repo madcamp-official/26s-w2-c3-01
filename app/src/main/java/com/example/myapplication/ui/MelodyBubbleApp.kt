@@ -18,6 +18,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -83,6 +84,9 @@ fun MelodyBubbleApp(
     val buildingLoungeState by viewModel.buildingLoungeState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val permissionPreferences = remember {
+        context.getSharedPreferences("melody-bubble-permission-prompts", android.content.Context.MODE_PRIVATE)
+    }
 
     fun requestNowPlayingAccessIfNeeded() {
         if (!NowPlayingNotificationListenerService.isEnabled(context)) {
@@ -104,6 +108,22 @@ fun MelodyBubbleApp(
         } else {
             viewModel.sharingPermissionRequired()
         }
+    }
+
+    val realtimeNotificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) {
+        permissionPreferences.edit().putBoolean("realtime-notifications-requested", true).apply()
+    }
+
+    LaunchedEffect(loginState, state.isOnboardingComplete) {
+        val shouldRequest = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            loginState is LoginUiState.Success &&
+            state.isOnboardingComplete &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED &&
+            !permissionPreferences.getBoolean("realtime-notifications-requested", false)
+        if (shouldRequest) realtimeNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     fun requestSharingStart() {
@@ -289,6 +309,10 @@ fun MelodyBubbleApp(
                 if (roomId == null || chat == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
+                    DisposableEffect(roomId) {
+                        viewModel.openChat(roomId)
+                        onDispose { viewModel.closeChat(roomId) }
+                    }
                     val peerTrack = state.nearbyListeners
                         .firstOrNull { it.nearbyHandle == chat.peerHandle }
                         ?.currentTrack
