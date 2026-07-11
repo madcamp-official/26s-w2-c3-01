@@ -306,6 +306,91 @@ class ChatService(
                 ),
             )
             publishRoomUpdated(memberId, roomId)
+        }
+    }
+
+    private fun publishRoomUpdated(userId: UUID, roomId: UUID) {
+        roomUpdatedPayload(userId, roomId)?.let { payload ->
+            realtime.toUserAfterCommit(
+                userId,
+                RealtimeQueues.CHAT,
+                RealtimeEventTypes.CHAT_ROOM_UPDATED,
+                payload,
+            )
+        }
+    }
+
+    private fun roomUpdatedPayload(userId: UUID, roomId: UUID): ChatRoomUpdatedPayload? = jdbc.query(
+        """
+        select member.room_id,last_message.id,last_message.content,last_message.sent_at,
+          (select count(*) from chat_messages unread
+           where unread.room_id=member.room_id and unread.sender_id<>member.user_id
+             and (member.last_read_message_id is null or unread.sent_at > coalesce(
+               (select sent_at from chat_messages where id=member.last_read_message_id), '-infinity'
+             ))) unread_count
+        from chat_room_members member
+        left join lateral (
+          select id,content,sent_at from chat_messages message
+          where message.room_id=member.room_id order by sent_at desc,id desc limit 1
+        ) last_message on true
+        where member.room_id=? and member.user_id=?
+        """.trimIndent(),
+        { rs, _ ->
+            ChatRoomUpdatedPayload(
+                roomId = UUID.fromString(rs.getString("room_id")),
+                lastMessageId = rs.getString("id")?.let(UUID::fromString),
+                lastMessageContent = rs.getString("content"),
+                lastMessageAt = rs.getTimestamp("sent_at")?.toInstant(),
+                unreadCount = rs.getInt("unread_count"),
+            )
+        },
+        roomId,
+        userId,
+    ).firstOrNull()
+
+    private fun roomMembers(roomId: UUID): List<UUID> = jdbc.query(
+        "select user_id from chat_room_members where room_id=? order by user_id",
+        { rs, _ -> UUID.fromString(rs.getString(1)) },
+        roomId,
+    )
+
+    private fun roomSummary(userId: UUID, roomId: UUID): DirectChatSummary? = jdbc.query(
+        """
+        select pair.room_id,
+          (select ps.nearby_handle from presence_sessions ps
+           where ps.user_id=peer.id and ps.expires_at>now()
+           order by ps.last_seen_at desc limit 1) peer_handle,
+          peer.display_name,peer.profile_color,last_message.content,last_message.sent_at,
+          (select count(*) from chat_messages unread
+           where unread.room_id=pair.room_id and unread.sender_id<>?
+             and (member.last_read_message_id is null or unread.sent_at > coalesce(
+               (select sent_at from chat_messages where id=member.last_read_message_id), '-infinity'
+             ))) unread_count
+        from direct_chat_pairs pair
+        join chat_room_members member on member.room_id=pair.room_id and member.user_id=?
+        join users peer on peer.id=case when pair.first_user_id=? then pair.second_user_id else pair.first_user_id end
+        left join lateral (
+          select content,sent_at from chat_messages message
+          where message.room_id=pair.room_id order by sent_at desc,id desc limit 1
+        ) last_message on true
+        where pair.room_id=?
+        """.trimIndent(),
+        { rs, _ ->
+            DirectChatSummary(
+                roomId = UUID.fromString(rs.getString("room_id")),
+                peerHandle = rs.getString("peer_handle"),
+                peerAlias = rs.getString("display_name"),
+                peerColor = rs.getString("profile_color"),
+                lastMessage = rs.getString("content"),
+                lastMessageAt = rs.getTimestamp("sent_at")?.toInstant(),
+                unreadCount = rs.getInt("unread_count"),
+            )
+        },
+        userId,
+        userId,
+        userId,
+        roomId,
+    ).firstOrNull()
 
     private fun requireActiveMutual(userId: UUID, roomId: UUID) {
         val allowed = jdbc.queryForObject(
@@ -352,4 +437,8 @@ class ChatController(private val chat: ChatService) {
         @PathVariable roomId: UUID,
         @RequestBody request: SendChatMessageRequest,
     ) = chat.send(UUID.fromString(principal.name), roomId, request)
+
+    @PutMapping("/{roomId}/read")
+    fun read(principal: Principal, @PathVariable roomId: UUID) =
+        chat.read(UUID.fromString(principal.name), roomId)
 }
