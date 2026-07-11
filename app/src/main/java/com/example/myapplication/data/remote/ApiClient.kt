@@ -64,6 +64,9 @@ object ApiClient {
     fun createMelodyAliasApi(environment: ApiEnvironment = ApiEnvironment()): MelodyAliasApi =
         authenticatedRetrofit(environment).create(MelodyAliasApi::class.java)
 
+    fun createBuildingLoungeApi(environment: ApiEnvironment = ApiEnvironment()): BuildingLoungeApi =
+        retrofit(environment).create(BuildingLoungeApi::class.java)
+
     fun createLyriaMusicApi(environment: ApiEnvironment = ApiEnvironment()): LyriaMusicApi {
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

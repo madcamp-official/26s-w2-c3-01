@@ -13,6 +13,8 @@ import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.data.MelodyRepository
 import com.example.myapplication.data.remote.AuthRepository
 import com.example.myapplication.data.remote.ApiClient
+import com.example.myapplication.data.remote.BuildingLoungeRepository
+import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
 import com.example.myapplication.data.remote.MelodyAliasGenerateRequest
 import com.example.myapplication.data.remote.MelodyAliasRepository
 import com.example.myapplication.data.remote.LyriaAliasGenerateRequest
@@ -49,12 +51,28 @@ sealed interface LyriaGenerationState {
     data class Error(val message: String) : LyriaGenerationState
 }
 
+data class UserMapLocation(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float? = null
+)
+
+data class BuildingLoungeUiState(
+    val loading: Boolean = false,
+    val userLocation: UserMapLocation? = null,
+    val lounges: List<BuildingLoungeSummaryDto> = emptyList(),
+    val enteredLoungeId: String? = null,
+    val subLounges: List<com.example.myapplication.data.remote.SubLoungeSummaryDto> = emptyList(),
+    val message: String? = null
+)
+
 class MelodyViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: MelodyRepository = DemoMelodyRepository(application)
     private val authRepository by lazy { AuthRepository() }
     private val melodyAliasPreviewPlayer = MelodyAliasPreviewPlayer()
     private val melodyAliasRepository by lazy { MelodyAliasRepository() }
     private val lyriaRepository by lazy { LyriaMusicRepository() }
+    private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
     private val lyriaClipPlayer = LyriaClipPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private var accessToken: String? = null
@@ -62,11 +80,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val tokenStore = SecureTokenStore(application)
     private val _melodyAliasGenerationState = MutableStateFlow<MelodyAliasGenerationState>(MelodyAliasGenerationState.Idle)
     private val _lyriaGenerationState = MutableStateFlow<LyriaGenerationState>(LyriaGenerationState.Idle)
+    private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
     val melodyAliasGenerationState = _melodyAliasGenerationState.asStateFlow()
     val lyriaGenerationState = _lyriaGenerationState.asStateFlow()
+    val buildingLoungeState = _buildingLoungeState.asStateFlow()
 
     init {
         ApiClient.configureSession(tokenStore) {
@@ -287,6 +307,134 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         lyriaClipPlayer.stop()
         _lyriaGenerationState.value = LyriaGenerationState.Idle
     }
+
+    fun refreshBuildingLounges(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
+        val token = accessToken
+        if (token.isNullOrBlank()) {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                message = "Login is required to load building lounges."
+            )
+            return
+        }
+        viewModelScope.launch {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                loading = true,
+                userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                message = null
+            )
+            buildingLoungeRepository.nearby(token, latitude, longitude)
+                .onSuccess { lounges ->
+                    val hasOldOffsetFixtures = lounges.any {
+                        it.name == "Test Mall Lounge" ||
+                            it.name == "Test Cafe Lounge" ||
+                            it.name == "Test Music Hall Lounge"
+                    }
+                    if (lounges.isEmpty() || hasOldOffsetFixtures) {
+                        buildingLoungeRepository.createTestFixtures(token, latitude, longitude)
+                            .onSuccess { seededLounges ->
+                                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                                    loading = false,
+                                    lounges = seededLounges,
+                                    message = "Real building test lounges are ready."
+                                )
+                            }
+                            .onFailure {
+                                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                                    loading = false,
+                                    lounges = emptyList(),
+                                    message = "Could not create test places."
+                                )
+                            }
+                        return@launch
+                    }
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        loading = false,
+                        lounges = lounges,
+                        message = if (lounges.none { it.inside }) "No active lounge in this area yet." else null
+                    )
+                }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        loading = false,
+                        message = "Could not load building lounges."
+                    )
+                }
+        }
+    }
+
+    fun enterBuildingLounge(loungeId: String) {
+        val token = accessToken ?: return
+        val location = _buildingLoungeState.value.userLocation ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.enter(
+                token,
+                loungeId,
+                location.latitude,
+                location.longitude,
+                location.accuracyMeters
+            ).onSuccess {
+                val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    enteredLoungeId = loungeId,
+                    subLounges = subLounges,
+                    message = "Entered ${it.lounge.name}."
+                )
+            }.onFailure {
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    message = "Move inside the lounge circle to enter."
+                )
+            }
+        }
+    }
+
+    fun heartbeatBuildingLounge(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
+        val token = accessToken ?: return
+        val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.heartbeat(token, loungeId, latitude, longitude, accuracyMeters)
+                .onSuccess { response ->
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                        enteredLoungeId = if (response.forcedExit) null else loungeId,
+                        subLounges = if (response.forcedExit) emptyList() else _buildingLoungeState.value.subLounges,
+                        message = if (response.forcedExit) "You left the building lounge." else null
+                    )
+                }
+        }
+    }
+
+    fun leaveBuildingLounge() {
+        val token = accessToken ?: return
+        val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.leave(token, loungeId)
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                enteredLoungeId = null,
+                subLounges = emptyList(),
+                message = "Left the lounge."
+            )
+        }
+    }
+
+    fun createBuildingSubLounge(title: String, style: String?) {
+        val token = accessToken ?: return
+        val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.createSubLounge(token, loungeId, title, style)
+                .onSuccess {
+                    val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        subLounges = subLounges,
+                        message = "Created ${it.title}."
+                    )
+                }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "Could not create sub lounge.")
+                }
+        }
+    }
+
     fun previewMelodyAlias(candidate: MelodyAliasCandidate) = melodyAliasPreviewPlayer.play(candidate)
     fun previewMelodyTone(tone: String) = melodyAliasPreviewPlayer.playToneSample(tone)
     fun createDemoExchange(peerAlias: String) = repository.createDemoExchange(peerAlias)

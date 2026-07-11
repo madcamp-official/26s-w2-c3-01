@@ -19,6 +19,7 @@ fun configuredValue(name: String): String =
             "API_BASE_URL" -> "https://sy-725ad61798e54aca9aca4901becbef0b.ecs.ap-northeast-2.on.aws"
             "STOMP_WS_URL" -> "wss://sy-725ad61798e54aca9aca4901becbef0b.ecs.ap-northeast-2.on.aws/ws"
             "GOOGLE_WEB_CLIENT_ID" -> "170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com"
+            "GOOGLE_MAPS_API_KEY" -> ""
             else -> ""
         }
 
@@ -53,6 +54,12 @@ android {
             "GOOGLE_WEB_CLIENT_ID",
             quotedBuildConfig(configuredValue("GOOGLE_WEB_CLIENT_ID"))
         )
+        buildConfigField(
+            "String",
+            "GOOGLE_MAPS_API_KEY",
+            quotedBuildConfig(configuredValue("GOOGLE_MAPS_API_KEY"))
+        )
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = configuredValue("GOOGLE_MAPS_API_KEY")
     }
 
     buildTypes {
@@ -95,6 +102,9 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.google.identity.googleid)
+    implementation(libs.google.play.services.maps)
+    implementation(libs.google.play.services.location)
+    implementation(libs.kotlinx.coroutines.play.services)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
