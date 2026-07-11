@@ -2,6 +2,7 @@ package com.melodybubble.server.nearby
 
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -27,13 +28,18 @@ data class PresenceSettingsUpdate(
 
 @RestController
 @RequestMapping("/api/v1/me/presence-settings")
-class PresenceSettingsController(private val jdbc: JdbcTemplate) {
+class PresenceSettingsController(
+    private val jdbc: JdbcTemplate,
+    private val nearby: NearbyService,
+) {
     @GetMapping
     fun settings(principal: Principal) = load(UUID.fromString(principal.name))
 
     @PutMapping
+    @Transactional
     fun update(principal: Principal, @RequestBody request: PresenceSettingsUpdate): PresenceSettings {
         val userId = UUID.fromString(principal.name)
+        val previousAudience = nearby.musicAudienceSnapshot(userId)
         val discoverability = request.discoverabilityScope.trim().uppercase()
         val musicVisibility = request.musicVisibility.trim().uppercase()
         if (discoverability !in DISCOVERABILITY_SCOPES || musicVisibility !in MUSIC_VISIBILITIES) {
@@ -63,6 +69,7 @@ class PresenceSettingsController(private val jdbc: JdbcTemplate) {
             request.discoveryRadiusMeters,
             request.allowReactions,
         )
+        nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
         return load(userId)
     }
 
