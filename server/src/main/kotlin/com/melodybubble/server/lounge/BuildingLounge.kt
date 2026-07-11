@@ -149,7 +149,7 @@ class BuildingLoungeService(
         return BuildingLoungeSessionResponse(lounge = lounge, entered = true)
     }
 
-    fun createTestFixtures(latitude: Double, longitude: Double): TestFixturesResponse {
+    private fun cacheRealBuildings(latitude: Double, longitude: Double) {
         validateCoordinate(latitude, longitude)
         jdbc.update(
             """
@@ -234,7 +234,6 @@ class BuildingLoungeService(
                 )
             }
         }
-        return TestFixturesResponse(nearby(latitude, longitude))
     }
 
     private fun realBuildingFixtures(latitude: Double, longitude: Double): List<TestFixture> = runCatching {
