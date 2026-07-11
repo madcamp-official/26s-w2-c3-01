@@ -5,6 +5,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -62,6 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1124,7 +1126,7 @@ private fun AbstractNearbyMap(
                 }
                 drawCircle(
                     color = MelodyBubbleColors.Primary.copy(alpha = 0.10f),
-                    radius = 31.dp.toPx(),
+                    radius = 20.dp.toPx(),
                     center = center
                 )
             }
@@ -1132,11 +1134,11 @@ private fun AbstractNearbyMap(
             Surface(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(58.dp)
+                    .size(42.dp)
                     .semantics { contentDescription = "내 버블" },
                 shape = CircleShape,
                 color = MelodyBubbleColors.Primary,
-                border = BorderStroke(5.dp, MelodyBubbleColors.Primary.copy(alpha = 0.15f))
+                border = BorderStroke(2.dp, MelodyBubbleColors.Primary.copy(alpha = 0.20f))
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
@@ -1182,6 +1184,8 @@ private fun ListenerMapBubble(
     Column(
         modifier = modifier
             .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
                 role = Role.Button,
                 onClickLabel = "${listener.displayAlias} 선택",
                 onClick = onClick
@@ -1239,31 +1243,22 @@ private fun ListenerMapBubble(
                     .clip(CircleShape)
                     .background(Color(listener.colorHex))
                     .border(
-                        width = if (selected) 3.dp else 1.dp,
+                        width = if (selected) 2.dp else 1.dp,
                         color = if (selected) MelodyBubbleColors.PrimarySoft else Color.White.copy(alpha = 0.35f),
                         shape = CircleShape
                     )
             )
         }
         Spacer(Modifier.height(4.dp))
-        Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = MelodyBubbleColors.Background.copy(alpha = 0.82f),
-            border = BorderStroke(
-                1.dp,
-                MelodyBubbleColors.Border
-            )
-        ) {
-            Text(
-                text = listener.displayAlias,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                color = MelodyBubbleColors.Text,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+        Text(
+            text = listener.displayAlias,
+            modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp),
+            color = if (selected) MelodyBubbleColors.PrimarySoft else MelodyBubbleColors.Text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

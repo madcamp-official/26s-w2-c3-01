@@ -1,0 +1,160 @@
+package com.example.myapplication.data.remote
+
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.Header
+import retrofit2.http.POST
+import retrofit2.http.Path
+import retrofit2.http.Query
+
+data class BuildingLoungeSummaryDto(
+    val id: String,
+    val buildingId: String,
+    val name: String,
+    val address: String?,
+    val latitude: Double,
+    val longitude: Double,
+    val radiusMeters: Int,
+    val category: String,
+    val distanceMeters: Double,
+    val inside: Boolean,
+    val activeMembers: Int,
+    val subLoungeCount: Int
+)
+
+data class EnterBuildingLoungeRequestDto(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float? = null
+)
+
+data class BuildingLoungeSessionResponseDto(
+    val lounge: BuildingLoungeSummaryDto,
+    val entered: Boolean
+)
+
+data class HeartbeatRequestDto(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float? = null
+)
+
+data class HeartbeatResponseDto(
+    val inside: Boolean,
+    val outsideCount: Int,
+    val forcedExit: Boolean
+)
+
+data class TestFixturesRequestDto(
+    val latitude: Double,
+    val longitude: Double
+)
+
+data class TestFixturesResponseDto(
+    val lounges: List<BuildingLoungeSummaryDto>
+)
+
+data class CreateSubLoungeRequestDto(
+    val title: String,
+    val style: String? = null
+)
+
+data class SubLoungeSummaryDto(
+    val id: String,
+    val buildingLoungeId: String,
+    val title: String,
+    val style: String?,
+    val memberCount: Int,
+    val createdAt: String
+)
+
+interface BuildingLoungeApi {
+    @GET("api/v1/building-lounges/nearby")
+    suspend fun nearby(
+        @Header("Authorization") authorization: String,
+        @Query("latitude") latitude: Double,
+        @Query("longitude") longitude: Double
+    ): List<BuildingLoungeSummaryDto>
+
+    @POST("api/v1/building-lounges/{loungeId}/enter")
+    suspend fun enter(
+        @Header("Authorization") authorization: String,
+        @Path("loungeId") loungeId: String,
+        @Body request: EnterBuildingLoungeRequestDto
+    ): BuildingLoungeSessionResponseDto
+
+    @POST("api/v1/building-lounges/{loungeId}/heartbeat")
+    suspend fun heartbeat(
+        @Header("Authorization") authorization: String,
+        @Path("loungeId") loungeId: String,
+        @Body request: HeartbeatRequestDto
+    ): HeartbeatResponseDto
+
+    @POST("api/v1/building-lounges/{loungeId}/leave")
+    suspend fun leave(
+        @Header("Authorization") authorization: String,
+        @Path("loungeId") loungeId: String
+    )
+
+    @POST("api/v1/building-lounges/test-fixtures")
+    suspend fun createTestFixtures(
+        @Header("Authorization") authorization: String,
+        @Body request: TestFixturesRequestDto
+    ): TestFixturesResponseDto
+
+    @GET("api/v1/building-lounges/{loungeId}/sub-lounges")
+    suspend fun subLounges(
+        @Header("Authorization") authorization: String,
+        @Path("loungeId") loungeId: String
+    ): List<SubLoungeSummaryDto>
+
+    @POST("api/v1/building-lounges/{loungeId}/sub-lounges")
+    suspend fun createSubLounge(
+        @Header("Authorization") authorization: String,
+        @Path("loungeId") loungeId: String,
+        @Body request: CreateSubLoungeRequestDto
+    ): SubLoungeSummaryDto
+}
+
+class BuildingLoungeRepository(
+    private val api: BuildingLoungeApi = ApiClient.createBuildingLoungeApi()
+) {
+    suspend fun nearby(token: String, latitude: Double, longitude: Double): Result<List<BuildingLoungeSummaryDto>> =
+        runCatching { api.nearby(token.bearer(), latitude, longitude) }
+
+    suspend fun enter(
+        token: String,
+        loungeId: String,
+        latitude: Double,
+        longitude: Double,
+        accuracyMeters: Float?
+    ): Result<BuildingLoungeSessionResponseDto> =
+        runCatching {
+            api.enter(token.bearer(), loungeId, EnterBuildingLoungeRequestDto(latitude, longitude, accuracyMeters))
+        }
+
+    suspend fun heartbeat(
+        token: String,
+        loungeId: String,
+        latitude: Double,
+        longitude: Double,
+        accuracyMeters: Float?
+    ): Result<HeartbeatResponseDto> =
+        runCatching {
+            api.heartbeat(token.bearer(), loungeId, HeartbeatRequestDto(latitude, longitude, accuracyMeters))
+        }
+
+    suspend fun leave(token: String, loungeId: String): Result<Unit> =
+        runCatching { api.leave(token.bearer(), loungeId) }
+
+    suspend fun createTestFixtures(token: String, latitude: Double, longitude: Double): Result<List<BuildingLoungeSummaryDto>> =
+        runCatching { api.createTestFixtures(token.bearer(), TestFixturesRequestDto(latitude, longitude)).lounges }
+
+    suspend fun subLounges(token: String, loungeId: String): Result<List<SubLoungeSummaryDto>> =
+        runCatching { api.subLounges(token.bearer(), loungeId) }
+
+    suspend fun createSubLounge(token: String, loungeId: String, title: String, style: String?): Result<SubLoungeSummaryDto> =
+        runCatching { api.createSubLounge(token.bearer(), loungeId, CreateSubLoungeRequestDto(title, style)) }
+
+    private fun String.bearer(): String = "Bearer $this"
+}
