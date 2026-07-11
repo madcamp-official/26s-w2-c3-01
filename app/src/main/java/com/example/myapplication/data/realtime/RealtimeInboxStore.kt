@@ -182,3 +182,9 @@ class RealtimeInboxStore(context: Context) {
 
     companion object {
         private const val PREFERENCES_NAME = "realtime_inbox"
+        private const val KEY_OWNER = "owner"
+        private const val KEY_ITEMS = "items"
+        private const val MAX_ITEMS = 100
+        private val CONTROL_CHARACTERS = Regex("[\\p{Cc}\\p{Cf}]+")
+    }
+}
