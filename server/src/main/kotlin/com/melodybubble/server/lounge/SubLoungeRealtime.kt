@@ -366,3 +366,95 @@ class SubLoungeRealtimeService(
     private fun snapshotUnchecked(userId: UUID, subLoungeId: UUID): SubLoungeSnapshot {
         val room = jdbc.query(
             """
+            select room.id,room.building_lounge_id,room.title,room.style
+            from sub_lounges room where room.id=? and room.active=true
+            """.trimIndent(),
+            { rs, _ -> arrayOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)) },
+            subLoungeId,
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "하위 라운지를 찾을 수 없습니다.")
+        return SubLoungeSnapshot(
+            id = UUID.fromString(room[0]),
+            buildingLoungeId = UUID.fromString(room[1]),
+            title = room[2],
+            style = room[3],
+            memberCount = memberCount(subLoungeId),
+            joined = hasActiveMembership(jdbc, userId, subLoungeId),
+            listeningStatuses = listeningStatuses(subLoungeId),
+            cards = cards(userId, subLoungeId),
+            poll = poll(userId, subLoungeId),
+        )
+    }
+
+    private fun listeningStatuses(subLoungeId: UUID): List<LoungeListeningStatus> = jdbc.query(
+        """
+        select person.display_name,status.track_title,status.artist_name,status.album_art_url,
+          status.is_playing,status.updated_at
+        from sub_lounge_listening_statuses status
+        join users person on person.id=status.user_id
+        join sub_lounge_members member on member.sub_lounge_id=status.sub_lounge_id
+          and member.user_id=status.user_id and member.active=true
+        where status.sub_lounge_id=? and status.expires_at>now()
+        order by status.updated_at desc
+        """.trimIndent(),
+        { rs, _ ->
+            LoungeListeningStatus(
+                listenerAlias = rs.getString("display_name"),
+                trackTitle = rs.getString("track_title"),
+                artistName = rs.getString("artist_name"),
+                albumArtUrl = rs.getString("album_art_url"),
+                isPlaying = rs.getBoolean("is_playing"),
+                updatedAt = rs.getTimestamp("updated_at").toInstant(),
+            )
+        },
+        subLoungeId,
+    )
+
+    private fun poll(userId: UUID, subLoungeId: UUID): LoungePollState {
+        val counts = jdbc.query(
+            "select target_key,count(*) from sub_lounge_votes where sub_lounge_id=? group by target_key",
+            { rs, _ -> rs.getString(1) to rs.getInt(2) },
+            subLoungeId,
+        ).toMap()
+        val myVote = jdbc.query(
+            "select target_key from sub_lounge_votes where sub_lounge_id=? and user_id=?",
+            { rs, _ -> rs.getString(1) },
+            subLoungeId,
+            userId,
+        ).firstOrNull()
+        return LoungePollState(POLL_KEYS.map { LoungePollOption(it, counts[it] ?: 0) }, myVote)
+    }
+
+    private fun requireBuildingSession(userId: UUID, subLoungeId: UUID): UUID = jdbc.query(
+        """
+        select room.building_lounge_id from sub_lounges room
+        join building_lounge_sessions session on session.building_lounge_id=room.building_lounge_id
+        where room.id=? and room.active=true and session.user_id=?
+          and session.active=true and session.expires_at>now()
+        """.trimIndent(),
+        { rs, _ -> UUID.fromString(rs.getString(1)) },
+        subLoungeId,
+        userId,
+    ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.FORBIDDEN, "건물 라운지에 먼저 입장해 주세요.")
+
+    private fun requireMember(userId: UUID, subLoungeId: UUID) {
+        if (!hasActiveMembership(jdbc, userId, subLoungeId)) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "하위 라운지 참가가 필요합니다.")
+        }
+    }
+
+    private fun deactivateMembership(userId: UUID, subLoungeId: UUID) {
+        jdbc.update(
+            "update sub_lounge_members set active=false,last_seen_at=now() where user_id=? and sub_lounge_id=?",
+            userId,
+            subLoungeId,
+        )
+        jdbc.update(
+            "delete from sub_lounge_listening_statuses where user_id=? and sub_lounge_id=?",
+            userId,
+            subLoungeId,
+        )
+    }
+
+    private fun memberCount(subLoungeId: UUID): Int = activeMemberCount(jdbc, subLoungeId)
+
+    private fun publishState(subLoungeId: UUID) {
