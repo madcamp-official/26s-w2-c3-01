@@ -175,14 +175,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun completeOnboarding(genres: List<String>, moods: List<String>) {
+        repository.completeOnboarding()
+        val current = _loginState.value as? LoginUiState.Success
+        if (current != null) _loginState.value = current.copy(onboardingComplete = true)
+        val profile = repository.state.value.profile
+        repository.updateProfile(
+            profile.accountAlias, profile.colorHex, profile.bio, profile.avatarDataUrl,
+            genres, moods,
+        )
         val access = accessToken ?: return
         viewModelScope.launch {
             authRepository.completeOnboarding(access, genres, moods)
-                .onSuccess {
-                    repository.completeOnboarding()
-                    val current = _loginState.value as? LoginUiState.Success
-                    if (current != null) _loginState.value = current.copy(onboardingComplete = true)
-                }
         }
     }
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
