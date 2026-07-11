@@ -88,7 +88,6 @@ interface MelodyRepository {
     fun completeOnboarding()
     fun selectTab(tab: MainTab)
     fun selectNearby(handle: String?)
-    fun selectLounge(roomId: String?)
     fun openChat(roomId: String)
     fun closeChat(roomId: String)
     fun startSharing()
@@ -102,8 +101,6 @@ interface MelodyRepository {
     fun report(handle: String, reason: ReportReason = ReportReason.OTHER, description: String? = null)
     fun loadBlockedUsers()
     fun unblock(blockId: String)
-    fun sendMusicCard(roomId: String)
-    fun reactToMusicCard(roomId: String, cardId: String)
     fun sendChat(roomId: String, content: String)
     fun selectTrack(track: Track)
     fun setCurrentMusicPlaying(isPlaying: Boolean)
@@ -276,10 +273,6 @@ class DemoMelodyRepository(
 
     override fun selectNearby(handle: String?) {
         _state.update { it.copy(selectedNearbyHandle = handle) }
-    }
-
-    override fun selectLounge(roomId: String?) {
-        _state.update { it.copy(selectedLoungeId = roomId) }
     }
 
     override fun openChat(roomId: String) {
@@ -510,60 +503,6 @@ class DemoMelodyRepository(
                 }.onFailure { error ->
                     if (isCurrentSession(token)) showRequestError(error, "차단을 해제하지 못했어요")
                 }
-        }
-    }
-
-    override fun sendMusicCard(roomId: String) {
-        _state.update { current ->
-            val currentTrack = current.currentTrack
-            val lounges = current.lounges.map { lounge ->
-                if (lounge.id != roomId || !lounge.isJoined) return@map lounge
-                val alreadySent = lounge.cards.any {
-                    it.senderAlias == current.profile.nearbyDisplayAlias &&
-                        it.track.id == currentTrack.id
-                }
-                if (alreadySent) return@map lounge
-                lounge.copy(
-                    cards = listOf(
-                        com.example.myapplication.core.model.MusicCard(
-                            id = "local-card-${UUID.randomUUID()}",
-                            senderAlias = current.profile.nearbyDisplayAlias,
-                            track = currentTrack,
-                            reactionCount = 0
-                        )
-                    ) + lounge.cards
-                )
-            }
-            current.copy(
-                lounges = lounges,
-                feedbackMessage = "${currentTrack.title} 음악 카드를 라운지에 보냈어요"
-            )
-        }
-    }
-
-    override fun reactToMusicCard(roomId: String, cardId: String) {
-        _state.update { current ->
-            var reactedTrackTitle: String? = null
-            val lounges = current.lounges.map { lounge ->
-                if (lounge.id != roomId) return@map lounge
-                lounge.copy(
-                    cards = lounge.cards.map { card ->
-                        if (card.id != cardId) return@map card
-                        reactedTrackTitle = card.track.title
-                        val nextReacted = !card.hasReacted
-                        card.copy(
-                            hasReacted = nextReacted,
-                            reactionCount = (card.reactionCount + if (nextReacted) 1 else -1)
-                                .coerceAtLeast(0)
-                        )
-                    }
-                )
-            }
-            current.copy(
-                lounges = lounges,
-                feedbackMessage = reactedTrackTitle?.let { "$it 카드 공감이 반영됐어요" }
-                    ?: current.feedbackMessage
-            )
         }
     }
 
