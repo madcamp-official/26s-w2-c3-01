@@ -396,39 +396,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             )
             buildingLoungeRepository.nearby(token, latitude, longitude)
                 .onSuccess { lounges ->
-                    val hasOldOffsetFixtures = lounges.any {
-                        it.name == "Test Mall Lounge" ||
-                            it.name == "Test Cafe Lounge" ||
-                            it.name == "Test Music Hall Lounge"
-                    }
-                    if (lounges.isEmpty() || hasOldOffsetFixtures) {
-                        buildingLoungeRepository.createTestFixtures(token, latitude, longitude)
-                            .onSuccess { seededLounges ->
-                                _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                                    loading = false,
-                                    lounges = seededLounges,
-                                    message = "Real building test lounges are ready."
-                                )
-                            }
-                            .onFailure {
-                                _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                                    loading = false,
-                                    lounges = emptyList(),
-                                    message = "Could not create test places."
-                                )
-                            }
-                        return@launch
-                    }
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
                         lounges = lounges,
-                        message = if (lounges.none { it.inside }) "No active lounge in this area yet." else null
+                        message = if (lounges.isEmpty()) "주변에 이용 가능한 실제 건물 라운지가 없어요." else null
                     )
                 }
                 .onFailure {
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
-                        message = "Could not load building lounges."
+                        lounges = emptyList(),
+                        message = "주변 건물 라운지를 불러오지 못했어요."
                     )
                 }
         }
