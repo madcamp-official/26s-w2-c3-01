@@ -151,7 +151,16 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     event.destination == _buildingLoungeState.value.selectedSubLoungeId
                         ?.let(RealtimeDestinations::subLounge)
                 ) {
-                    refreshSelectedSubLounge(silent = true)
+                    val snapshot = _buildingLoungeState.value.subLoungeSnapshot
+                    val reduced = snapshot?.let { SubLoungeEventReducer.reduce(it, event) }
+                    if (reduced != null) {
+                        latestSubLoungeSnapshotAt = event.envelope.timestamp
+                        _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                            subLoungeSnapshot = reduced,
+                        )
+                    } else {
+                        refreshSelectedSubLounge(silent = true)
+                    }
                 }
             }
         }
