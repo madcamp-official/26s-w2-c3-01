@@ -40,6 +40,40 @@ class SubLoungeEventReducerTest {
         assertTrue(stopped!!.listeningStatuses.isEmpty())
     }
 
+    @Test
+    fun `card reaction preserves personal reacted state`() {
+        val cardJson = """{"id":"card","subLoungeId":"room","clientCardId":"client","senderAlias":"민아","trackTitle":"곡","artistName":"가수","reactionCount":0,"reactedByMe":false,"createdAt":"2026-07-12T02:00:00Z"}"""
+        val created = SubLoungeEventReducer.reduce(
+            snapshot(),
+            event("RECOMMENDATION_CARD_CREATED", cardJson),
+        )!!
+        val reacted = SubLoungeEventReducer.reduce(
+            created,
+            event(
+                "RECOMMENDATION_CARD_REACTED",
+                cardJson.replace("\"reactionCount\":0", "\"reactionCount\":4")
+                    .replace("\"reactedByMe\":false", "\"reactedByMe\":true"),
+            ),
+        )
+
+        assertEquals(4, reacted?.cards?.single()?.reactionCount)
+        assertEquals(false, reacted?.cards?.single()?.reactedByMe)
+    }
+
+    @Test
+    fun `poll event preserves personal vote`() {
+        val reduced = SubLoungeEventReducer.reduce(
+            snapshot(),
+            event(
+                "LOUNGE_POLL_UPDATED",
+                """{"options":[{"key":"CHILL","voteCount":5}],"myVote":"ENERGY"}""",
+            ),
+        )
+
+        assertEquals(5, reduced?.poll?.options?.single()?.voteCount)
+        assertEquals("CHILL", reduced?.poll?.myVote)
+    }
+
     private fun snapshot() = SubLoungeSnapshotDto(
         id = "room",
         buildingLoungeId = "building",
