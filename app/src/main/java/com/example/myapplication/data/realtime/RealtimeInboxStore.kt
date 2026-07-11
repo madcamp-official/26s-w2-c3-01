@@ -90,3 +90,95 @@ class RealtimeInboxStore(context: Context) {
 
     fun markAllRead() = synchronized(lock) {
         if (activeOwner != null) {
+            writeItems(readItems().map { it.copy(isRead = true) })
+            _notifications.value = readItems().toNotifications()
+        }
+    }
+
+    fun clear() = synchronized(lock) {
+        activeOwner = null
+        preferences.edit().clear().apply()
+        _notifications.value = emptyList()
+    }
+
+    private fun readItems(): List<StoredItem> {
+        val json = preferences.getString(KEY_ITEMS, null) ?: return emptyList()
+        return runCatching {
+            gson.fromJson(json, Array<StoredItem>::class.java)?.toList().orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    private fun writeItems(items: List<StoredItem>) {
+        preferences.edit().putString(KEY_ITEMS, gson.toJson(items)).apply()
+    }
+
+    private fun RealtimeEvent.toStoredItem(): StoredItem? = when (this) {
+        is RealtimeEvent.NearbyReactionCreated -> {
+            val payload = envelope.payload
+            val alias = payload.senderAlias.safeText(40) ?: "주변 사용자"
+            val reaction = reactionLabel(payload.reactionType)
+            val track = payload.trackTitle.safeText(160)
+            StoredItem(
+                id = payload.reactionId?.takeIf(String::isNotBlank) ?: envelope.eventId,
+                type = NotificationType.REACTION.name,
+                actorAlias = alias,
+                preview = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
+                createdAtEpochMillis = System.currentTimeMillis(),
+            )
+        }
+        is RealtimeEvent.NotificationCreated -> {
+            val payload = envelope.payload
+            val preview = payload.body.safeText(300) ?: payload.title.safeText(160) ?: return null
+            StoredItem(
+                id = payload.notificationId?.takeIf(String::isNotBlank) ?: envelope.eventId,
+                type = notificationType(payload.type).name,
+                actorAlias = null,
+                preview = preview,
+                createdAtEpochMillis = System.currentTimeMillis(),
+            )
+        }
+        else -> null
+    }
+
+    private fun notificationType(type: String?): NotificationType = when (type) {
+        "FOLLOW", "FOLLOWED" -> NotificationType.FOLLOW
+        "MUTUAL_FOLLOW" -> NotificationType.MUTUAL_FOLLOW
+        "REACTION" -> NotificationType.REACTION
+        else -> NotificationType.SYSTEM
+    }
+
+    private fun reactionLabel(type: String?): String = when (type) {
+        "LIKE" -> "이 곡 좋아요"
+        "SAME_TASTE" -> "취향이 닮았어요"
+        "GREAT_PICK" -> "선곡 멋져요"
+        "LISTEN_TOGETHER" -> "같이 듣고 싶어요"
+        else -> "새 리액션"
+    }
+
+    private fun jwtSubject(token: String): String? = runCatching {
+        val payload = token.split('.').getOrNull(1) ?: return@runCatching null
+        val decoded = String(
+            Base64.decode(payload, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING),
+            Charsets.UTF_8,
+        )
+        JsonParser.parseString(decoded).asJsonObject.get("sub")?.asString
+            ?.takeIf(String::isNotBlank)
+    }.getOrNull()
+
+    private fun String?.safeText(maxLength: Int): String? = this
+        ?.replace(CONTROL_CHARACTERS, " ")
+        ?.trim()
+        ?.take(maxLength)
+        ?.takeIf(String::isNotEmpty)
+
+    private data class StoredItem(
+        val id: String,
+        val type: String,
+        val actorAlias: String?,
+        val preview: String,
+        val createdAtEpochMillis: Long,
+        val isRead: Boolean = false,
+    )
+
+    companion object {
+        private const val PREFERENCES_NAME = "realtime_inbox"
