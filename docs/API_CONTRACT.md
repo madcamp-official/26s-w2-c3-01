@@ -4,7 +4,7 @@
 
 ### 현재 Android에 선언된 계약 경계
 
-- REST: 로그인, 토큰 갱신, 내 프로필·Presence 공개 범위, 주변 snapshot·상세, 팔로우·차단·신고, 맞팔 대화방·메시지
+- REST: 로그인, 토큰 갱신, 내 프로필·Presence 공개 범위, 주변 snapshot·인기 음악·리액션, 팔로우·차단·신고, 맞팔 대화방·메시지·읽음
 - STOMP SEND: Presence, 위치·음악, 리액션, 채팅·읽음, 라운지 입장·퇴장·카드·리액션·투표
 - STOMP SUBSCRIBE: 개인 nearby/chat/notifications/reactions/ack/errors Queue와 라운지 state/cards/votes Topic
 - 후속 계약: 채팅 typing, 지역 trend·pulse, 라운지 reaction Topic, 행사 Topic
@@ -27,17 +27,17 @@
 |---|---|---|---|---|
 | 시작·로그인 | 데모 세션 | `POST /api/v1/auth/login`, `/refresh`; signup은 후속 | 없음 | 인증 상태, 오류 |
 | 온보딩·취향 | 시드 장르·분위기, 완료 여부는 SharedPreferences | `PUT /api/v1/me/privacy`; 취향 저장은 후속 | 없음 | 본인이 입력한 취향·공개 범위 |
-| 홈 | 시드 주변 요약·인기 음악, Foreground Service 공유 상태 | `GET /api/v1/nearby/snapshot`; 지역 trend REST는 후속 | `/user/queue/nearby`; Presence·location·music SEND; 지역 trend Topic은 후속 | 익명 버블, 가상 배치, 유사도, 공개 허용 음악, 익명 집계 |
+| 홈 | 시드 주변 요약·인기 음악, Foreground Service 공유 상태 | `GET /api/v1/nearby/snapshot`, `GET /api/v1/nearby/popular-tracks` | `/user/queue/nearby`; 음악 상태 변경과 인기 음악 집계 수신 | 익명 버블, 가상 배치, 유사도, 공개 허용 음악, 익명 집계 |
 | 근처 | 홈과 같은 시드 목록 | `GET /api/v1/nearby/snapshot` | `/user/queue/nearby` | 정확 거리·방향 없는 주변 사용자 카드 |
-| 사용자 상세 | 선택한 시드 사용자 | snapshot에 포함된 공개 필드 또는 `GET /api/v1/nearby/{nearbyHandle}` | 리액션 `/app/reaction/send`; 결과 `/user/queue/reactions`, `/ack` | 임시 handle, 별칭, 유사도, 공개 음악·취향 요약 |
+| 사용자 상세 | 선택한 시드 사용자 | snapshot 또는 `GET /api/v1/nearby/{nearbyHandle}`; `POST /api/v1/nearby/{nearbyHandle}/reactions` | 수신 리액션 `/user/queue/reactions` | 임시 handle, 별칭, 유사도, 공개 음악·취향 요약 |
 | 팔로우 | 서버 관계 상태 | `PUT`·`DELETE /api/v1/nearby/{nearbyHandle}/follow` | 결과 `/user/queue/notifications` 확장 가능 | 팔로우·맞팔 상태와 맞팔 대화방 ID |
 | 차단·신고 | 서버 차단 목록·신고 접수 | `PUT /api/v1/nearby/{nearbyHandle}/block`, `GET /api/v1/me/blocks`, `DELETE /api/v1/me/blocks/{blockId}`, `POST /api/v1/nearby/{nearbyHandle}/reports` | 처리 결과는 요청자에게만 반환 | 공개 메시지 없이 본인 처리 결과만 표시 |
 | 라운지 목록 | 시드 라운지 | `GET /api/v1/rooms?areaId={areaId}` | 선택 사항: 지역 notice | 이름, 상태, 익명 참여자 수, 장르·분위기 |
 | 라운지 상세 | 시드 카드·투표 | `GET /api/v1/rooms/{roomId}` | `/app/room/join|leave|card|reaction|vote`; 현재 구독은 `state|cards|votes`, reaction Topic은 후속 | 집계·추천곡 카드·정해진 리액션·투표 |
-| 인박스 | 시드 알림·대화방 | `GET /api/v1/notifications`, `GET /api/v1/chat/rooms` | `/user/queue/notifications`, `/user/queue/reactions`, `/user/queue/chat` | 본인에게 전달된 알림·대화 미리보기 |
-| 1:1 채팅 | 서버 대화 | `GET /api/v1/chat/rooms`, `GET`·`POST /api/v1/chat/rooms/{roomId}/messages` | STOMP 수신은 후속 | 맞팔이며 차단되지 않은 대화방의 텍스트와 전송 상태 |
+| 인박스 | 서버 리액션 이력·대화방 | `GET /api/v1/nearby/reactions`, `GET /api/v1/notifications`, `GET /api/v1/chat/rooms` | `/user/queue/notifications`, `/user/queue/reactions`, `/user/queue/chat` | 본인에게 전달된 알림·대화 미리보기 |
+| 1:1 채팅 | 서버 대화 | `GET /api/v1/chat/rooms`, `GET`·`POST /api/v1/chat/rooms/{roomId}/messages`, `PUT /api/v1/chat/rooms/{roomId}/read` | `/user/queue/chat`의 생성·메시지·읽음·방 갱신 이벤트 | 맞팔이며 차단되지 않은 대화방의 텍스트와 전송 상태 |
 | 마이·설정 | 로컬 데모 프로필, 알림 접근 설정 진입 | `GET /api/v1/me`, `PATCH /api/v1/me`, `PUT /api/v1/me/privacy` | 설정 반영 알림은 개인 Queue 선택 | 본인 프로필·취향·공개 범위 |
-| 현재 음악 선택 | `MediaSessionManager` 직접 감지, 세션 미제공 앱만 알림 문자열 폴백 | `POST /api/v1/nearby/music` | `/app/music/update` 확장 가능 | 제목·아티스트·source·재생 여부; 앱 계정·원본 알림 전체 제외 |
+| 현재 음악 선택 | 앱 공용 `PresenceSyncCoordinator`가 MediaSession 감지, 세션 미제공 앱만 알림 문자열 폴백 | `POST /api/v1/nearby/music` | 변경 수신은 `/user/queue/nearby` | 제목·아티스트·source·재생 여부; 앱 계정·원본 알림 전체 제외 |
 | 오프라인 기록 | Room `offline_exchange_local`·`sync_outbox` | `POST /api/v1/offline-exchanges/sync` | Nearby Connections는 후속이며 STOMP와 별도 | 직접 승인한 음악 카드와 동기화 상태 |
 
 `nearbyHandle`은 현재 Presence 범위에서만 쓰는 불투명 식별자여야 합니다. 사용자 상세에서 서버의 영구 UUID를 주변 사용자에게 그대로 노출하지 않습니다. 기획 초안의 `temporaryUserId` 개념은 Android·API 계약에서 `nearbyHandle`로 통일합니다.
@@ -199,6 +199,15 @@ POST /api/v1/nearby/{nearbyHandle}/reports
 
 차단·신고 요청의 handle→사용자 UUID 해석, 중복 방지, 제재 상태는 서버 내부에서 처리합니다. 처리 결과를 공개 Topic으로 발행하지 않습니다.
 
+### 주변 음악 리액션 — 구현됨
+
+```http
+POST /api/v1/nearby/{nearbyHandle}/reactions
+GET /api/v1/nearby/reactions?limit=100
+```
+
+전송은 `clientReactionId`로 멱등 처리합니다. 수신 이력 조회는 WebSocket 재연결 뒤 누락된 `/user/queue/reactions` 이벤트를 복구하는 용도이며 최신순으로 반환합니다.
+
 ### 라운지 목록·상세 — 선언됨, 어댑터 미연결
 
 ```http
@@ -232,28 +241,27 @@ GET /api/v1/rooms/{roomId}
 }
 ```
 
-### 과거 채팅 — 선언됨, 어댑터 미연결
+### 채팅 — 구현됨
 
 ```http
 GET /api/v1/chat/rooms
-GET /api/v1/chat/rooms/{roomId}/messages?cursor={cursor}&limit=30
+GET /api/v1/chat/rooms/{roomId}/messages?limit=50
+POST /api/v1/chat/rooms/{roomId}/messages
+PUT /api/v1/chat/rooms/{roomId}/read
 ```
 
 ```json
-{
-  "items": [
-    {
-      "messageId": "server-message-uuid",
-      "clientMessageId": "client-message-uuid",
-      "senderId": "user-uuid",
-      "content": "이 노래 저도 좋아해요.",
-      "messageType": "TEXT",
-      "sentAt": "2026-07-10T15:30:01Z",
-      "readAt": null
-    }
-  ],
-  "nextCursor": null
-}
+[
+  {
+    "messageId": "server-message-uuid",
+    "clientMessageId": "client-message-uuid",
+    "roomId": "room-uuid",
+    "isMine": false,
+    "content": "이 노래 저도 좋아해요.",
+    "sentAt": "2026-07-10T15:30:01Z",
+    "readByPeer": false
+  }
+]
 ```
 
 ### 오프라인 교환 동기화 — 선언됨, 현재는 로컬 데모 ACK
@@ -308,16 +316,14 @@ POST /api/v1/offline-exchanges/sync
 ```json
 {
   "eventId": "event-uuid",
-  "requestId": "optional-client-request-uuid",
-  "type": "NEARBY_USERS_DELTA",
+  "type": "CHAT_MESSAGE_CREATED",
   "version": 1,
-  "sequence": 1082,
   "timestamp": "2026-07-10T15:30:00Z",
   "payload": {}
 }
 ```
 
-`eventId`는 중복 제거, `requestId`는 ACK 연결, `sequence`는 Queue 또는 Topic 스트림 내부 순서 역전 감지에 사용합니다. 서로 다른 destination의 sequence를 하나의 전역 순서처럼 비교하지 않습니다.
+`eventId`는 클라이언트 중복 제거에 사용합니다. 알 수 없는 `type` 또는 상위 `version`은 무시하고 재연결 뒤 REST 전체 동기화로 복구합니다.
 
 ## 5. Android → 서버 SEND 계약
 
@@ -328,9 +334,9 @@ POST /api/v1/offline-exchanges/sync
 | `/app/presence/heartbeat` | `requestId`, `clientSessionId`, `clientTimestamp` | TTL 갱신 |
 | `/app/location/update` | `requestId`, `clientSessionId`, `latitude`, `longitude`, `accuracyMeters`, `clientTimestamp` | 최신값만 TTL 저장; 이력 금지 |
 | `/app/music/update` | `requestId`, `track`, `isPlaying`, `sourceType`, `clientTimestamp` | 현재 상태 TTL·정규화 track |
-| `/app/reaction/send` | `requestId`, `receiverNearbyHandle`, `reactionType`, `musicStatusId?` | 서버가 handle을 내부 사용자로 해석한 뒤 리액션 저장 |
-| `/app/chat/send` | `requestId`, `clientMessageId`, `roomId`, `content`, `clientSentAt` | 검증 후 메시지 저장 |
-| `/app/chat/read` | `requestId`, `roomId`, `lastReadMessageId` | read 상태 갱신 |
+| `/app/reaction/send` (후속) | `requestId`, `receiverNearbyHandle`, `reactionType`, `musicStatusId?` | 현재 구현은 REST `POST /api/v1/nearby/{nearbyHandle}/reactions` 사용 |
+| `/app/chat/send` (후속) | `requestId`, `clientMessageId`, `roomId`, `content`, `clientSentAt` | 현재 구현은 REST 메시지 저장 API 사용 |
+| `/app/chat/read` (후속) | `requestId`, `roomId`, `lastReadMessageId` | 현재 구현은 REST `PUT /api/v1/chat/rooms/{roomId}/read` 사용 |
 | `/app/chat/typing` (후속) | `roomId`, `isTyping` | 저장 안 함 |
 | `/app/room/join` | `requestId`, `roomId` | 멤버십·현재 접속 갱신 |
 | `/app/room/leave` | `requestId`, `roomId` | 퇴장 시각 갱신 |
@@ -377,12 +383,12 @@ POST /api/v1/offline-exchanges/sync
 
 | Destination | 이벤트 type | payload |
 |---|---|---|
-| `/user/queue/nearby` | `NEARBY_USERS_DELTA` | `entered[]`, `updated[]`, `left[]` |
-| `/user/queue/chat` | `CHAT_MESSAGE`, `CHAT_READ`, `CHAT_TYPING` | 대화방·메시지 또는 일시 상태 |
-| `/user/queue/notifications` | `FOLLOWED`, `MUTUAL_FOLLOW`, `SYSTEM_NOTICE` | 알림 ID·종류·비민감 표시 정보 |
-| `/user/queue/reactions` | `MUSIC_REACTION_RECEIVED` | sender 표시용 임시 ID·reactionType·시각 |
+| `/user/queue/nearby` | `NEARBY_MUSIC_UPDATED`, `POPULAR_TRACKS_UPDATED` | 임시 nearbyHandle·공개 음악 또는 익명 집계 |
+| `/user/queue/chat` | `CHAT_ROOM_CREATED`, `CHAT_MESSAGE_CREATED`, `CHAT_MESSAGE_READ`, `CHAT_ROOM_UPDATED` | 대화방·메시지·읽음 상태 |
+| `/user/queue/notifications` | `NOTIFICATION_CREATED` | 알림 ID·종류·비민감 표시 정보 |
+| `/user/queue/reactions` | `NEARBY_REACTION_CREATED` | sender 별칭·reactionType·공개 곡·시각 |
 | `/user/queue/ack` | `REQUEST_ACK` | `requestId`, `status`, 서버 생성 ID·시각 |
-| `/user/queue/errors` | `REQUEST_ERROR` | `requestId?`, `code`, `message`, `retryable` |
+| `/user/queue/errors` | `ERROR` | `requestId?`, `code`, `message` |
 
 주변 Delta 예시:
 
