@@ -102,6 +102,8 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 
+private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap building footprint")
+
 @Composable
 fun BuildingLoungeMapScreen(
     state: BuildingLoungeUiState,
@@ -539,7 +541,7 @@ private fun BuildingLoungeRow(
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(lounge.name, color = PaleMint, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                lounge.address?.takeIf { it.isNotBlank() && it != "주소 정보 없음" }?.let { address ->
+                lounge.address?.takeIf { it.isNotBlank() && it !in HIDDEN_OSM_ADDRESSES }?.let { address ->
                     Text(address, color = MutedMint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
                 Text(
