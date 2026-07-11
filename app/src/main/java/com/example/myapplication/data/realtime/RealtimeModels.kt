@@ -182,3 +182,67 @@ sealed interface RealtimeEvent {
     }
 
     data class ServerError(
+        override val destination: String,
+        val envelope: RealtimeEventEnvelope<RealtimeServerErrorPayload>,
+    ) : RealtimeEvent {
+        override val eventId: String = envelope.eventId
+        override val type: String = envelope.type
+    }
+
+    data class Unknown(
+        override val destination: String,
+        val envelope: RealtimeEventEnvelope<JsonElement>,
+    ) : RealtimeEvent {
+        override val eventId: String = envelope.eventId
+        override val type: String = envelope.type
+    }
+
+    /** Parsing failures are data, not exceptions escaping into WebSocket callbacks. */
+    data class ParsingError(
+        override val destination: String,
+        val rawBody: String,
+        val reason: String,
+    ) : RealtimeEvent {
+        override val eventId: String? = null
+        override val type: String? = null
+    }
+}
+
+sealed interface RealtimeConnectionState {
+    data object Disconnected : RealtimeConnectionState
+
+    data class Connecting(
+        val isReconnect: Boolean,
+    ) : RealtimeConnectionState
+
+    data class Connected(
+        val sessionId: String?,
+        val stompVersion: String?,
+        val serverHeartbeat: StompHeartbeat,
+        val connectedAtEpochMillis: Long,
+        val isReconnect: Boolean,
+    ) : RealtimeConnectionState
+
+    data class Reconnecting(
+        val attempt: Int,
+        val retryInMillis: Long,
+        val cause: String?,
+    ) : RealtimeConnectionState
+}
+
+data class StompHeartbeat(
+    val canSendEveryMillis: Long,
+    val wantsReceiveEveryMillis: Long,
+) {
+    companion object {
+        val Disabled = StompHeartbeat(0, 0)
+    }
+}
+
+sealed interface RealtimeSyncRequest {
+    /** Emitted after any retry connection succeeds, including recovery from initial failures. */
+    data class FullSync(
+        val connectedAtEpochMillis: Long,
+        val reconnectAttempt: Int,
+    ) : RealtimeSyncRequest
+}
