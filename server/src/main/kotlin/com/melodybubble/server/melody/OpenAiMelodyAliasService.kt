@@ -112,6 +112,7 @@ class OpenAiMelodyAliasService(
         - Mood: ${request.mood}
         - Tone: ${request.tone}
         - Energy: ${request.energy}
+        - Pitch range: ${request.pitch}
         - Tempo range: ${request.tempoRange}
         - Preferred vibe tags: ${request.vibeTags.joinToString(", ").ifBlank { "none" }}
         - Candidate count: ${request.count}
@@ -221,4 +222,3 @@ class OpenAiMelodyAliasService(
         )
     }
 }
-

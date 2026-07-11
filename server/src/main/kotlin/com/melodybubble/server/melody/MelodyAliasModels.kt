@@ -5,6 +5,7 @@ data class MelodyAliasGenerateRequest(
     val tone: String,
     val energy: String,
     val tempoRange: String,
+    val pitch: String = "medium",
     val vibeTags: List<String> = emptyList(),
     val count: Int = 3,
 )
@@ -45,4 +46,3 @@ data class MelodyAliasCandidateResponse(
 data class MelodyAliasGenerateResponse(
     val candidates: List<MelodyAliasCandidateResponse>,
 )
-

@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController
 data class MelodyAliasPromptPreviewResponse(val prompt: String)
 
 @RestController
-@RequestMapping("/internal/ops/api/melody-alias")
+@RequestMapping("/internal/ops/api/melody-alias", "/api/v1/melody-alias")
 class MelodyAliasController(private val service: OpenAiMelodyAliasService) {
     @PostMapping("/generate")
     fun generate(@RequestBody request: MelodyAliasGenerateRequest): MelodyAliasGenerateResponse =
@@ -28,4 +28,3 @@ class MelodyAliasController(private val service: OpenAiMelodyAliasService) {
         "vibeTags" to listOf("cozy", "light", "friendly", "clear", "cute", "clean", "sparkly", "minimal"),
     )
 }
-

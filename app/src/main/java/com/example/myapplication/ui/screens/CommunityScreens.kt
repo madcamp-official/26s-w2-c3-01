@@ -48,6 +48,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -91,6 +92,7 @@ import com.example.myapplication.ui.theme.MossSurfaceHigh
 import com.example.myapplication.ui.theme.MutedMint
 import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
+import com.example.myapplication.ui.MelodyAliasGenerationState
 import kotlin.math.roundToInt
 
 @Composable
@@ -778,31 +780,25 @@ fun MelodyAliasScreen(
     onBack: () -> Unit,
     onPreview: (MelodyAliasCandidate) -> Unit,
     onPreviewTone: (String) -> Unit,
-    onSelect: (String) -> Unit,
+    generationState: MelodyAliasGenerationState,
+    onGenerate: (String, String, String, String) -> Unit,
+    onResetGeneration: () -> Unit,
+    onSelect: (MelodyAliasCandidate) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var editing by rememberSaveable { mutableStateOf(false) }
-    var requestedCandidates by rememberSaveable { mutableStateOf(false) }
     var selectedMood by rememberSaveable { mutableStateOf(profile.melodyAliasMood) }
     var selectedTone by rememberSaveable { mutableStateOf(profile.melodyAliasTone) }
     var selectedPitch by rememberSaveable { mutableStateOf(0.5f) }
     var selectedTempo by rememberSaveable { mutableStateOf(tempoLabel(profile.melodyAliasTempo)) }
 
-    val currentCandidate = candidates.firstOrNull { it.id == profile.melodyAliasId }
-        ?: candidates.firstOrNull { it.notes == profile.melodyNotes }
+    val generatedCandidates = (generationState as? MelodyAliasGenerationState.Success)?.candidates.orEmpty()
+    val currentCandidate = (candidates + generatedCandidates).firstOrNull { it.id == profile.melodyAliasId }
+        ?: (candidates + generatedCandidates).firstOrNull { it.notes == profile.melodyNotes }
     val moods = (listOf("밝음", "몽환", "차분", "설렘", "귀여움", "에너지") +
         candidates.map { it.mood }).distinct()
     val tones = (listOf("전자음", "피아노", "기타", "벨", "오르골", "신스패드") +
         candidates.map { it.tone }).distinct()
-    val rankedCandidates = remember(candidates, selectedMood, selectedTone, selectedPitch, selectedTempo) {
-        candidates
-            .sortedWith(
-                compareByDescending<MelodyAliasCandidate> {
-                    melodyCandidateScore(it, selectedMood, selectedTone, selectedPitch, selectedTempo)
-                }.thenBy { kotlin.math.abs(it.tempo - tempoTarget(selectedTempo)) }
-            )
-            .take(5)
-    }
 
     Column(modifier = modifier.fillMaxSize()) {
         BackHeader(onBack = onBack, title = "멜로디 별칭", subtitle = "짧고 또렷한 알림음 시그널")
@@ -837,7 +833,7 @@ fun MelodyAliasScreen(
                         Button(
                             onClick = {
                                 editing = true
-                                requestedCandidates = false
+                                onResetGeneration()
                             },
                             modifier = Modifier.weight(1f)
                         ) {
@@ -847,7 +843,7 @@ fun MelodyAliasScreen(
                 }
             }
 
-            if (editing && !requestedCandidates) {
+            if (editing && generationState !is MelodyAliasGenerationState.Success) {
                 item { SectionLabel("1. 원하는 무드") }
                 item {
                     ChoiceGrid(
@@ -856,7 +852,7 @@ fun MelodyAliasScreen(
                         columns = 2,
                         onSelect = {
                             selectedMood = it
-                            requestedCandidates = false
+                            onResetGeneration()
                         }
                     )
                 }
@@ -867,7 +863,7 @@ fun MelodyAliasScreen(
                         selected = selectedTone,
                         onSelect = {
                             selectedTone = it
-                            requestedCandidates = false
+                            onResetGeneration()
                             onPreviewTone(it)
                         }
                     )
@@ -878,7 +874,7 @@ fun MelodyAliasScreen(
                         value = selectedPitch,
                         onValueChange = {
                             selectedPitch = it
-                            requestedCandidates = false
+                            onResetGeneration()
                         }
                     )
                 }
@@ -890,30 +886,50 @@ fun MelodyAliasScreen(
                         columns = 3,
                         onSelect = {
                             selectedTempo = it
-                            requestedCandidates = false
+                            onResetGeneration()
                         }
                     )
                 }
                 item {
                     Button(
-                        onClick = { requestedCandidates = true },
+                        onClick = {
+                            onGenerate(
+                                selectedMood,
+                                selectedTone,
+                                pitchLabel(selectedPitch),
+                                tempoRange(selectedTempo)
+                            )
+                        },
+                        enabled = generationState !is MelodyAliasGenerationState.Loading,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(52.dp)
                     ) {
-                        Text("선택 완료")
+                        Text("AI 멜로디 3개 만들기")
                     }
                 }
-                if (!requestedCandidates) {
+                if (generationState is MelodyAliasGenerationState.Idle) {
                     item {
                         AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
-                            Text("선택 완료를 누르면 후보를 만들어요", style = MaterialTheme.typography.titleMedium)
-                            Text("나중에는 이 지점에서 LLM API를 호출하고, 지금은 DB 데모 후보를 불러옵니다.", color = MutedMint)
+                            Text("선택한 느낌으로 새로운 알림음을 만들어요", style = MaterialTheme.typography.titleMedium)
+                            Text("무드, 톤, 피치, 속도를 OpenAI에 보내 후보 3개를 생성합니다.", color = MutedMint)
+                        }
+                    }
+                }
+                if (generationState is MelodyAliasGenerationState.Loading) {
+                    item { MelodyAliasLoadingPanel() }
+                }
+                if (generationState is MelodyAliasGenerationState.Error) {
+                    item {
+                        AppPanel(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)) {
+                            Text("멜로디 생성에 실패했어요", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(6.dp))
+                            Text(generationState.message, color = MutedMint)
                         }
                     }
                 }
             }
-            if (editing && requestedCandidates) {
+            if (editing && generationState is MelodyAliasGenerationState.Success) {
                 item {
                     AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
                         Text("선택한 조건", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
@@ -926,39 +942,47 @@ fun MelodyAliasScreen(
                         }
                         Spacer(Modifier.height(12.dp))
                         OutlinedButton(
-                            onClick = { requestedCandidates = false },
+                            onClick = onResetGeneration,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("조건 다시 고르기")
                         }
                     }
                 }
-                if (requestedCandidates) {
-                    item { SectionLabel("추천 후보 5개") }
-                }
-                if (requestedCandidates && rankedCandidates.isEmpty()) {
-                    item {
-                        AppPanel {
-                            Text("아직 DB 후보가 준비되지 않았어요", style = MaterialTheme.typography.titleMedium)
-                            Text("데모 데이터가 로드되면 이곳에 후보가 표시됩니다.", color = MutedMint)
-                        }
-                    }
-                } else if (requestedCandidates) {
-                    items(rankedCandidates, key = { it.id }) { candidate ->
+                item { SectionLabel("AI 추천 후보 3개") }
+                items(generatedCandidates, key = { it.id }) { candidate ->
                         MelodyAliasCandidateCard(
                             candidate = candidate,
                             selected = candidate.id == profile.melodyAliasId,
                             onPreview = { onPreview(candidate) },
                             onSelect = {
-                                onSelect(candidate.id)
+                                onSelect(candidate)
                                 editing = false
-                                requestedCandidates = false
                             }
                         )
-                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MelodyAliasLoadingPanel() {
+    AppPanel(color = SignalGreen.copy(alpha = 0.10f)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(30.dp),
+                color = SignalGreen,
+                strokeWidth = 3.dp
+            )
+            Spacer(Modifier.width(14.dp))
+            Column {
+                Text("멜로디 생성 중", style = MaterialTheme.typography.titleMedium)
+                Text("AI가 어울리는 음표와 리듬을 조합하고 있어요.", color = MutedMint)
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SignalGreen)
     }
 }
 
@@ -1242,6 +1266,12 @@ private fun tempoTarget(label: String): Int = when (label) {
     "느림" -> 96
     "빠름" -> 148
     else -> 124
+}
+
+private fun tempoRange(label: String): String = when (label) {
+    "느림" -> "80-100 BPM"
+    "빠름" -> "130-160 BPM"
+    else -> "100-130 BPM"
 }
 
 @Composable

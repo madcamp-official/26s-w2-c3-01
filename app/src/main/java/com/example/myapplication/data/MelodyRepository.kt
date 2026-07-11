@@ -59,6 +59,7 @@ interface MelodyRepository {
     fun setAllowReactions(enabled: Boolean)
     fun setOfflineExchangeEnabled(enabled: Boolean)
     fun selectMelodyAlias(candidateId: String)
+    fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
     fun createDemoExchange(peerAlias: String)
     fun syncExchange(exchangeId: String)
     fun clearFeedback()
@@ -450,6 +451,21 @@ class DemoMelodyRepository(
     override fun selectMelodyAlias(candidateId: String) {
         val candidate = _state.value.melodyAliasCandidates.firstOrNull { it.id == candidateId }
             ?: return
+        _state.update { current ->
+            current.copy(
+                profile = current.profile.copy(
+                    melodyNotes = candidate.notes,
+                    melodyAliasId = candidate.id,
+                    melodyAliasTone = candidate.tone,
+                    melodyAliasMood = candidate.mood,
+                    melodyAliasTempo = candidate.tempo
+                ),
+                feedbackMessage = "${candidate.name}을(를) 멜로디 별칭으로 설정했어요"
+            )
+        }
+    }
+
+    override fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate) {
         _state.update { current ->
             current.copy(
                 profile = current.profile.copy(

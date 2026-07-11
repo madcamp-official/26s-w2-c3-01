@@ -10,6 +10,8 @@ import com.example.myapplication.audio.MelodyAliasPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.data.MelodyRepository
 import com.example.myapplication.data.remote.AuthRepository
+import com.example.myapplication.data.remote.MelodyAliasGenerateRequest
+import com.example.myapplication.data.remote.MelodyAliasRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -21,15 +23,25 @@ sealed interface LoginUiState {
     data class Error(val message: String) : LoginUiState
 }
 
+sealed interface MelodyAliasGenerationState {
+    data object Idle : MelodyAliasGenerationState
+    data object Loading : MelodyAliasGenerationState
+    data class Success(val candidates: List<MelodyAliasCandidate>) : MelodyAliasGenerationState
+    data class Error(val message: String) : MelodyAliasGenerationState
+}
+
 class MelodyViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: MelodyRepository = DemoMelodyRepository(application)
     private val authRepository by lazy { AuthRepository() }
     private val melodyAliasPreviewPlayer = MelodyAliasPreviewPlayer()
+    private val melodyAliasRepository by lazy { MelodyAliasRepository() }
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private var accessToken: String? = null
+    private val _melodyAliasGenerationState = MutableStateFlow<MelodyAliasGenerationState>(MelodyAliasGenerationState.Idle)
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
+    val melodyAliasGenerationState = _melodyAliasGenerationState.asStateFlow()
 
     fun login(email: String, password: String) {
         if (_loginState.value == LoginUiState.Loading) return
@@ -88,6 +100,39 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun setAllowReactions(enabled: Boolean) = repository.setAllowReactions(enabled)
     fun setOfflineExchangeEnabled(enabled: Boolean) = repository.setOfflineExchangeEnabled(enabled)
     fun selectMelodyAlias(candidateId: String) = repository.selectMelodyAlias(candidateId)
+    fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate) = repository.selectGeneratedMelodyAlias(candidate)
+
+    fun generateMelodyAliases(mood: String, tone: String, pitch: String, tempoRange: String) {
+        if (_melodyAliasGenerationState.value == MelodyAliasGenerationState.Loading) return
+        val token = accessToken
+        if (token.isNullOrBlank()) {
+            _melodyAliasGenerationState.value = MelodyAliasGenerationState.Error("로그인 후 AI 멜로디를 생성할 수 있어요.")
+            return
+        }
+        viewModelScope.launch {
+            _melodyAliasGenerationState.value = MelodyAliasGenerationState.Loading
+            melodyAliasRepository.generate(
+                token,
+                MelodyAliasGenerateRequest(
+                    mood = mood,
+                    tone = tone,
+                    pitch = pitch,
+                    tempoRange = tempoRange,
+                    count = 3
+                )
+            ).onSuccess { candidates ->
+                _melodyAliasGenerationState.value = MelodyAliasGenerationState.Success(candidates)
+            }.onFailure {
+                _melodyAliasGenerationState.value = MelodyAliasGenerationState.Error(
+                    "멜로디를 만들지 못했어요. 서버 연결과 OpenAI 설정을 확인한 뒤 다시 시도해 주세요."
+                )
+            }
+        }
+    }
+
+    fun resetMelodyAliasGeneration() {
+        _melodyAliasGenerationState.value = MelodyAliasGenerationState.Idle
+    }
     fun previewMelodyAlias(candidate: MelodyAliasCandidate) = melodyAliasPreviewPlayer.play(candidate)
     fun previewMelodyTone(tone: String) = melodyAliasPreviewPlayer.playToneSample(tone)
     fun createDemoExchange(peerAlias: String) = repository.createDemoExchange(peerAlias)
