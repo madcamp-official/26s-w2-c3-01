@@ -539,14 +539,17 @@ private fun BuildingLoungeRow(
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(lounge.name, color = PaleMint, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                lounge.address?.takeIf { it.isNotBlank() && it != "주소 정보 없음" }?.let { address ->
+                    Text(address, color = MutedMint, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                }
                 Text(
-                    "${lounge.distanceMeters.roundToInt()}m away / radius ${lounge.radiusMeters}m",
+                    "현재 거리 ${lounge.distanceMeters.roundToInt()}m · 입장 반경 ${lounge.radiusMeters}m",
                     color = MutedMint,
                     style = MaterialTheme.typography.labelMedium
                 )
             }
             Text(
-                if (lounge.inside) "Enter" else "Outside",
+                if (lounge.inside) "입장" else "반경 밖",
                 color = if (lounge.inside) SignalGreen else MutedMint,
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.Bold
