@@ -306,52 +306,6 @@ fun LoungeDetailScreen(
                 }
             }
         }
-        lounge.poll?.let { poll ->
-            item { SectionLabel("진행 중 투표") }
-            item {
-                AppPanel {
-                    Text(poll.question, style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(14.dp))
-                    poll.options.forEach { option ->
-                        val total = poll.totalVotes.coerceAtLeast(1)
-                        val progress = option.voteCount.toFloat() / total
-                        val selected = poll.myChoice == option.id
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .clickable(enabled = poll.isOpen) { onVote(option.id) }
-                                .padding(vertical = 8.dp)
-                        ) {
-                            Row {
-                                Text(
-                                    option.label,
-                                    modifier = Modifier.weight(1f),
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) SignalGreen else PaleMint
-                                )
-                                Text("${(progress * 100).roundToInt()}%", color = MutedMint)
-                            }
-                            Spacer(Modifier.height(6.dp))
-                            LinearProgressIndicator(
-                                progress = { progress },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(5.dp)
-                                    .clip(CircleShape),
-                                color = if (selected) SignalGreen else MutedMint,
-                                trackColor = MossOutline
-                            )
-                        }
-                    }
-                    Text(
-                        "${poll.totalVotes}표 · 서버 ACK와 동일한 상태 전이를 데모로 재현",
-                        color = MutedMint,
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
-            }
-        }
         item {
             Button(
                 onClick = onSendCurrentTrack,
