@@ -1,6 +1,8 @@
 package com.melodybubble.server.profile
 
+import com.melodybubble.server.nearby.NearbyService
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -32,7 +34,10 @@ data class PrivacyUpdate(val discoverable: Boolean, val shareMusic: Boolean)
 
 @RestController
 @RequestMapping("/api/v1/me")
-class ProfileController(private val jdbc: JdbcTemplate) {
+class ProfileController(
+    private val jdbc: JdbcTemplate,
+    private val nearby: NearbyService,
+) {
     @GetMapping fun me(principal: Principal): ProfileResponse = load(UUID.fromString(principal.name))
 
     @PatchMapping fun update(principal: Principal, @RequestBody request: ProfileUpdate): ProfileResponse {
@@ -47,11 +52,32 @@ class ProfileController(private val jdbc: JdbcTemplate) {
         return load(UUID.fromString(principal.name))
     }
 
-    @PutMapping("/privacy") fun privacy(principal: Principal, @RequestBody request: PrivacyUpdate): ProfileResponse {
+    @PutMapping("/privacy")
+    @Transactional
+    fun privacy(principal: Principal, @RequestBody request: PrivacyUpdate): ProfileResponse {
+        val userId = UUID.fromString(principal.name)
+        val previousAudience = nearby.musicAudienceSnapshot(userId)
         jdbc.update("""insert into user_privacy_settings(user_id,discoverable,share_music) values (?,?,?)
             on conflict(user_id) do update set discoverable=excluded.discoverable,share_music=excluded.share_music,updated_at=now()""",
-            UUID.fromString(principal.name), request.discoverable, request.shareMusic)
-        return load(UUID.fromString(principal.name))
+            userId, request.discoverable, request.shareMusic)
+        jdbc.update(
+            """
+            update user_privacy_settings set
+              discoverability_scope=case
+                when ? then case when discoverability_scope='HIDDEN' then 'NEARBY' else discoverability_scope end
+                else 'HIDDEN' end,
+              music_visibility=case
+                when ? then case when music_visibility='HIDDEN' then 'TITLE_ARTIST' else music_visibility end
+                else 'HIDDEN' end,
+              updated_at=now()
+            where user_id=?
+            """.trimIndent(),
+            request.discoverable,
+            request.shareMusic,
+            userId,
+        )
+        nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
+        return load(userId)
     }
 
     private fun load(userId: UUID): ProfileResponse = jdbc.query("""select u.display_name,u.profile_color,u.bio,
