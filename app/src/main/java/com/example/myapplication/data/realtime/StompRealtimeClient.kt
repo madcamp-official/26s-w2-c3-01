@@ -182,3 +182,95 @@ class StompRealtimeClient(
             consume(bytes.utf8(), webSocket)
         }
 
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            webSocket.close(code, reason)
+            terminal("Server closing ($code): $reason")
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            terminal("Socket closed ($code): $reason")
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            terminal(listOfNotNull(t::class.simpleName, t.message).joinToString(": "))
+        }
+
+        private fun consume(chunk: String, webSocket: WebSocket) {
+            if (!isActive(connection)) return
+            lastServerActivity.set(SystemClock.elapsedRealtime())
+            if (chunk.all { it == '\n' || it == '\r' }) return
+            synchronized(incoming) {
+                incoming.append(chunk)
+                while (true) {
+                    val terminator = incoming.indexOf(STOMP_NULL.toString())
+                    if (terminator < 0) break
+                    val rawFrame = incoming.substring(0, terminator).trimStart('\n', '\r')
+                    incoming.delete(0, terminator + 1)
+                    if (rawFrame.isNotBlank()) {
+                        runCatching { parseFrame(rawFrame) }
+                            .onSuccess { frame -> handleFrame(frame, webSocket) }
+                            .onFailure { error ->
+                                emitIfNew(
+                                    RealtimeEvent.ParsingError(
+                                        destination = RealtimeDestinations.ERRORS,
+                                        rawBody = rawFrame,
+                                        reason = error.message ?: "Malformed STOMP frame",
+                                    )
+                                )
+                                webSocket.close(PROTOCOL_ERROR_CLOSE_CODE, "Malformed STOMP frame")
+                                terminal("Malformed STOMP frame")
+                            }
+                    }
+                }
+                while (incoming.isNotEmpty() && (incoming[0] == '\n' || incoming[0] == '\r')) {
+                    incoming.deleteCharAt(0)
+                }
+                if (incoming.length > MAX_INCOMING_BUFFER_CHARS) {
+                    incoming.clear()
+                    webSocket.cancel()
+                    terminal("STOMP frame exceeded the receive limit")
+                }
+            }
+        }
+
+        private fun handleFrame(frame: StompFrame, webSocket: WebSocket) {
+            if (!isActive(connection)) return
+            when (frame.command) {
+                "CONNECTED" -> handleConnected(frame, webSocket)
+                "MESSAGE" -> {
+                    val destination = frame.headers["destination"] ?: RealtimeDestinations.ERRORS
+                    emitIfNew(eventRouter.route(destination, frame.body))
+                }
+                "ERROR" -> {
+                    val routed = eventRouter.route(RealtimeDestinations.ERRORS, frame.body)
+                    val event = if (routed is RealtimeEvent.ParsingError) {
+                        routed.copy(reason = frame.headers["message"] ?: routed.reason)
+                    } else routed
+                    emitIfNew(event)
+                    terminal(frame.headers["message"] ?: "STOMP ERROR")
+                    webSocket.close(PROTOCOL_ERROR_CLOSE_CODE, "STOMP ERROR")
+                }
+                "RECEIPT" -> Unit
+            }
+        }
+
+        private fun handleConnected(frame: StompFrame, webSocket: WebSocket) {
+            if (!isActive(connection)) return
+            val heartbeat = negotiatedHeartbeat(frame.headers["heart-beat"])
+            val connectedAt = System.currentTimeMillis()
+            synchronized(lock) {
+                if (connection.serial != activeConnectionSerial) return
+                connectTimeoutJob?.cancel()
+                connectTimeoutJob = null
+                _connectionState.value = RealtimeConnectionState.Connected(
+                    sessionId = frame.headers["session"],
+                    stompVersion = frame.headers["version"],
+                    serverHeartbeat = heartbeat,
+                    connectedAtEpochMillis = connectedAt,
+                    isReconnect = connection.isReconnect,
+                )
+                reconnectStabilityJob?.cancel()
+                reconnectStabilityJob = scope.launch {
+                    delay(RECONNECT_STABILITY_RESET_MILLIS)
+                    synchronized(lock) {
+                        if (connection.serial == activeConnectionSerial &&
