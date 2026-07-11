@@ -90,3 +90,95 @@ class SubLoungeTopicAuthorizer(private val jdbc: JdbcTemplate) {
         private val TOPIC_PATTERN = Regex("/topic/sub-lounges/([0-9a-fA-F-]{36})")
     }
 }
+
+@Service
+class SubLoungeRealtimeService(
+    private val jdbc: JdbcTemplate,
+    private val rateLimiter: ActionRateLimiter,
+    private val realtime: RealtimePublisher,
+) {
+    fun snapshot(userId: UUID, subLoungeId: UUID): SubLoungeSnapshot {
+        requireMember(userId, subLoungeId)
+        return snapshotUnchecked(userId, subLoungeId)
+    }
+
+    fun activeSnapshot(userId: UUID): SubLoungeSnapshot? {
+        val subLoungeId = jdbc.query(
+            """
+            select member.sub_lounge_id from sub_lounge_members member
+            join sub_lounges room on room.id=member.sub_lounge_id and room.active=true
+            join building_lounge_sessions session
+              on session.building_lounge_id=room.building_lounge_id and session.user_id=member.user_id
+            where member.user_id=? and member.active=true
+              and session.active=true and session.expires_at>now()
+            order by member.last_seen_at desc limit 1
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            userId,
+        ).firstOrNull() ?: return null
+        return snapshotUnchecked(userId, subLoungeId)
+    }
+
+    @Transactional
+    fun join(userId: UUID, subLoungeId: UUID): SubLoungeSnapshot {
+        rateLimiter.enforce(userId, "LOUNGE_JOIN", 30, Duration.ofMinutes(1))
+        val buildingLoungeId = requireBuildingSession(userId, subLoungeId)
+        val previousRooms = jdbc.query(
+            """
+            select member.sub_lounge_id from sub_lounge_members member
+            join sub_lounges room on room.id=member.sub_lounge_id
+            where member.user_id=? and member.active=true
+              and room.building_lounge_id=? and member.sub_lounge_id<>?
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            userId,
+            buildingLoungeId,
+            subLoungeId,
+        )
+        previousRooms.forEach { previousId -> deactivateMembership(userId, previousId) }
+        val wasJoined = hasActiveMembership(jdbc, userId, subLoungeId)
+        jdbc.update(
+            """
+            insert into sub_lounge_members(sub_lounge_id,user_id,active)
+            values (?,?,true)
+            on conflict(sub_lounge_id,user_id) do update
+              set active=true,last_seen_at=now()
+            """.trimIndent(),
+            subLoungeId,
+            userId,
+        )
+        previousRooms.forEach { publishMemberChange(it, userId, joined = false) }
+        if (!wasJoined) publishMemberChange(subLoungeId, userId, joined = true)
+        publishState(subLoungeId)
+        return snapshotUnchecked(userId, subLoungeId)
+    }
+
+    @Transactional
+    fun leave(userId: UUID, subLoungeId: UUID) {
+        if (!hasActiveMembership(jdbc, userId, subLoungeId)) return
+        deactivateMembership(userId, subLoungeId)
+        publishMemberChange(subLoungeId, userId, joined = false)
+        publishState(subLoungeId)
+    }
+
+    @Transactional
+    fun forceLeaveFromBuilding(userId: UUID, buildingLoungeId: UUID) {
+        val rooms = jdbc.query(
+            """
+            select member.sub_lounge_id from sub_lounge_members member
+            join sub_lounges room on room.id=member.sub_lounge_id
+            where member.user_id=? and member.active=true and room.building_lounge_id=?
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            userId,
+            buildingLoungeId,
+        )
+        rooms.forEach { subLoungeId ->
+            deactivateMembership(userId, subLoungeId)
+            publishMemberChange(subLoungeId, userId, joined = false)
+            publishState(subLoungeId)
+        }
+    }
+
+    @Transactional
+    fun expireStaleMemberships() {
