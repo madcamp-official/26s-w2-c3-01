@@ -1308,6 +1308,98 @@ class DemoMelodyRepository(
         if (response.mutual) loadChatRooms()
     }
 
+    private fun handleRealtimeConnectionState(realtimeState: RealtimeConnectionState) {
+        if (accessToken == null) return
+        if (_state.value.sharingState !in setOf(SharingState.STARTING, SharingState.ACTIVE)) return
+        val connectionState = when (realtimeState) {
+            RealtimeConnectionState.Disconnected -> ConnectionState.OFFLINE
+            is RealtimeConnectionState.Connecting -> ConnectionState.CONNECTING
+            is RealtimeConnectionState.Connected -> ConnectionState.LIVE
+            is RealtimeConnectionState.Reconnecting -> ConnectionState.RECONNECTING
+        }
+        _state.update { current -> current.copy(connectionState = connectionState) }
+    }
+
+    private fun handleRealtimeEvent(event: RealtimeEvent) {
+        if (accessToken == null) return
+        if (event is RealtimeEvent.ChatRoomCreated ||
+            event is RealtimeEvent.ChatMessageCreated ||
+            event is RealtimeEvent.ChatMessageRead ||
+            event is RealtimeEvent.ChatRoomUpdated
+        ) {
+            chatRealtimeVersion.incrementAndGet()
+        }
+        if (event is RealtimeEvent.NearbyMusicUpdated) nearbyRealtimeVersion.incrementAndGet()
+        if (event is RealtimeEvent.PopularTracksUpdated) popularRealtimeVersion.incrementAndGet()
+        when (event) {
+            is RealtimeEvent.ChatRoomCreated -> loadChatRooms()
+            is RealtimeEvent.ChatMessageCreated -> applyChatMessageCreated(event)
+            is RealtimeEvent.ChatMessageRead -> applyChatMessageRead(event)
+            is RealtimeEvent.ChatRoomUpdated -> applyChatRoomUpdated(event)
+            is RealtimeEvent.NearbyReactionCreated -> applyNearbyReaction(event)
+            is RealtimeEvent.NearbyMusicUpdated -> applyNearbyMusicUpdated(event)
+            is RealtimeEvent.PopularTracksUpdated -> applyPopularTracksUpdated(event)
+            is RealtimeEvent.NotificationCreated -> applyNotificationCreated(event)
+            is RealtimeEvent.ServerError -> {
+                event.envelope.payload.message?.takeIf(String::isNotBlank)?.let { message ->
+                    _state.update { it.copy(feedbackMessage = message) }
+                }
+            }
+            is RealtimeEvent.ParsingError,
+            is RealtimeEvent.Unknown -> Unit
+        }
+    }
+
+    private fun applyChatMessageCreated(event: RealtimeEvent.ChatMessageCreated) {
+        val payload = event.envelope.payload
+        val messageId = payload.messageId?.takeIf(String::isNotBlank) ?: return
+        val clientMessageId = payload.clientMessageId?.takeIf(String::isNotBlank) ?: messageId
+        val roomId = payload.roomId?.takeIf(String::isNotBlank) ?: return
+        val content = payload.content?.trim()?.takeIf(String::isNotEmpty) ?: return
+        var shouldRefreshRooms = false
+        var shouldMarkRead = false
+        _state.update { current ->
+            val currentMessages = current.chatMessages[roomId].orEmpty()
+            val pending = currentMessages.firstOrNull { it.clientMessageId == clientMessageId }
+            val existing = currentMessages.firstOrNull { it.messageId == messageId }
+            val isMine = payload.isMine ?: pending?.isMine ?: false
+            val delivered = ChatMessage(
+                messageId = messageId,
+                clientMessageId = clientMessageId,
+                roomId = roomId,
+                isMine = isMine,
+                content = content.take(1_000),
+                sentAtLabel = "방금",
+                deliveryState = existing?.deliveryState?.takeIf { it == DeliveryState.READ }
+                    ?: DeliveryState.SENT,
+            )
+            val mergedMessages = when {
+                existing != null -> currentMessages.map { if (it.messageId == messageId) delivered else it }
+                pending != null -> currentMessages.map {
+                    if (it.clientMessageId == clientMessageId) delivered else it
+                }
+                else -> currentMessages + delivered
+            }.distinctBy(ChatMessage::messageId)
+            val active = activeChatRoomId == roomId
+            shouldMarkRead = active && !isMine
+            shouldRefreshRooms = current.chats.none { it.roomId == roomId }
+            current.copy(
+                chatMessages = current.chatMessages + (roomId to mergedMessages),
+                chats = current.chats.map { chat ->
+                    if (chat.roomId != roomId) chat else chat.copy(
+                        lastMessage = delivered.content,
+                        relativeTime = "방금",
+                        unreadCount = if (isMine || active) 0 else chat.unreadCount + 1,
+                    )
+                },
+            )
+        }
+        if (shouldRefreshRooms) loadChatRooms()
+        if (shouldMarkRead) markChatRoomRead(roomId)
+    }
+
+    private fun applyChatMessageRead(event: RealtimeEvent.ChatMessageRead) {
+        val payload = event.envelope.payload
     private fun startChatSync(token: String) {
         chatSyncJob?.cancel()
         chatSyncJob = scope.launch {
