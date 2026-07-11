@@ -6,7 +6,7 @@
 
 - REST: 로그인, 토큰 갱신, 내 프로필·Presence 공개 범위, 주변 snapshot·인기 음악·리액션, 팔로우·차단·신고, 맞팔 대화방·메시지·읽음
 - STOMP SEND: Presence, 위치·음악, 리액션, 채팅·읽음, 라운지 입장·퇴장·카드·리액션·투표
-- STOMP SUBSCRIBE: 개인 nearby/chat/notifications/reactions/ack/errors Queue와 라운지 state/cards/votes Topic
+- STOMP SUBSCRIBE: 개인 nearby/chat/notifications/reactions/errors Queue와 참가 중인 하위 라운지 Topic
 - 후속 계약: 채팅 typing, 지역 trend·pulse, 라운지 reaction Topic, 행사 Topic
 
 좌표는 Presence TTL 동안 최신값 한 건만 저장하며 주변 응답에는 실제 좌표·방향·정확 거리를 포함하지 않습니다.
@@ -32,8 +32,8 @@
 | 사용자 상세 | 선택한 시드 사용자 | snapshot 또는 `GET /api/v1/nearby/{nearbyHandle}`; `POST /api/v1/nearby/{nearbyHandle}/reactions` | 수신 리액션 `/user/queue/reactions` | 임시 handle, 별칭, 유사도, 공개 음악·취향 요약 |
 | 팔로우 | 서버 관계 상태 | `PUT`·`DELETE /api/v1/nearby/{nearbyHandle}/follow` | 결과 `/user/queue/notifications` 확장 가능 | 팔로우·맞팔 상태와 맞팔 대화방 ID |
 | 차단·신고 | 서버 차단 목록·신고 접수 | `PUT /api/v1/nearby/{nearbyHandle}/block`, `GET /api/v1/me/blocks`, `DELETE /api/v1/me/blocks/{blockId}`, `POST /api/v1/nearby/{nearbyHandle}/reports` | 처리 결과는 요청자에게만 반환 | 공개 메시지 없이 본인 처리 결과만 표시 |
-| 라운지 목록 | 시드 라운지 | `GET /api/v1/rooms?areaId={areaId}` | 선택 사항: 지역 notice | 이름, 상태, 익명 참여자 수, 장르·분위기 |
-| 라운지 상세 | 시드 카드·투표 | `GET /api/v1/rooms/{roomId}` | `/app/room/join|leave|card|reaction|vote`; 현재 구독은 `state|cards|votes`, reaction Topic은 후속 | 집계·추천곡 카드·정해진 리액션·투표 |
+| 라운지 목록 | 위치 기반 건물 라운지 | `GET /api/v1/building-lounges/nearby` | 없음 | 실제 좌표는 서버 입장 검증에만 사용 |
+| 라운지 상세 | 서버 하위 라운지 snapshot | 참가·퇴장·청취·카드·리액션·투표 REST | `/topic/sub-lounges/{subLoungeId}` | 별칭·공개 음악·추천 카드·집계 투표 |
 | 인박스 | 서버 리액션 이력·대화방 | `GET /api/v1/nearby/reactions`, `GET /api/v1/notifications`, `GET /api/v1/chat/rooms` | `/user/queue/notifications`, `/user/queue/reactions`, `/user/queue/chat` | 본인에게 전달된 알림·대화 미리보기 |
 | 1:1 채팅 | 서버 대화 | `GET /api/v1/chat/rooms`, `GET`·`POST /api/v1/chat/rooms/{roomId}/messages`, `PUT /api/v1/chat/rooms/{roomId}/read` | `/user/queue/chat`의 생성·메시지·읽음·방 갱신 이벤트 | 맞팔이며 차단되지 않은 대화방의 텍스트와 전송 상태 |
 | 마이·설정 | 로컬 데모 프로필, 알림 접근 설정 진입 | `GET /api/v1/me`, `PATCH /api/v1/me`, `PUT /api/v1/me/privacy` | 설정 반영 알림은 개인 Queue 선택 | 본인 프로필·취향·공개 범위 |
@@ -208,11 +208,20 @@ GET /api/v1/nearby/reactions?limit=100
 
 전송은 `clientReactionId`로 멱등 처리합니다. 수신 이력 조회는 WebSocket 재연결 뒤 누락된 `/user/queue/reactions` 이벤트를 복구하는 용도이며 최신순으로 반환합니다.
 
-### 라운지 목록·상세 — 선언됨, 어댑터 미연결
+### 건물·하위 라운지 — 구현됨
 
 ```http
-GET /api/v1/rooms?areaId={areaId}
-GET /api/v1/rooms/{roomId}
+GET /api/v1/building-lounges/nearby?latitude={lat}&longitude={lng}
+POST /api/v1/building-lounges/{loungeId}/enter
+POST /api/v1/building-lounges/{loungeId}/heartbeat
+POST /api/v1/building-lounges/{loungeId}/leave
+GET /api/v1/building-lounges/sub-lounges/{subLoungeId}
+POST /api/v1/building-lounges/sub-lounges/{subLoungeId}/join
+POST /api/v1/building-lounges/sub-lounges/{subLoungeId}/leave
+PUT /api/v1/building-lounges/sub-lounges/{subLoungeId}/listening
+POST /api/v1/building-lounges/sub-lounges/{subLoungeId}/cards
+POST /api/v1/building-lounges/cards/{cardId}/reactions
+PUT /api/v1/building-lounges/sub-lounges/{subLoungeId}/vote
 ```
 
 ```json
@@ -441,10 +450,7 @@ ACK 예시:
 |---|---|
 | `/topic/area/{areaId}/trend` (후속) | 최소 인원 기준을 통과한 장르·아티스트·곡·분위기 집계 |
 | `/topic/area/{areaId}/pulse` (후속) | `pulseType`, 정규화 track key, 집계 count, 짧은 만료 시간 |
-| `/topic/room/{roomId}/state` | 익명 참여자 수, 현재 분위기, 라운지 상태 |
-| `/topic/room/{roomId}/cards` | 카드 ID, 공개 가능한 곡 정보, 익명 반응 집계 |
-| `/topic/room/{roomId}/reactions` (후속) | 카드별 reactionType과 갱신된 집계 |
-| `/topic/room/{roomId}/votes` | voteType, option별 count·percentage |
+| `/topic/sub-lounges/{subLoungeId}` | 참가 인원, 청취 상태, 추천 카드·리액션, 분위기 투표 |
 | `/topic/event/{eventId}/live` (후속) | 개인 식별자가 없는 행사 집계 상태 |
 | `/topic/event/{eventId}/notice` (후속) | 운영 공지 |
 
