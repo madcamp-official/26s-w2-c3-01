@@ -1,5 +1,6 @@
 package com.melodybubble.server.social
 
+import com.melodybubble.server.chat.ChatService
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -46,6 +47,7 @@ private data class Peer(val id: UUID, val alias: String, val color: String)
 class SocialService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
+    private val chat: ChatService,
 ) {
     @Transactional
     fun follow(userId: UUID, handle: String): FollowResponse {
@@ -168,7 +170,7 @@ class SocialService(
         val (first, second) = listOf(left, right).sortedBy(UUID::toString)
         val roomId = UUID.nameUUIDFromBytes("melody-direct:$first:$second".toByteArray(StandardCharsets.UTF_8))
         jdbc.update("insert into chat_rooms(id,type) values (?,'DIRECT') on conflict(id) do nothing", roomId)
-        jdbc.update(
+        val pairInserted = jdbc.update(
             "insert into direct_chat_pairs(first_user_id,second_user_id,room_id) values (?,?,?) on conflict do nothing",
             first,
             second,
@@ -181,6 +183,7 @@ class SocialService(
             roomId,
             second,
         )
+        if (pairInserted == 1) chat.publishRoomCreated(roomId)
         return roomId
     }
 
