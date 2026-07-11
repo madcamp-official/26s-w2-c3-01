@@ -1,11 +1,15 @@
 package com.melodybubble.server.nearby
 
+import com.melodybubble.server.realtime.RealtimeEnvelope
+import com.melodybubble.server.realtime.RealtimeEventTypes
+import com.melodybubble.server.realtime.RealtimePublisher
+import com.melodybubble.server.realtime.RealtimeQueues
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.messaging.simp.SimpMessagingTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -51,12 +55,27 @@ data class MusicUpdate(
     val sourceType: String = "ANDROID_MEDIA_SESSION",
     val isPlaying: Boolean = true,
 )
-data class Envelope<T>(val type: String, val data: T, val emittedAt: Instant = Instant.now())
+data class PopularTrack(
+    val title: String,
+    val artist: String,
+    val listenerCount: Int,
+    val reactionCount: Int,
+)
+data class NearbyMusicUpdatedPayload(
+    val nearbyHandle: String,
+    val isPlaying: Boolean,
+    val track: TrackSummary?,
+)
+data class PopularTracksUpdatedPayload(val tracks: List<PopularTrack>)
+
+data class MusicAudienceMember(val userId: UUID, val sourceHandle: String)
+private data class CurrentMusic(val title: String, val artist: String)
 
 @Service
 class NearbyService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
+    private val realtime: RealtimePublisher,
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
     @Value("\${app.nearby.max-radius-meters:2000}") private val maxRadiusMeters: Int,
 ) {
@@ -77,14 +96,14 @@ class NearbyService(
               session.nearby_handle,
               person.display_name,
               person.profile_color,
-              CASE WHEN status.is_playing AND (
+              CASE WHEN status.is_playing AND privacy.share_music AND (
                 privacy.music_visibility='TITLE_ARTIST' OR (
                   privacy.music_visibility='MUTUALS'
                   AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=? AND f.followed_id=session.user_id)
                   AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=session.user_id AND f.followed_id=?)
                 )
               ) THEN status.track_title END AS track_title,
-              CASE WHEN status.is_playing AND (
+              CASE WHEN status.is_playing AND privacy.share_music AND (
                 privacy.music_visibility='TITLE_ARTIST' OR (
                   privacy.music_visibility='MUTUALS'
                   AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=? AND f.followed_id=session.user_id)
@@ -154,6 +173,7 @@ class NearbyService(
         return NearbySnapshot(radiusMeters = radius, items = items)
     }
 
+    @Transactional
     fun updateLocation(userId: UUID, update: LocationUpdate) {
         rateLimiter.enforce(userId, "PRESENCE_LOCATION", 30, Duration.ofMinutes(1))
         validateLocation(update)
@@ -187,10 +207,13 @@ class NearbyService(
         )
     }
 
+    @Transactional
     fun updateMusic(userId: UUID, update: MusicUpdate) {
         rateLimiter.enforce(userId, "PRESENCE_MUSIC", 30, Duration.ofMinutes(1))
+        val previous = currentMusic(userId)
         if (!update.isPlaying) {
             jdbc.update("delete from music_statuses where user_id=?", userId)
+            if (previous != null) publishMusicChanged(userId, false, null)
             return
         }
         val title = update.title.trim()
@@ -199,6 +222,9 @@ class NearbyService(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "재생 중인 음악의 제목과 아티스트가 필요합니다.")
         }
         val expiresAt = Timestamp.from(Instant.now().plusSeconds(presenceTtlSeconds.coerceIn(30, 300)))
+        val normalizedTitle = title.take(160)
+        val normalizedArtist = artist.take(160)
+        val sourceType = update.sourceType.trim().take(32).ifBlank { "ANDROID_MEDIA_SESSION" }
         jdbc.update(
             """
             INSERT INTO music_statuses(id,user_id,track_title,artist_name,source_type,is_playing,expires_at)
@@ -209,11 +235,58 @@ class NearbyService(
               expires_at=excluded.expires_at,updated_at=now()
             """.trimIndent(),
             userId,
-            title.take(160),
-            artist.take(160),
-            update.sourceType.trim().take(32).ifBlank { "ANDROID_MEDIA_SESSION" },
+            normalizedTitle,
+            normalizedArtist,
+            sourceType,
             expiresAt,
         )
+        val changed = previous == null || previous.title != normalizedTitle || previous.artist != normalizedArtist
+        if (changed) publishMusicChanged(userId, true, TrackSummary(normalizedTitle, normalizedArtist))
+    }
+
+    fun popularTracks(userId: UUID): List<PopularTrack> {
+        rateLimiter.enforce(userId, "NEARBY_POPULAR", 60, Duration.ofMinutes(1))
+        return popularTracksFor(userId)
+    }
+
+    /** Recomputes popular-track payloads for users who can currently see this listener. */
+    fun publishPopularTracksAroundAfterCommit(listenerId: UUID) {
+        musicAudience(listenerId).forEach { audience ->
+            realtime.toUserAfterCommit(
+                audience.userId,
+                RealtimeQueues.NEARBY,
+                RealtimeEventTypes.POPULAR_TRACKS_UPDATED,
+                PopularTracksUpdatedPayload(popularTracksFor(audience.userId)),
+            )
+        }
+    }
+
+    fun musicAudienceSnapshot(sourceUserId: UUID): List<MusicAudienceMember> =
+        musicAudience(sourceUserId)
+
+    fun publishPrivacyAudienceChangesAfterCommit(
+        sourceUserId: UUID,
+        previousAudience: List<MusicAudienceMember>,
+    ) {
+        val remainingUserIds = musicAudience(sourceUserId).map(MusicAudienceMember::userId).toSet()
+        previousAudience.filter { it.userId !in remainingUserIds }.forEach { removed ->
+            realtime.toUserAfterCommit(
+                removed.userId,
+                RealtimeQueues.NEARBY,
+                RealtimeEventTypes.NEARBY_MUSIC_UPDATED,
+                NearbyMusicUpdatedPayload(
+                    nearbyHandle = removed.sourceHandle,
+                    isPlaying = false,
+                    track = null,
+                ),
+            )
+            realtime.toUserAfterCommit(
+                removed.userId,
+                RealtimeQueues.NEARBY,
+                RealtimeEventTypes.POPULAR_TRACKS_UPDATED,
+                PopularTracksUpdatedPayload(popularTracksFor(removed.userId)),
+            )
+        }
     }
 
     fun stop(userId: UUID, clientSessionId: String) {
