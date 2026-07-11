@@ -125,7 +125,9 @@ class MainActivity : ComponentActivity() {
             MODE_PRIVATE
         )
         if (!preferences.getBoolean(NowPlayingNotificationListenerService.KEY_ACTIVE, false)) {
-            viewModel.setCurrentMusicPlaying(false)
+            if (preferences.contains(NowPlayingNotificationListenerService.KEY_ACTIVE)) {
+                viewModel.setCurrentMusicPlaying(false)
+            }
             return
         }
         val title = preferences.getString(NowPlayingNotificationListenerService.KEY_TITLE, null)

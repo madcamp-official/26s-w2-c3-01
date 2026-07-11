@@ -176,7 +176,7 @@ class DemoMelodyRepository(
         scope.launch {
             while (isActive) {
                 delay(3_500)
-                if (_state.value.sharingState == SharingState.ACTIVE) {
+                if (_state.value.sharingState == SharingState.ACTIVE && accessToken == null) {
                     applyLiveTick()
                 }
             }
@@ -838,8 +838,12 @@ class DemoMelodyRepository(
             avatarDataUrl = remote.avatarDataUrl,
             genres = remote.genres.orEmpty(),
             moods = remote.moods.orEmpty(),
-            discoverable = remote.discoverable,
-            musicVisibilityLabel = if (remote.shareMusic) "제목과 아티스트 공개" else "비공개",
+            discoverable = current.discoverabilityScope != "HIDDEN",
+            musicVisibilityLabel = when (current.musicVisibility) {
+                "MUTUALS" -> "맞팔에게만 공개"
+                "HIDDEN" -> "비공개"
+                else -> "제목과 아티스트 공개"
+            },
         ), feedbackMessage = feedback ?: current.feedbackMessage) }
         persistProfile(_state.value.profile)
     }
@@ -966,7 +970,11 @@ class DemoMelodyRepository(
         val coarse = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!fine && !coarse) return null
         val manager = applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        return manager.getProviders(true).mapNotNull { provider -> runCatching { manager.getLastKnownLocation(provider) }.getOrNull() }
+        val freshAfter = System.currentTimeMillis() - 2 * 60 * 1_000L
+        return manager.getProviders(true).mapNotNull { provider ->
+            runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
+                ?.takeIf { it.time >= freshAfter }
+        }
             .maxByOrNull { it.time }
     }
 
