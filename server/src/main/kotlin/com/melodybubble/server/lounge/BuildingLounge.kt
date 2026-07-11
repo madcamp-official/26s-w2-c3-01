@@ -49,8 +49,6 @@ data class EnterBuildingLoungeRequest(val latitude: Double, val longitude: Doubl
 data class BuildingLoungeSessionResponse(val lounge: BuildingLoungeSummary, val entered: Boolean)
 data class HeartbeatRequest(val latitude: Double, val longitude: Double, val accuracyMeters: Float? = null)
 data class HeartbeatResponse(val inside: Boolean, val outsideCount: Int, val forcedExit: Boolean)
-data class TestFixturesRequest(val latitude: Double, val longitude: Double)
-data class TestFixturesResponse(val lounges: List<BuildingLoungeSummary>)
 data class CreateSubLoungeRequest(val title: String, val style: String? = null)
 data class SubLoungeSummary(
     val id: UUID,
@@ -633,10 +631,6 @@ class BuildingLoungeController(
         @PathVariable loungeId: UUID,
         @RequestBody request: EnterBuildingLoungeRequest,
     ): BuildingLoungeSessionResponse = service.enter(UUID.fromString(principal.name), loungeId, request)
-
-    @PostMapping("/test-fixtures")
-    fun createTestFixtures(@RequestBody request: TestFixturesRequest): TestFixturesResponse =
-        service.createTestFixtures(request.latitude, request.longitude)
 
     @PostMapping("/{loungeId}/heartbeat")
     fun heartbeat(
