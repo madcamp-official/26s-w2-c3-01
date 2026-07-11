@@ -90,3 +90,8 @@ class RealtimeEventRouterTest {
         assertEquals(10_000L, StompRealtimeClient.retryDelay(4))
         assertEquals(20_000L, StompRealtimeClient.retryDelay(5))
         assertEquals(30_000L, StompRealtimeClient.retryDelay(6))
+        assertEquals(30_000L, StompRealtimeClient.retryDelay(100))
+        assertFalse(RealtimeDestinations.userQueues.contains("/user/queue/ack"))
+        assertEquals(5, RealtimeDestinations.userQueues.size)
+    }
+}
