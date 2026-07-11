@@ -243,6 +243,8 @@ data class MelodyUiState(
     val snapshotSequence: Long = 1,
     val currentTrack: Track,
     val currentTrackPlaying: Boolean = true,
+    val detectedTrack: Track? = null,
+    val detectedTrackPlaying: Boolean = false,
     val nearbyListeners: List<NearbyListener>,
     val popularTracks: List<PopularTrack>,
     val lounges: List<Lounge>,
