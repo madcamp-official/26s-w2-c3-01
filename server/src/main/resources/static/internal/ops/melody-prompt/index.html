@@ -94,9 +94,16 @@
   async function refreshPrompt(){try{const d=await post('/internal/ops/api/melody-alias/prompt-preview',payload());$('prompt').textContent=d.prompt}catch(e){setStatus(e.message,true)}}
   async function generate(){setStatus('Calling OpenAI...');$('generate').disabled=true;try{const d=await post('/internal/ops/api/melody-alias/generate',payload());state.result=d;$('json').textContent=JSON.stringify(d,null,2);renderCards(d.candidates);setStatus('Generated. Press Play to hear a candidate.')}catch(e){setStatus(e.message,true)}finally{$('generate').disabled=false}}
   function renderCards(candidates){$('cards').innerHTML=candidates.map((c,i)=>`<article class="card"><span class="label">${esc(c.mood)} / ${esc(c.tone)}</span><h2>${esc(c.name)}</h2><p>${esc(c.playbackHint)}</p><div class="notes">${esc(c.notes.join('  '))}</div><p>${esc(c.rhythmMs.join(' / '))} ms</p><button class="play" data-index="${i}">Play</button></article>`).join('')}
-  async function play(index){const c=state.result?.candidates?.[index];if(!c)return;await Tone.start();const preset=c.toneJsPreset;const Synth=Tone[preset.synth]||Tone.Synth;const synth=new Synth({oscillator:{type:preset.oscillatorType},envelope:preset.envelope}).toDestination();let t=Tone.now()+0.05;c.notes.forEach((note,i)=>{const dur=(c.rhythmMs[i]||160)/1000;synth.triggerAttackRelease(note,Math.max(0.05,dur*0.75),t);t+=dur});setTimeout(()=>synth.dispose(),Math.ceil((t-Tone.now()+1)*1000))}
+  function instrumentFor(candidate){
+    const tone=String(candidate.tone).toLowerCase(),p=candidate.toneJsPreset;
+    if(tone.includes('guitar')||tone.includes('기타'))return new Tone.PluckSynth({attackNoise:1.2,dampening:3200,resonance:.88});
+    if(tone.includes('bell')||tone.includes('벨'))return new Tone.FMSynth({harmonicity:3.01,modulationIndex:12,oscillator:{type:'sine'},envelope:{attack:.002,decay:.8,sustain:.02,release:1.2},modulation:{type:'sine'},modulationEnvelope:{attack:.001,decay:.45,sustain:0,release:.7}});
+    if(tone.includes('glass')||tone.includes('오르골'))return new Tone.FMSynth({harmonicity:2.4,modulationIndex:7,envelope:{attack:.003,decay:.65,sustain:.05,release:1}});
+    if(tone.includes('piano')||tone.includes('피아노'))return new Tone.Synth({oscillator:{type:'triangle8'},envelope:{attack:.004,decay:.35,sustain:.08,release:.7}});
+    const Synth=Tone[p.synth]||Tone.Synth;return new Synth({oscillator:{type:p.oscillatorType},envelope:p.envelope});
+  }
+  async function play(index){const c=state.result?.candidates?.[index];if(!c)return;await Tone.start();const p=c.toneJsPreset;const reverb=new Tone.Reverb({decay:1.4,wet:Math.min(.45,p.effects.reverb)}).toDestination();await reverb.generate();const delay=new Tone.FeedbackDelay('16n',Math.min(.22,p.effects.delay));delay.wet.value=Math.min(.3,p.effects.delay);delay.connect(reverb);const synth=instrumentFor(c).connect(delay);let t=Tone.now()+.05;c.notes.forEach((note,i)=>{const dur=(c.rhythmMs[i]||160)/1000;synth.triggerAttackRelease(note,Math.max(.06,dur*.82),t);t+=dur});setTimeout(()=>{synth.dispose();delay.dispose();reverb.dispose()},Math.ceil((t-Tone.now()+2)*1000))}
   $('generate').addEventListener('click',generate);$('preview').addEventListener('click',refreshPrompt);['mood','tone','energy','tempoRange','count'].forEach(id=>$(id).addEventListener('change',refreshPrompt));$('cards').addEventListener('click',e=>{const index=e.target?.dataset?.index;if(index!==undefined)play(Number(index))});loadOptions();
 </script>
 </body>
 </html>
-

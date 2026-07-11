@@ -75,7 +75,7 @@ class OpenAiMelodyAliasService(
 
         val outputText = extractOutputText(objectMapper.readTree(response.body()))
         val generated = objectMapper.readValue(outputText, MelodyAliasGenerateResponse::class.java)
-        return generated.copy(candidates = generated.candidates.map(::normalizeCandidate))
+        return generated.copy(candidates = generated.candidates.map { normalizeCandidate(it, request) })
     }
 
     fun buildPromptPreview(request: MelodyAliasGenerateRequest): String =
@@ -94,13 +94,18 @@ class OpenAiMelodyAliasService(
         throw IllegalStateException("OpenAI response did not contain output text.")
     }
 
-    private fun normalizeCandidate(candidate: MelodyAliasCandidateResponse): MelodyAliasCandidateResponse {
+    private fun normalizeCandidate(
+        candidate: MelodyAliasCandidateResponse,
+        request: MelodyAliasGenerateRequest,
+    ): MelodyAliasCandidateResponse {
         val notes = candidate.notes.take(5)
         val rhythm = candidate.rhythmMs.take(notes.size)
         require(notes.size in 2..5) { "Generated melody must contain 2 to 5 notes." }
         require(rhythm.size == notes.size) { "Generated rhythm must match note count." }
         return candidate.copy(
             id = candidate.id.lowercase().replace(Regex("[^a-z0-9-]+"), "-").trim('-'),
+            mood = request.mood,
+            tone = request.tone,
             tempo = candidate.tempo.coerceIn(80, 160),
             notes = notes,
             rhythmMs = rhythm.map { it.coerceIn(60, 800) },
@@ -131,6 +136,14 @@ class OpenAiMelodyAliasService(
             - Each melody must use 2 to 5 notes only.
             - Use Tone.js-compatible note names, such as C5, D#5, F6, A6.
             - rhythmMs values are note durations in milliseconds.
+            - Compose a compact notification motif, not a scale exercise or arpeggio drill.
+            - Never use three or more notes moving only upward or only downward by scale steps.
+            - Give the motif a recognizable contour: use a repeat, a direction change, or one tasteful leap.
+            - Use at least two clearly different rhythmMs values. Make the final note the longest or give it a clear resolving accent.
+            - Favor punchy notification timing: most notes should be 80-220 ms and the full motif should stay under 1.2 seconds.
+            - The three candidates must differ in contour and rhythm, not merely transpose the same pattern.
+            - Treat the selected tone as orchestration: bell should be bright and ringing; guitar should be warm, plucked, and quickly decaying.
+            - Good structural examples are short-short-short-long, short-long-short-long, and pickup-accent-resolve. Do not copy their pitches mechanically.
             - Keep tempo from 80 to 160 BPM unless the user's tempo range is narrower.
             - Do not reference real songs, artists, brands, or copyrighted melodies.
             - Names must be short, friendly, and usable as a melody alias.
