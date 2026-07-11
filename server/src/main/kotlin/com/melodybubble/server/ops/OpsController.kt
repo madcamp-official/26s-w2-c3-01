@@ -39,6 +39,7 @@ class OpsController(private val jdbc: JdbcTemplate) {
             count("music", "Music statuses", "music_statuses", "expires_at > now()"),
             count("chatRooms", "Chat rooms", "chat_rooms"),
             count("messages", "Messages", "chat_messages"),
+            count("nearbyReactions", "Nearby reactions", "nearby_reactions"),
             count("lounges", "Active lounges", "lounges", "active = true"),
             count("cards", "Live cards", "lounge_cards", "expires_at > now()"),
             count("votes", "Votes", "lounge_votes"),
