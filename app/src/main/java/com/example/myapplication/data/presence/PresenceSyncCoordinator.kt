@@ -182,3 +182,83 @@ class PresenceSyncCoordinator private constructor(
             Track(
                 id = "detected-${title.hashCode()}-${artist.hashCode()}",
                 title = title,
+                artist = artist,
+                platform = source,
+            ),
+            isPlaying = false,
+            verifiedInCurrentProcess = false,
+        )
+    }
+
+    private fun persist(playback: DetectedPlaybackState) {
+        val track = playback.track
+        preferences.edit().apply {
+            if (playback.isPlaying && track != null) {
+                putString(KEY_TITLE, track.title)
+                putString(KEY_ARTIST, track.artist)
+                putString(KEY_SOURCE, track.platform)
+                putLong(KEY_UPDATED_AT_EPOCH_MS, System.currentTimeMillis())
+                putBoolean(KEY_ACTIVE, true)
+            } else {
+                remove(KEY_TITLE)
+                remove(KEY_ARTIST)
+                remove(KEY_SOURCE)
+                remove(KEY_UPDATED_AT_EPOCH_MS)
+                putBoolean(KEY_ACTIVE, false)
+            }
+        }.apply()
+    }
+
+    private fun DetectedPlaybackState.fingerprint(): String =
+        "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.platform.orEmpty()}\u001F$isPlaying\u001F$verifiedInCurrentProcess"
+
+    companion object {
+        const val PREFERENCES_NAME = "melody_bubble_now_playing_fallback"
+        const val KEY_TITLE = "title"
+        const val KEY_ARTIST = "text"
+        const val KEY_SOURCE = "source"
+        const val KEY_UPDATED_AT_EPOCH_MS = "updated_at_epoch_ms"
+        const val KEY_ACTIVE = "active"
+
+        private const val DEFAULT_SOURCE_TYPE = "ANDROID_MEDIA_SESSION"
+        private const val MAX_TITLE_LENGTH = 160
+        private const val MAX_ARTIST_LENGTH = 160
+        private const val MAX_SOURCE_LENGTH = 32
+        private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
+        private const val MAX_RETRY_DELAY_MILLIS = 30_000L
+        private const val ACTIVE_PLAYBACK_REFRESH_MILLIS = 60_000L
+        private const val PERSISTED_PLAYBACK_MAX_AGE_MILLIS = 90_000L
+        @Volatile
+        private var instance: PresenceSyncCoordinator? = null
+
+        fun get(context: Context): PresenceSyncCoordinator =
+            instance ?: synchronized(this) {
+                instance ?: PresenceSyncCoordinator(context).also { instance = it }
+            }
+    }
+}
+
+internal fun DetectedPlaybackState.toMusicUpdateRequest(): MusicUpdateRequest {
+    val detected = track?.takeIf { isPlaying && verifiedInCurrentProcess }
+    return MusicUpdateRequest(
+        title = detected?.title.orEmpty(),
+        artist = detected?.artist.orEmpty(),
+        sourceType = detected?.platform.toRemoteSourceType(),
+        isPlaying = detected != null,
+    )
+}
+
+private fun String?.toRemoteSourceType(): String = when (this) {
+    "MEDIA_SESSION", "ANDROID_MEDIA_SESSION" -> "ANDROID_MEDIA_SESSION"
+    "MEDIA_NOTIFICATION", "ANDROID_MEDIA_NOTIFICATION" -> "ANDROID_MEDIA_NOTIFICATION"
+    else -> this?.take(32)?.ifBlank { null } ?: "ANDROID_MEDIA_SESSION"
+}
+
+private fun String?.toSafeMetadata(maxLength: Int): String? =
+    this
+        ?.replace(METADATA_CONTROL_CHARACTERS, " ")
+        ?.trim()
+        ?.take(maxLength)
+        ?.takeIf(String::isNotEmpty)
+
+private val METADATA_CONTROL_CHARACTERS = Regex("[\\p{Cc}\\p{Cf}]+")
