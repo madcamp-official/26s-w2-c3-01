@@ -1,5 +1,8 @@
 package com.melodybubble.server.chat
 
+import com.melodybubble.server.realtime.RealtimeEventTypes
+import com.melodybubble.server.realtime.RealtimePublisher
+import com.melodybubble.server.realtime.RealtimeQueues
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.server.ResponseStatusException
 import java.security.Principal
 import java.time.Duration
@@ -36,14 +40,49 @@ data class DirectChatMessage(
     val isMine: Boolean,
     val content: String,
     val sentAt: Instant,
+    val readByPeer: Boolean = false,
 )
 
 data class SendChatMessageRequest(val clientMessageId: String, val content: String)
+
+data class ChatMessageCreatedPayload(
+    val messageId: UUID,
+    val clientMessageId: UUID,
+    val roomId: UUID,
+    val senderAlias: String,
+    val content: String,
+    val sentAt: Instant,
+    val isMine: Boolean,
+)
+
+data class ChatMessageReadPayload(
+    val roomId: UUID,
+    val lastReadMessageId: UUID,
+    val readerAlias: String,
+    val readAt: Instant,
+    val isMine: Boolean,
+)
+
+data class ChatRoomUpdatedPayload(
+    val roomId: UUID,
+    val lastMessageId: UUID?,
+    val lastMessageContent: String?,
+    val lastMessageAt: Instant?,
+    val unreadCount: Int,
+    val updatedAt: Instant = Instant.now(),
+)
+
+data class ChatReadResponse(
+    val roomId: UUID,
+    val lastReadMessageId: UUID?,
+    val readAt: Instant,
+)
 
 @Service
 class ChatService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
+    private val realtime: RealtimePublisher,
 ) {
     fun rooms(userId: UUID): List<DirectChatSummary> = jdbc.query(
         """
@@ -97,8 +136,16 @@ class ChatService(
         requireActiveMutual(userId, roomId)
         return jdbc.query(
             """
-            select id,client_message_id,room_id,sender_id,content,sent_at
-            from chat_messages where room_id=? order by sent_at desc limit ?
+            select message.id,message.client_message_id,message.room_id,message.sender_id,
+              message.content,message.sent_at,
+              case when message.sender_id=? and peer_read.id is not null
+                and (message.sent_at,message.id) <= (peer_read.sent_at,peer_read.id)
+                then true else false end read_by_peer
+            from chat_messages message
+            left join chat_room_members peer_member
+              on peer_member.room_id=message.room_id and peer_member.user_id<>?
+            left join chat_messages peer_read on peer_read.id=peer_member.last_read_message_id
+            where message.room_id=? order by message.sent_at desc,message.id desc limit ?
             """.trimIndent(),
             { rs, _ ->
                 DirectChatMessage(
@@ -108,8 +155,11 @@ class ChatService(
                     isMine = UUID.fromString(rs.getString("sender_id")) == userId,
                     content = rs.getString("content"),
                     sentAt = rs.getTimestamp("sent_at").toInstant(),
+                    readByPeer = rs.getBoolean("read_by_peer"),
                 )
             },
+            userId,
+            userId,
             roomId,
             limit.coerceIn(1, 100),
         ).reversed()
@@ -126,7 +176,7 @@ class ChatService(
         if (content.isBlank() || content.length > 1000) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "메시지는 1자부터 1000자까지 입력할 수 있습니다.")
         }
-        jdbc.update(
+        val inserted = jdbc.update(
             """
             insert into chat_messages(id,room_id,sender_id,client_message_id,content)
             values (?,?,?,?,?) on conflict(sender_id,client_message_id) do nothing
@@ -137,7 +187,7 @@ class ChatService(
             clientMessageId,
             content,
         )
-        return jdbc.query(
+        val stored = jdbc.query(
             """
             select id,client_message_id,room_id,sender_id,content,sent_at
             from chat_messages where sender_id=? and client_message_id=?
@@ -155,6 +205,14 @@ class ChatService(
             userId,
             clientMessageId,
         ).single()
+        if (stored.roomId != roomId || stored.content != content) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "clientMessageId가 이미 다른 메시지에 사용되었습니다.",
+            )
+        }
+        if (inserted == 1) publishMessageCreated(userId, stored)
+        return stored
     }
 
     private fun requireActiveMutual(userId: UUID, roomId: UUID) {
