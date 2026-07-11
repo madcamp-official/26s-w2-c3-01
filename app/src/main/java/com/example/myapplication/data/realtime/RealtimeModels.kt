@@ -10,6 +10,8 @@ object RealtimeDestinations {
     const val ERRORS = "/user/queue/errors"
 
     val userQueues = listOf(CHAT, REACTIONS, NEARBY, NOTIFICATIONS, ERRORS)
+
+    fun subLounge(subLoungeId: String) = "/topic/sub-lounges/$subLoungeId"
 }
 
 /** The server-wide realtime event shape. */
@@ -176,6 +178,14 @@ sealed interface RealtimeEvent {
     data class NotificationCreated(
         override val destination: String,
         val envelope: RealtimeEventEnvelope<RealtimeNotificationPayload>,
+    ) : RealtimeEvent {
+        override val eventId: String = envelope.eventId
+        override val type: String = envelope.type
+    }
+
+    data class SubLoungeUpdated(
+        override val destination: String,
+        val envelope: RealtimeEventEnvelope<JsonElement>,
     ) : RealtimeEvent {
         override val eventId: String = envelope.eventId
         override val type: String = envelope.type
