@@ -40,6 +40,7 @@ import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.service.SharingForegroundService
+import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.ui.components.MelodyBottomNavigationBar
 import com.example.myapplication.ui.screens.ChatScreen
 import com.example.myapplication.ui.screens.BlockedUsersScreen
@@ -83,6 +84,12 @@ fun MelodyBubbleApp(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
 
+    fun requestNowPlayingAccessIfNeeded() {
+        if (!NowPlayingNotificationListenerService.isEnabled(context)) {
+            context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -91,6 +98,7 @@ fun MelodyBubbleApp(
             SharingForegroundService.hasLocationPermission(context)
         if (hasLocation && SharingForegroundService.start(context)) {
             viewModel.startSharing()
+            requestNowPlayingAccessIfNeeded()
         } else if (hasLocation) {
             viewModel.sharingStartFailed()
         } else {
@@ -109,6 +117,7 @@ fun MelodyBubbleApp(
         if (hasLocationPermission && !needsNotificationPermission) {
             if (SharingForegroundService.start(context)) {
                 viewModel.startSharing()
+                requestNowPlayingAccessIfNeeded()
             } else {
                 viewModel.sharingStartFailed()
             }

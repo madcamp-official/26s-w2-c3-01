@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.app.NotificationManagerCompat
 
 /**
  * Reads current playback from active MediaSessions exposed to this enabled notification listener.
@@ -193,6 +194,9 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
     private data class TimestampedFallback(val postTime: Long, val text: NowPlayingText)
 
     companion object {
+        fun isEnabled(context: Context): Boolean =
+            context.packageName in NotificationManagerCompat.getEnabledListenerPackages(context)
+
         const val PREFERENCES_NAME = "melody_bubble_now_playing_fallback"
         const val KEY_TITLE = "title"
         const val KEY_TEXT = "text"

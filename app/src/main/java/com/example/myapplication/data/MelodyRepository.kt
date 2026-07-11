@@ -43,6 +43,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.service.SharingForegroundService
 import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
@@ -56,7 +60,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
+
+private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 15_000L
+private const val CHAT_SYNC_INTERVAL_MILLIS = 5_000L
 
 interface MelodyRepository {
     val state: StateFlow<MelodyUiState>
@@ -126,11 +135,13 @@ class DemoMelodyRepository(
     override val state: StateFlow<MelodyUiState> = _state.asStateFlow()
 
     private var sharingJob: Job? = null
+    private var chatSyncJob: Job? = null
     private val clientSessionId = preferences.getString("client-session-id", null)
         ?: UUID.randomUUID().toString().also { preferences.edit().putString("client-session-id", it).apply() }
     private val nearbyApi = ApiClient.createNearbyApi(environment)
     private val profileApi = ApiClient.createProfileApi(environment)
     private val socialApi = ApiClient.createSocialApi(environment)
+    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationContext)
     @Volatile private var accessToken: String? = null
     private var liveTick = 0
     private var locationReceiverRegistered = false
@@ -142,7 +153,9 @@ class DemoMelodyRepository(
             val accuracy = intent.getFloatExtra(SharingForegroundService.EXTRA_ACCURACY_METERS, Float.NaN)
                 .takeIf(Float::isFinite)
             if (!latitude.isFinite() || !longitude.isFinite()) return
-            if (_state.value.sharingState == SharingState.ACTIVE) {
+            if (_state.value.sharingState == SharingState.STARTING ||
+                _state.value.sharingState == SharingState.ACTIVE
+            ) {
                 scope.launch { syncPresence(LocationFix(latitude, longitude, accuracy)) }
             }
         }
@@ -748,6 +761,7 @@ class DemoMelodyRepository(
 
     override fun authenticate(accessToken: String) {
         this.accessToken = accessToken
+        val detectedTrack = persistedNowPlayingTrack()
         preferences.edit().putBoolean("onboarding-complete", false).apply()
         _state.update {
             it.copy(
@@ -758,6 +772,8 @@ class DemoMelodyRepository(
                 notifications = emptyList(),
                 chats = emptyList(),
                 chatMessages = emptyMap(),
+                currentTrack = detectedTrack ?: it.currentTrack,
+                currentTrackPlaying = detectedTrack != null,
                 selectedNearbyHandle = null,
                 selectedLoungeId = null,
                 dataSourceLabel = "SERVER LIVE",
@@ -786,11 +802,13 @@ class DemoMelodyRepository(
                 }
         }
         loadBlockedUsers()
-        loadChatRooms()
+        startChatSync(accessToken)
     }
 
     override fun logout() {
         stopSharing()
+        chatSyncJob?.cancel()
+        chatSyncJob = null
         accessToken = null
         preferences.edit().clear().apply()
         _state.update { it.copy(
@@ -883,7 +901,7 @@ class DemoMelodyRepository(
 
     private suspend fun syncPresence(fix: LocationFix? = null): Boolean {
         val token = accessToken ?: return false
-        val location = fix ?: lastKnownLocation()?.let {
+        val location = fix ?: currentLocation()?.let {
             LocationFix(it.latitude, it.longitude, it.accuracy.takeIf(Float::isFinite))
         } ?: run {
             _state.update {
@@ -978,6 +996,34 @@ class DemoMelodyRepository(
             .maxByOrNull { it.time }
     }
 
+    private suspend fun currentLocation(): android.location.Location? {
+        lastKnownLocation()?.let { return it }
+
+        val fine = ContextCompat.checkSelfPermission(
+            applicationContext,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(
+            applicationContext,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fine && !coarse) return null
+
+        val cancellation = CancellationTokenSource()
+        return try {
+            withTimeoutOrNull(CURRENT_LOCATION_TIMEOUT_MILLIS) {
+                fusedLocationClient.getCurrentLocation(
+                    if (fine) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    cancellation.token,
+                ).await()
+            }
+        } catch (_: SecurityException) {
+            null
+        } finally {
+            cancellation.cancel()
+        }
+    }
+
     private fun RemoteNearbyBubble.toDomain() = com.example.myapplication.core.model.NearbyListener(
         nearbyHandle = nearbyHandle,
         displayAlias = displayAlias,
@@ -1037,6 +1083,17 @@ class DemoMelodyRepository(
                 },
             )
         }
+        if (response.mutual) loadChatRooms()
+    }
+
+    private fun startChatSync(token: String) {
+        chatSyncJob?.cancel()
+        chatSyncJob = scope.launch {
+            while (isActive && accessToken == token) {
+                loadChatRooms()
+                delay(CHAT_SYNC_INTERVAL_MILLIS)
+            }
+        }
     }
 
     private fun loadChatRooms() {
@@ -1071,6 +1128,34 @@ class DemoMelodyRepository(
                     }
                 }.onFailure { error -> showRequestError(error, "대화방을 불러오지 못했어요") }
         }
+    }
+
+    private fun persistedNowPlayingTrack(): Track? {
+        val nowPlaying = applicationContext.getSharedPreferences(
+            NowPlayingNotificationListenerService.PREFERENCES_NAME,
+            Context.MODE_PRIVATE,
+        )
+        if (!nowPlaying.getBoolean(NowPlayingNotificationListenerService.KEY_ACTIVE, false)) {
+            return null
+        }
+        val title = nowPlaying.getString(NowPlayingNotificationListenerService.KEY_TITLE, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: return null
+        val artist = nowPlaying.getString(NowPlayingNotificationListenerService.KEY_TEXT, null)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+            ?: return null
+        val source = nowPlaying.getString(
+            NowPlayingNotificationListenerService.KEY_SOURCE,
+            NowPlayingNotificationListenerService.SOURCE_NOTIFICATION_FALLBACK,
+        ) ?: NowPlayingNotificationListenerService.SOURCE_NOTIFICATION_FALLBACK
+        return Track(
+            id = "notification-${title.hashCode()}-${artist.hashCode()}",
+            title = title,
+            artist = artist,
+            platform = source,
+        )
     }
 
     private fun RemoteChatSummary.toDomain() = ChatPreview(
