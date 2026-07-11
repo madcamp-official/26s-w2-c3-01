@@ -90,3 +90,25 @@ class RealtimePublisherTest {
             expiresAt = now.plusSeconds(60),
         )
         assertThat(policy.isAllowed(active, now)).isTrue()
+
+        policy.revoke(active)
+        assertThat(policy.isAllowed(active, now)).isFalse()
+
+        val expired = active.copy(
+            tokenId = UUID.randomUUID().toString(),
+            expiresAt = now.minusSeconds(1),
+        )
+        assertThat(policy.isAllowed(expired, now)).isFalse()
+    }
+}
+
+private class RecordingChannel : MessageChannel {
+    val messages = mutableListOf<Message<*>>()
+
+    override fun send(message: Message<*>): Boolean {
+        messages += message
+        return true
+    }
+
+    override fun send(message: Message<*>, timeout: Long): Boolean = send(message)
+}
