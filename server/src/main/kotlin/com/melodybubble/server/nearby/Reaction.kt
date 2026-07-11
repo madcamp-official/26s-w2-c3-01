@@ -274,3 +274,14 @@ class NearbyReactionService(
 class NearbyReactionController(private val reactions: NearbyReactionService) {
     @GetMapping("/reactions")
     fun received(
+        principal: Principal,
+        @RequestParam(defaultValue = "100") limit: Int,
+    ) = reactions.received(UUID.fromString(principal.name), limit)
+
+    @PostMapping("/{nearbyHandle}/reactions")
+    fun send(
+        principal: Principal,
+        @PathVariable nearbyHandle: String,
+        @RequestBody request: SendNearbyReactionRequest,
+    ) = reactions.send(UUID.fromString(principal.name), nearbyHandle, request)
+}
