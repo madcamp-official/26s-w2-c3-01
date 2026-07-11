@@ -70,7 +70,7 @@ class MelodyAliasPreviewPlayer {
     }
 
     private fun synthesize(notes: List<String>, rhythmMs: List<Int>, tone: String): ShortArray {
-        val silenceSamples = (SAMPLE_RATE * 0.025).toInt()
+        val silenceSamples = (SAMPLE_RATE * 0.035).toInt()
         val totalSamples = notes.indices.sumOf { index ->
             val durationMs = rhythmMs.getOrElse(index) { 140 }
             (SAMPLE_RATE * durationMs / 1000) + silenceSamples
@@ -120,17 +120,26 @@ class MelodyAliasPreviewPlayer {
                 sin(phase * 2.76) * 0.28 * kotlin.math.exp(-time * 3.8) +
                 sin(phase * 5.4) * 0.17 * kotlin.math.exp(-time * 6.2)
         isTone(tone, "오르골", "glass") ->
-            sin(phase) * 0.54 + sin(phase * 3.0) * 0.28 + sin(phase * 5.0) * 0.10
-        isTone(tone, "신스패드", "synth") -> sin(phase) * 0.48 + triangle(phase) * 0.28
-        else -> sin(phase) * 0.56 + square(phase) * 0.24
+            sin(phase) * 0.60 + sin(phase * 3.5) * 0.20 * kotlin.math.exp(-time * 3.0) +
+                sin(phase * 6.0) * 0.06 * kotlin.math.exp(-time * 5.0)
+        isTone(tone, "신스패드", "pad") ->
+            sin(phase) * 0.62 + sin(phase * 1.005) * 0.18 + triangle(phase * 0.5) * 0.08
+        isTone(tone, "전자음", "synth", "electronic") ->
+            sin(phase) * 0.68 + sin(phase * 1.5) * 0.14 + triangle(phase) * 0.08
+        else -> sin(phase) * 0.76 + triangle(phase) * 0.10
     }
 
     private fun envelope(progress: Double, tone: String): Double {
-        val attack = if (isTone(tone, "피아노", "piano")) 0.04 else 0.012
+        val attack = when {
+            isTone(tone, "신스패드", "pad") -> 0.20
+            isTone(tone, "피아노", "piano") -> 0.04
+            else -> 0.012
+        }
         val attackGain = (progress / attack).coerceIn(0.0, 1.0)
         val decay = when {
             isTone(tone, "벨", "bell") -> (1.0 - progress).coerceAtLeast(0.0).pow(1.25)
             isTone(tone, "기타", "guitar") -> (1.0 - progress).coerceAtLeast(0.0).pow(1.8)
+            isTone(tone, "신스패드", "pad") -> (1.0 - progress * 0.28).coerceAtLeast(0.0)
             else -> (1.0 - progress * 0.72).coerceAtLeast(0.0)
         }
         return attackGain * decay

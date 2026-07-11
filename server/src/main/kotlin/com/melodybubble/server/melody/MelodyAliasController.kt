@@ -22,7 +22,7 @@ class MelodyAliasController(private val service: OpenAiMelodyAliasService) {
     @GetMapping("/options")
     fun options() = mapOf(
         "moods" to listOf("dreamy", "bright", "calm", "playful", "energetic", "mysterious"),
-        "tones" to listOf("bell", "piano", "glass", "synth", "guitar", "pixel"),
+        "tones" to listOf("전자음", "피아노", "기타", "벨", "오르골", "신스패드"),
         "energies" to listOf("soft", "medium", "bouncy", "sharp", "warm"),
         "tempoRanges" to listOf("80-100 BPM", "90-120 BPM", "110-140 BPM", "130-160 BPM"),
         "vibeTags" to listOf("cozy", "light", "friendly", "clear", "cute", "clean", "sparkly", "minimal"),

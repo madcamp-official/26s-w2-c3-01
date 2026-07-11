@@ -100,16 +100,23 @@ class OpenAiMelodyAliasService(
     ): MelodyAliasCandidateResponse {
         val notes = candidate.notes.take(5)
         val rhythm = candidate.rhythmMs.take(notes.size)
-        require(notes.size in 2..5) { "Generated melody must contain 2 to 5 notes." }
+        require(notes.size in 4..5) { "Generated melody must contain 4 to 5 notes." }
         require(rhythm.size == notes.size) { "Generated rhythm must match note count." }
+        val normalizedRhythm = normalizeDuration(rhythm)
         return candidate.copy(
             id = candidate.id.lowercase().replace(Regex("[^a-z0-9-]+"), "-").trim('-'),
             mood = request.mood,
             tone = request.tone,
             tempo = candidate.tempo.coerceIn(80, 160),
             notes = notes,
-            rhythmMs = rhythm.map { it.coerceIn(60, 800) },
+            rhythmMs = normalizedRhythm,
         )
+    }
+
+    private fun normalizeDuration(rhythm: List<Int>): List<Int> {
+        val bounded = rhythm.map { it.coerceIn(300, 950) }
+        val scale = 3_000.0 / bounded.sum().coerceAtLeast(1)
+        return bounded.map { (it * scale).toInt().coerceIn(300, 950) }
     }
 
     private fun userPrompt(request: MelodyAliasGenerateRequest): String = """
@@ -127,23 +134,24 @@ class OpenAiMelodyAliasService(
 
     private companion object {
         private val developerPrompt = """
-            You are a melody alias generator for Melody Bubble, a music-sharing app.
-            Generate short alarm-like identity sounds that can be played with Tone.js.
+            You are a melody identity composer for Melody Bubble, a music-sharing app.
+            Compose a personal signature melody that communicates "this is my vibe" and can be played with Tone.js.
 
             Rules:
             - Return JSON only.
-            - Each melody must be suitable for an app notification or identity sound.
-            - Each melody must use 2 to 5 notes only.
+            - This is not a notification or alarm. It is a warm, expressive personal identity melody lasting about 3 seconds.
+            - Each melody must use 4 to 5 notes only.
             - Use Tone.js-compatible note names, such as C5, D#5, F6, A6.
             - rhythmMs values are note durations in milliseconds.
-            - Compose a compact notification motif, not a scale exercise or arpeggio drill.
+            - Compose a memorable musical phrase, not a scale exercise, generic arpeggio, ringtone, or warning sound.
             - Never use three or more notes moving only upward or only downward by scale steps.
             - Give the motif a recognizable contour: use a repeat, a direction change, or one tasteful leap.
-            - Use at least two clearly different rhythmMs values. Make the final note the longest or give it a clear resolving accent.
-            - Favor punchy notification timing: most notes should be 80-220 ms and the full motif should stay under 1.2 seconds.
+            - The sum of rhythmMs must be between 2600 and 3400 ms. Use expressive timing, breathing room, and a satisfying final note.
+            - Use at least three different rhythmMs values. Most notes should be 400-750 ms; the final note should usually be 700-950 ms.
             - The three candidates must differ in contour and rhythm, not merely transpose the same pattern.
-            - Treat the selected tone as orchestration: bell should be bright and ringing; guitar should be warm, plucked, and quickly decaying.
-            - Good structural examples are short-short-short-long, short-long-short-long, and pickup-accent-resolve. Do not copy their pitches mechanically.
+            - Treat the selected tone as orchestration. All tones must sound gentle and musical, never harsh, buzzy, piercing, or toy-like.
+            - Tone meanings: 전자음 is a rounded modern synth; 피아노 is warm and intimate; 기타 is soft nylon pluck; 벨 is clear but mellow; 오르골 is delicate and dreamy; 신스패드 is airy and spacious.
+            - Good phrase shapes include invitation-development-resolve, question-answer, and gentle lift-return. Do not copy pitches mechanically.
             - Keep tempo from 80 to 160 BPM unless the user's tempo range is narrower.
             - Do not reference real songs, artists, brands, or copyrighted melodies.
             - Names must be short, friendly, and usable as a melody alias.
@@ -184,15 +192,15 @@ class OpenAiMelodyAliasService(
                             "energy" to mapOf("type" to "string"),
                             "notes" to mapOf(
                                 "type" to "array",
-                                "minItems" to 2,
+                                "minItems" to 4,
                                 "maxItems" to 5,
                                 "items" to mapOf("type" to "string"),
                             ),
                             "rhythmMs" to mapOf(
                                 "type" to "array",
-                                "minItems" to 2,
+                                "minItems" to 4,
                                 "maxItems" to 5,
-                                "items" to mapOf("type" to "integer", "minimum" to 60, "maximum" to 800),
+                                "items" to mapOf("type" to "integer", "minimum" to 300, "maximum" to 950),
                             ),
                             "toneJsPreset" to mapOf(
                                 "type" to "object",
