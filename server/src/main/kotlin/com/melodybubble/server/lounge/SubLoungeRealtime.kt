@@ -199,6 +199,20 @@ class SubLoungeRealtimeService(
             publishMemberChange(subLoungeId, userId, joined = false)
             publishState(subLoungeId)
         }
+        jdbc.update(
+            """
+            update sub_lounges room set active=false
+            where room.active=true and room.created_at < now() - interval '7 days'
+              and not exists (
+                select 1 from sub_lounge_members member
+                join building_lounge_sessions session
+                  on session.user_id=member.user_id
+                 and session.building_lounge_id=room.building_lounge_id
+                where member.sub_lounge_id=room.id and member.active=true
+                  and session.active=true and session.expires_at>now()
+              )
+            """.trimIndent(),
+        )
     }
 
     @Transactional
