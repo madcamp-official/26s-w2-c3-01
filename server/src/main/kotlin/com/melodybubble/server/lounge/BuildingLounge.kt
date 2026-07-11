@@ -21,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.security.Principal
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.Duration
 import java.util.UUID
@@ -224,7 +226,7 @@ class BuildingLoungeService(
         val body = overpassClient.post()
             .uri("/interpreter")
             .contentType(MediaType.APPLICATION_FORM_URLENCODED)
-            .body("data=$query")
+            .body("data=${URLEncoder.encode(query, StandardCharsets.UTF_8)}")
             .retrieve()
             .body(String::class.java)
             .orEmpty()
