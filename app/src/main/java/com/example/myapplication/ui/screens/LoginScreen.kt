@@ -45,21 +45,26 @@ import kotlinx.coroutines.launch
 fun LoginScreen(
     state: LoginUiState,
     onLogin: (String, String) -> Unit,
+    onSignup: (String, String, String) -> Unit,
     onGoogleLogin: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var email by rememberSaveable { mutableStateOf("demo@melody.local") }
+    var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var displayName by rememberSaveable { mutableStateOf("") }
+    var signupMode by rememberSaveable { mutableStateOf(false) }
     var showEmailLogin by rememberSaveable { mutableStateOf(false) }
     var googleError by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val googleClient = remember(context) { GoogleCredentialClient(context) }
     val loading = state == LoginUiState.Loading
-    val canSubmit = email.isNotBlank() && password.isNotBlank() && !loading
+    val canSubmit = email.isNotBlank() && password.length >= 6 && (!signupMode || displayName.length >= 2) && !loading
 
     fun submit() {
-        if (canSubmit) onLogin(email, password)
+        if (canSubmit) {
+            if (signupMode) onSignup(email, password, displayName) else onLogin(email, password)
+        }
     }
 
     Column(
@@ -164,15 +169,26 @@ fun LoginScreen(
                 Text("이메일로 로그인")
             }
         } else {
+            if (signupMode) {
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading,
+                    singleLine = true,
+                    label = { Text("프로필 이름") },
+                )
+                Spacer(Modifier.height(12.dp))
+            }
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
                 singleLine = true,
-                label = { Text("이메일") },
+                label = { Text("아이디") },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Email,
+                    keyboardType = KeyboardType.Text,
                     imeAction = ImeAction.Next,
                 ),
             )
@@ -197,14 +213,12 @@ fun LoginScreen(
                 enabled = canSubmit,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) {
-                Text("로그인")
+                Text(if (signupMode) "회원가입" else "로그인")
             }
-            Text(
-                "개발 계정: demo@melody.local / demo1234",
-                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            androidx.compose.material3.TextButton(
+                onClick = { signupMode = !signupMode },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            ) { Text(if (signupMode) "이미 계정이 있어요 · 로그인" else "계정이 없어요 · 회원가입") }
         }
 
         if (state is LoginUiState.Error) {
