@@ -14,6 +14,7 @@ spring:
     default-property-inclusion: non_null
 app:
   google:
+    # 공개 식별자인 개발 OAuth client ID. 운영에서는 compose가 환경변수를 필수로 요구합니다.
     web-client-id: ${GOOGLE_WEB_CLIENT_ID:170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com}
   seed-demo: ${DEMO_SEED_ENABLED:true}
   ops:

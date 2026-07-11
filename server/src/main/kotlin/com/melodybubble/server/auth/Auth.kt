@@ -27,7 +27,12 @@ import javax.crypto.SecretKey
 
 data class LoginRequest(val email: String, val password: String)
 data class GoogleLoginRequest(val idToken: String)
-data class TokenResponse(val accessToken: String, val tokenType: String = "Bearer", val expiresInSeconds: Long)
+data class TokenResponse(
+    val accessToken: String,
+    val tokenType: String = "Bearer",
+    val expiresInSeconds: Long,
+    val isNewUser: Boolean = false,
+)
 
 @Component
 class JwtService(
@@ -53,6 +58,9 @@ class JwtService(
 class GoogleTokenVerifier(
     @Value("\${app.google.web-client-id}") webClientId: String,
 ) {
+    init {
+        require(webClientId.isNotBlank()) { "GOOGLE_WEB_CLIENT_ID must be configured" }
+    }
     private val verifier = GoogleIdTokenVerifier.Builder(NetHttpTransport(), GsonFactory.getDefaultInstance())
         .setAudience(listOf(webClientId))
         .build()
@@ -87,29 +95,48 @@ class AuthService(
             { rs, _ -> UUID.fromString(rs.getString(1)) },
             payload.subject,
         ).firstOrNull()
-        val userId = existingIdentity ?: linkOrCreateGoogleUser(payload)
-        return TokenResponse(jwt.issue(userId), expiresInSeconds = jwt.ttlSeconds())
+        val (userId, isNewUser) = existingIdentity?.let { it to false }
+            ?: linkOrCreateGoogleUser(payload)
+        return TokenResponse(
+            jwt.issue(userId),
+            expiresInSeconds = jwt.ttlSeconds(),
+            isNewUser = isNewUser,
+        )
     }
 
-    private fun linkOrCreateGoogleUser(payload: GoogleIdToken.Payload): UUID {
+    private fun linkOrCreateGoogleUser(payload: GoogleIdToken.Payload): Pair<UUID, Boolean> {
         val existingUser = jdbc.query(
             "select id from users where email=?",
             { rs, _ -> UUID.fromString(rs.getString(1)) },
             payload.email,
         ).firstOrNull()
-        val userId = existingUser ?: UUID.randomUUID().also { id ->
+        val candidateId = UUID.randomUUID()
+        val created = if (existingUser == null) {
             val name = payload["name"]?.toString()?.take(40)?.ifBlank { null } ?: "Google Listener"
             jdbc.update(
-                "insert into users(id,email,password_hash,display_name) values (?,?,null,?)",
-                id, payload.email, name,
-            )
-            jdbc.update("insert into user_privacy_settings(user_id) values (?)", id)
-        }
+                "insert into users(id,email,password_hash,display_name) values (?,?,null,?) on conflict (email) do nothing",
+                candidateId, payload.email, name,
+            ) == 1
+        } else false
+        val userId = if (created) candidateId else existingUser ?: jdbc.query(
+            "select id from users where email=?",
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            payload.email,
+        ).first()
         jdbc.update(
-            "insert into user_identities(provider,provider_subject,user_id,email_at_link) values ('GOOGLE',?,?,?)",
+            "insert into user_privacy_settings(user_id) values (?) on conflict (user_id) do nothing",
+            userId,
+        )
+        jdbc.update(
+            "insert into user_identities(provider,provider_subject,user_id,email_at_link) values ('GOOGLE',?,?,?) on conflict do nothing",
             payload.subject, userId, payload.email,
         )
-        return userId
+        val linkedUserId = jdbc.query(
+            "select user_id from user_identities where provider='GOOGLE' and provider_subject=?",
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            payload.subject,
+        ).first()
+        return linkedUserId to created
     }
 }
 
