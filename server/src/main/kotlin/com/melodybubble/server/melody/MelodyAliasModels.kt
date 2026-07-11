@@ -8,6 +8,7 @@ data class MelodyAliasGenerateRequest(
     val pitch: String = "medium",
     val vibeTags: List<String> = emptyList(),
     val count: Int = 3,
+    val promptOverride: String? = null,
 )
 
 data class ToneJsEnvelope(

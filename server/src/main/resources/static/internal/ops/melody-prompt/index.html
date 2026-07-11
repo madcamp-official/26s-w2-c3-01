@@ -13,7 +13,7 @@
     .eyebrow,.label{font:700 11px ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}h1{margin:8px 0 0;font-size:clamp(32px,6vw,64px);line-height:.9;letter-spacing:-.05em}.grid{display:grid;grid-template-columns:360px 1fr;gap:14px}
     .panel{background:var(--panel);border:1px solid var(--line);box-shadow:var(--shadow);padding:18px}.control{margin:0 0 14px}.control label{display:block;margin-bottom:7px}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}select,input{width:100%;border:1px solid var(--line);background:white;padding:11px;color:var(--ink);border-radius:0}input:focus,select:focus,button:focus-visible{outline:3px solid var(--yellow);outline-offset:2px}
     .tags{display:flex;flex-wrap:wrap;gap:8px}.tag{border:1px solid var(--line);background:white;padding:8px 10px;cursor:pointer}.tag.active{background:var(--ink);color:white;border-color:var(--ink)}.actions{display:flex;gap:8px;margin-top:16px}button{border:1px solid var(--ink);background:var(--ink);color:white;padding:11px 14px;cursor:pointer}button.secondary{background:white;color:var(--ink)}button.play{background:var(--blue);border-color:var(--blue)}button:disabled{opacity:.55;cursor:wait}
-    .status{min-height:22px;margin-top:12px;color:var(--muted);font-size:13px}.status.error{color:var(--red)}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.card{border:1px solid var(--line);background:white;padding:14px;min-height:190px}.card h2{margin:4px 0 4px;font-size:22px;letter-spacing:-.03em}.card p{margin:8px 0;color:var(--muted);font-size:13px}.notes{font:700 13px ui-monospace,monospace;margin:12px 0}.json,.prompt{width:100%;min-height:260px;border:1px solid var(--line);background:#161815;color:#e8f1df;padding:14px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.prompt{min-height:230px}.section-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}
+    .status{min-height:22px;margin-top:12px;color:var(--muted);font-size:13px}.status.error{color:var(--red)}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.card{border:1px solid var(--line);background:white;padding:14px;min-height:190px}.card h2{margin:4px 0 4px;font-size:22px;letter-spacing:-.03em}.card p{margin:8px 0;color:var(--muted);font-size:13px}.notes{font:700 13px ui-monospace,monospace;margin:12px 0}.json,.prompt{width:100%;min-height:260px;border:1px solid var(--line);background:#161815;color:#e8f1df;padding:14px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.prompt{min-height:420px;resize:vertical}.section-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}.editor-actions{display:flex;gap:8px;align-items:center}
     @media(max-width:900px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr}.top{display:block}.row{grid-template-columns:1fr}}
   </style>
 </head>
@@ -74,9 +74,10 @@
       </article>
       <article class="panel" style="margin-top:14px">
         <div class="section-title">
-          <span class="label">Prompt preview</span>
+          <span class="label">Editable prompt</span>
+          <div class="editor-actions"><span class="label" id="promptCount">0 chars</span><button id="resetPrompt" class="secondary">Load default</button></div>
         </div>
-        <pre class="prompt" id="prompt"></pre>
+        <textarea class="prompt" id="prompt" spellcheck="false" aria-label="OpenAI prompt"></textarea>
       </article>
     </section>
   </section>
@@ -91,8 +92,9 @@
   function setStatus(text,isError=false){$('status').textContent=text;$('status').classList.toggle('error',isError)}
   async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw new Error(await r.text());return r.json()}
   async function loadOptions(){const r=await fetch('/internal/ops/api/melody-alias/options');state.options=await r.json();fillSelect('mood',state.options.moods);fillSelect('tone',state.options.tones);fillSelect('energy',state.options.energies);fillSelect('tempoRange',state.options.tempoRanges);$('vibeTags').innerHTML=state.options.vibeTags.map(tag=>`<button type="button" class="tag ${state.activeTags.has(tag)?'active':''}" data-tag="${esc(tag)}">${esc(tag)}</button>`).join('');$('vibeTags').addEventListener('click',e=>{const tag=e.target?.dataset?.tag;if(!tag)return;state.activeTags.has(tag)?state.activeTags.delete(tag):state.activeTags.add(tag);e.target.classList.toggle('active');refreshPrompt()});await refreshPrompt()}
-  async function refreshPrompt(){try{const d=await post('/internal/ops/api/melody-alias/prompt-preview',payload());$('prompt').textContent=d.prompt}catch(e){setStatus(e.message,true)}}
-  async function generate(){setStatus('Calling OpenAI...');$('generate').disabled=true;try{const d=await post('/internal/ops/api/melody-alias/generate',payload());state.result=d;$('json').textContent=JSON.stringify(d,null,2);renderCards(d.candidates);setStatus('Generated. Press Play to hear a candidate.')}catch(e){setStatus(e.message,true)}finally{$('generate').disabled=false}}
+  function updatePromptCount(){$('promptCount').textContent=`${$('prompt').value.length.toLocaleString()} chars`}
+  async function refreshPrompt(){try{const d=await post('/internal/ops/api/melody-alias/prompt-preview',payload());$('prompt').value=d.prompt;updatePromptCount();setStatus('Default prompt loaded. Edit it, then press Generate.')}catch(e){setStatus(e.message,true)}}
+  async function generate(){const promptOverride=$('prompt').value.trim();if(!promptOverride){setStatus('Prompt cannot be empty.',true);return}setStatus('Calling OpenAI with the edited prompt...');$('generate').disabled=true;try{const d=await post('/internal/ops/api/melody-alias/generate',{...payload(),promptOverride});state.result=d;$('json').textContent=JSON.stringify(d,null,2);renderCards(d.candidates);setStatus('Generated from your edited prompt. Press Play to hear a candidate.')}catch(e){setStatus(e.message,true)}finally{$('generate').disabled=false}}
   function renderCards(candidates){$('cards').innerHTML=candidates.map((c,i)=>`<article class="card"><span class="label">${esc(c.mood)} / ${esc(c.tone)}</span><h2>${esc(c.name)}</h2><p>${esc(c.playbackHint)}</p><div class="notes">${esc(c.notes.join('  '))}</div><p>${esc(c.rhythmMs.join(' / '))} ms</p><button class="play" data-index="${i}">Play</button></article>`).join('')}
   function instrumentFor(candidate){
     const tone=String(candidate.tone).toLowerCase(),p=candidate.toneJsPreset;
@@ -105,7 +107,7 @@
     const Synth=Tone[p.synth]||Tone.Synth;return new Synth({oscillator:{type:'sine'},envelope:{attack:.03,decay:.5,sustain:.25,release:1}});
   }
   async function play(index){const c=state.result?.candidates?.[index];if(!c)return;await Tone.start();const p=c.toneJsPreset;const reverb=new Tone.Reverb({decay:1.4,wet:Math.min(.45,p.effects.reverb)}).toDestination();await reverb.generate();const delay=new Tone.FeedbackDelay('16n',Math.min(.22,p.effects.delay));delay.wet.value=Math.min(.3,p.effects.delay);delay.connect(reverb);const synth=instrumentFor(c).connect(delay);let t=Tone.now()+.05;c.notes.forEach((note,i)=>{const dur=(c.rhythmMs[i]||160)/1000;synth.triggerAttackRelease(note,Math.max(.06,dur*.82),t);t+=dur});setTimeout(()=>{synth.dispose();delay.dispose();reverb.dispose()},Math.ceil((t-Tone.now()+2)*1000))}
-  $('generate').addEventListener('click',generate);$('preview').addEventListener('click',refreshPrompt);['mood','tone','energy','tempoRange','count'].forEach(id=>$(id).addEventListener('change',refreshPrompt));$('cards').addEventListener('click',e=>{const index=e.target?.dataset?.index;if(index!==undefined)play(Number(index))});loadOptions();
+  $('generate').addEventListener('click',generate);$('preview').addEventListener('click',refreshPrompt);$('resetPrompt').addEventListener('click',refreshPrompt);$('prompt').addEventListener('input',updatePromptCount);['mood','tone','energy','tempoRange','count'].forEach(id=>$(id).addEventListener('change',refreshPrompt));$('cards').addEventListener('click',e=>{const index=e.target?.dataset?.index;if(index!==undefined)play(Number(index))});loadOptions();
 </script>
 </body>
 </html>

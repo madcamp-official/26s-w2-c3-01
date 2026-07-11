@@ -26,29 +26,22 @@ class OpenAiMelodyAliasService(
         require(apiKey.isNotBlank()) { "OPENAI_API_KEY is not configured." }
 
         val count = request.count.coerceIn(1, 5)
+        val promptOverride = request.promptOverride?.trim()?.takeIf { it.isNotBlank() }
+        require(promptOverride == null || promptOverride.length <= 20_000) {
+            "Prompt override must be 20,000 characters or fewer."
+        }
+        val input = if (promptOverride != null) {
+            listOf(promptMessage("developer", promptOverride))
+        } else {
+            listOf(
+                promptMessage("developer", developerPrompt),
+                promptMessage("user", userPrompt(request.copy(count = count))),
+            )
+        }
         val body = objectMapper.writeValueAsString(
             mapOf(
                 "model" to model,
-                "input" to listOf(
-                    mapOf(
-                        "role" to "developer",
-                        "content" to listOf(
-                            mapOf(
-                                "type" to "input_text",
-                                "text" to developerPrompt,
-                            ),
-                        ),
-                    ),
-                    mapOf(
-                        "role" to "user",
-                        "content" to listOf(
-                            mapOf(
-                                "type" to "input_text",
-                                "text" to userPrompt(request.copy(count = count)),
-                            ),
-                        ),
-                    ),
-                ),
+                "input" to input,
                 "text" to mapOf(
                     "format" to mapOf(
                         "type" to "json_schema",
@@ -80,6 +73,11 @@ class OpenAiMelodyAliasService(
 
     fun buildPromptPreview(request: MelodyAliasGenerateRequest): String =
         "$developerPrompt\n\n${userPrompt(request.copy(count = request.count.coerceIn(1, 5)))}"
+
+    private fun promptMessage(role: String, text: String) = mapOf(
+        "role" to role,
+        "content" to listOf(mapOf("type" to "input_text", "text" to text)),
+    )
 
     private fun extractOutputText(root: JsonNode): String {
         root.path("output_text").takeIf { it.isTextual && it.asText().isNotBlank() }?.let {
@@ -140,14 +138,12 @@ class OpenAiMelodyAliasService(
             Rules:
             - Return JSON only.
             - This is not a notification or alarm. It is a warm, expressive personal identity melody lasting about 3 seconds.
-            - Each melody must use 4 to 5 notes only.
             - Use Tone.js-compatible note names, such as C5, D#5, F6, A6.
             - rhythmMs values are note durations in milliseconds.
             - Compose a memorable musical phrase, not a scale exercise, generic arpeggio, ringtone, or warning sound.
             - Never use three or more notes moving only upward or only downward by scale steps.
             - Give the motif a recognizable contour: use a repeat, a direction change, or one tasteful leap.
-            - The sum of rhythmMs must be between 2600 and 3400 ms. Use expressive timing, breathing room, and a satisfying final note.
-            - Use at least three different rhythmMs values. Most notes should be 400-750 ms; the final note should usually be 700-950 ms.
+                - The sum of rhythmMs must be between 2600 and 3400 ms. Use expressive timing, breathing room, and a satisfying final note.
             - The three candidates must differ in contour and rhythm, not merely transpose the same pattern.
             - Treat the selected tone as orchestration. All tones must sound gentle and musical, never harsh, buzzy, piercing, or toy-like.
             - Tone meanings: 전자음 is a rounded modern synth; 피아노 is warm and intimate; 기타 is soft nylon pluck; 벨 is clear but mellow; 오르골 is delicate and dreamy; 신스패드 is airy and spacious.
