@@ -39,22 +39,22 @@ import androidx.navigation.navArgument
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.SharingState
-import com.example.myapplication.data.DemoCatalog
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.ui.components.MelodyBottomNavigationBar
 import com.example.myapplication.ui.screens.ChatScreen
+import com.example.myapplication.ui.screens.BlockedUsersScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
 import com.example.myapplication.ui.screens.LoungeDetailScreen
 import com.example.myapplication.ui.screens.LoungeListScreen
 import com.example.myapplication.ui.screens.MelodyAliasScreen
-import com.example.myapplication.ui.screens.MusicSelectScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
 import com.example.myapplication.ui.screens.OfflineExchangeScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
+import com.example.myapplication.ui.screens.ReportUserScreen
 import com.example.myapplication.ui.screens.UserDetailScreen
 import com.example.myapplication.ui.theme.Ink
 
@@ -63,9 +63,10 @@ private object Route {
     const val USER_DETAIL = "user-detail"
     const val LOUNGE_DETAIL = "lounge-detail"
     const val CHAT = "chat/{roomId}"
-    const val MUSIC_SELECT = "music-select"
     const val MELODY_ALIAS = "melody-alias"
     const val OFFLINE_EXCHANGE = "offline-exchange"
+    const val REPORT_USER = "report-user"
+    const val BLOCKED_USERS = "blocked-users"
 
     fun chat(roomId: String) = "chat/$roomId"
 }
@@ -88,6 +89,8 @@ fun MelodyBubbleApp(
             SharingForegroundService.hasLocationPermission(context)
         if (hasLocation && SharingForegroundService.start(context)) {
             viewModel.startSharing()
+        } else if (hasLocation) {
+            viewModel.sharingStartFailed()
         } else {
             viewModel.sharingPermissionRequired()
         }
@@ -105,7 +108,7 @@ fun MelodyBubbleApp(
             if (SharingForegroundService.start(context)) {
                 viewModel.startSharing()
             } else {
-                viewModel.sharingPermissionRequired()
+                viewModel.sharingStartFailed()
             }
             return
         }
@@ -131,6 +134,7 @@ fun MelodyBubbleApp(
         LoginScreen(
             state = loginState,
             onLogin = viewModel::login,
+            onSignup = viewModel::signup,
             onGoogleLogin = viewModel::loginWithGoogle,
             modifier = modifier.safeDrawingPadding()
         )
@@ -170,12 +174,12 @@ fun MelodyBubbleApp(
                         navController.navigate(Route.LOUNGE_DETAIL)
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
-                    onOpenMusicSelect = { navController.navigate(Route.MUSIC_SELECT) },
                     onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenNotificationAccess = {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     },
-                    onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) }
+                    onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) },
+                    onOpenBlockedUsers = { navController.navigate(Route.BLOCKED_USERS) },
                 )
             }
             composable(Route.USER_DETAIL) {
@@ -210,9 +214,34 @@ fun MelodyBubbleApp(
                             viewModel.block(it.nearbyHandle)
                             navController.popBackStack()
                         },
-                        onReport = { viewModel.report(it.nearbyHandle) }
+                        onReport = { navController.navigate(Route.REPORT_USER) }
                     )
                 }
+            }
+            composable(Route.REPORT_USER) {
+                val listener = state.selectedNearby
+                if (listener == null) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                } else {
+                    ReportUserScreen(
+                        listener = listener,
+                        onBack = { navController.popBackStack() },
+                        onSubmit = { reason, description ->
+                            viewModel.report(listener.nearbyHandle, reason, description)
+                            navController.popBackStack(Route.MAIN, inclusive = false)
+                        },
+                        modifier = Modifier.safeDrawingPadding(),
+                    )
+                }
+            }
+            composable(Route.BLOCKED_USERS) {
+                LaunchedEffect(Unit) { viewModel.loadBlockedUsers() }
+                BlockedUsersScreen(
+                    users = state.blockedUsers,
+                    onBack = { navController.popBackStack() },
+                    onUnblock = viewModel::unblock,
+                    modifier = Modifier.safeDrawingPadding(),
+                )
             }
             composable(Route.LOUNGE_DETAIL) {
                 val lounge = state.selectedLounge
@@ -257,20 +286,6 @@ fun MelodyBubbleApp(
                     )
                 }
             }
-            composable(Route.MUSIC_SELECT) {
-                MusicSelectScreen(
-                    currentTrack = state.currentTrack,
-                    options = listOf(
-                        DemoCatalog.blueNight,
-                        DemoCatalog.lateDrive,
-                        DemoCatalog.summerEnd,
-                        DemoCatalog.indieRain
-                    ),
-                    onBack = { navController.popBackStack() },
-                    onSelect = viewModel::selectTrack,
-                    modifier = Modifier.safeDrawingPadding()
-                )
-            }
             composable(Route.MELODY_ALIAS) {
                 val lyriaState by viewModel.lyriaGenerationState.collectAsState()
                 MelodyAliasScreen(
@@ -313,13 +328,17 @@ private fun MainShell(
     onOpenUser: (String) -> Unit,
     onOpenLounge: (String) -> Unit,
     onOpenChat: (String) -> Unit,
-    onOpenMusicSelect: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
-    onOpenOfflineExchange: () -> Unit
+    onOpenOfflineExchange: () -> Unit,
+    onOpenBlockedUsers: () -> Unit,
 ) {
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
+    var nearbyRadius by rememberSaveable { mutableFloatStateOf(state.discoveryRadiusMeters.toFloat()) }
+    LaunchedEffect(state.discoveryRadiusMeters) {
+        nearbyRadius = state.discoveryRadiusMeters.toFloat()
+    }
 
     Scaffold(
         containerColor = Ink,
@@ -349,8 +368,18 @@ private fun MainShell(
                 state = state,
                 modifier = contentModifier,
                 similarityThreshold = similarityThreshold.toInt(),
+                radiusMeters = nearbyRadius.toInt(),
                 musicFilter = nearbyMusicFilter,
                 onSimilarityThresholdChange = { similarityThreshold = it.toFloat() },
+                onRadiusChange = { nearbyRadius = it.toFloat() },
+                onRadiusChangeFinished = {
+                    viewModel.updatePresenceSettings(
+                        nearbyRadius.toInt(),
+                        state.discoverabilityScope,
+                        state.musicVisibility,
+                    )
+                },
+                onRetry = viewModel::retrySharing,
                 onMusicFilterChange = { nearbyMusicFilter = it },
                 onSelectListener = { viewModel.selectNearby(it.nearbyHandle) },
                 onOpenListenerDetail = { onOpenUser(it.nearbyHandle) },
@@ -379,10 +408,14 @@ private fun MainShell(
                 onDiscoverableChange = viewModel::setDiscoverable,
                 onAllowReactionsChange = viewModel::setAllowReactions,
                 onOfflineExchangeChange = viewModel::setOfflineExchangeEnabled,
-                onOpenMusicSelect = onOpenMusicSelect,
+                onMusicVisibilityChange = viewModel::setMusicVisibility,
+                onProfileUpdate = viewModel::updateProfile,
+                onLogout = viewModel::logout,
+                onDeleteAccount = viewModel::deleteAccount,
                 onOpenMelodyAlias = onOpenMelodyAlias,
                 onOpenNotificationAccess = onOpenNotificationAccess,
                 onOpenOfflineExchange = onOpenOfflineExchange,
+                onOpenBlockedUsers = onOpenBlockedUsers,
                 modifier = contentModifier.safeDrawingPadding()
             )
         }
