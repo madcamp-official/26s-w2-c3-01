@@ -44,10 +44,16 @@ data class RemoteChatMessage(
     val roomId: String,
     val isMine: Boolean,
     val content: String,
-    val sentAt: String
+    val sentAt: String,
+    val readByPeer: Boolean? = null
 )
 
 data class SendChatMessageRequest(val clientMessageId: String, val content: String)
+data class RemoteChatReadResponse(
+    val roomId: String,
+    val lastReadMessageId: String?,
+    val readAt: String
+)
 
 interface SocialApi {
     @PUT("api/v1/nearby/{handle}/follow")
@@ -99,4 +105,10 @@ interface SocialApi {
         @Path("roomId") roomId: String,
         @Body request: SendChatMessageRequest
     ): RemoteChatMessage
+
+    @PUT("api/v1/chat/rooms/{roomId}/read")
+    suspend fun markChatRead(
+        @Header("Authorization") authorization: String,
+        @Path("roomId") roomId: String
+    ): RemoteChatReadResponse
 }
