@@ -46,15 +46,6 @@ data class HeartbeatResponseDto(
     val forcedExit: Boolean
 )
 
-data class TestFixturesRequestDto(
-    val latitude: Double,
-    val longitude: Double
-)
-
-data class TestFixturesResponseDto(
-    val lounges: List<BuildingLoungeSummaryDto>
-)
-
 data class CreateSubLoungeRequestDto(
     val title: String,
     val style: String? = null
@@ -157,12 +148,6 @@ interface BuildingLoungeApi {
         @Path("loungeId") loungeId: String
     )
 
-    @POST("api/v1/building-lounges/test-fixtures")
-    suspend fun createTestFixtures(
-        @Header("Authorization") authorization: String,
-        @Body request: TestFixturesRequestDto
-    ): TestFixturesResponseDto
-
     @GET("api/v1/building-lounges/{loungeId}/sub-lounges")
     suspend fun subLounges(
         @Header("Authorization") authorization: String,
@@ -256,9 +241,6 @@ class BuildingLoungeRepository(
 
     suspend fun leave(token: String, loungeId: String): Result<Unit> =
         runCatching { api.leave(token.bearer(), loungeId) }
-
-    suspend fun createTestFixtures(token: String, latitude: Double, longitude: Double): Result<List<BuildingLoungeSummaryDto>> =
-        runCatching { api.createTestFixtures(token.bearer(), TestFixturesRequestDto(latitude, longitude)).lounges }
 
     suspend fun subLounges(token: String, loungeId: String): Result<List<SubLoungeSummaryDto>> =
         runCatching { api.subLounges(token.bearer(), loungeId) }
