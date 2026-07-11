@@ -23,4 +23,7 @@ object ApiClient {
 
     fun createMelodyAliasApi(environment: ApiEnvironment = ApiEnvironment()): MelodyAliasApi =
         retrofit(environment).create(MelodyAliasApi::class.java)
+
+    fun createLyriaMusicApi(environment: ApiEnvironment = ApiEnvironment()): LyriaMusicApi =
+        retrofit(environment).create(LyriaMusicApi::class.java)
 }

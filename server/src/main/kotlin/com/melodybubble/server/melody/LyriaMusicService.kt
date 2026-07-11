@@ -14,6 +14,14 @@ import java.time.Duration
 
 data class LyriaGenerateRequest(val prompt: String)
 
+data class LyriaAliasGenerateRequest(
+    val moods: Map<String, Int>,
+    val genre: String,
+    val instruments: List<String>,
+    val pitch: Int,
+    val speed: Int,
+)
+
 data class LyriaGenerateResponse(
     val audioBase64: String,
     val mimeType: String,
@@ -59,6 +67,25 @@ class LyriaMusicService(
             throw IllegalStateException("Lyria request failed: HTTP ${response.statusCode()} ${response.body()}")
         }
         return parseResponse(objectMapper.readTree(response.body()))
+    }
+
+    fun generateAlias(request: LyriaAliasGenerateRequest): LyriaGenerateResponse {
+        val emphasized = request.instruments.joinToString(", ").ifBlank { "Piano" }
+        val moods = request.moods.entries.joinToString(", ") { "${it.key} ${it.value}%" }
+        val prompt = """
+            Create one polished 30-second instrumental identity song that expresses "this is my vibe."
+
+            Mood blend: $moods.
+            Genre: ${request.genre}.
+            Emphasized instruments: $emphasized.
+            Pitch character: ${request.pitch}/100, where 0 is low and grounded and 100 is high and airy.
+            Speed and energy: ${request.speed}/100, where 0 is slow and spacious and 100 is fast and energetic.
+
+            The emphasized instruments should be more noticeable, but the arrangement does not have to contain only those instruments. Add any supporting instruments needed to make the music coherent, rich, and pleasant.
+            Build a memorable motif, a clear development, and a satisfying ending within 30 seconds. Keep the mix musical and comfortable to hear, never harsh or alarm-like.
+            Instrumental only. No vocals or spoken words. Do not imitate any existing artist or copyrighted song.
+        """.trimIndent()
+        return generate(LyriaGenerateRequest(prompt))
     }
 
     private fun parseResponse(root: JsonNode): LyriaGenerateResponse {
