@@ -22,7 +22,7 @@ Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Comp
 - 채팅 메시지 저장·읽음 처리와 `/user/queue/chat` 실시간 이벤트
 - 위치 기반 건물 라운지 입장·heartbeat와 하위 라운지 snapshot·카드·리액션·투표
 - 참가자 전용 `/topic/sub-lounges/{id}` 실시간 이벤트와 구독 권한 검사
-- `GET /api/v1/rooms`, `GET /api/v1/rooms/{roomId}`
+- OSM 기반 실제 건물 캐시와 사용자 생성 하위 라운지(`/api/v1/building-lounges/**`)
 - STOMP `/ws`: `Authorization: Bearer {accessToken}` CONNECT 인증, 10초 heartbeat
 - 개인 queue: `/user/queue/chat|reactions|nearby|notifications|errors|ack`
 - Flyway 기반 PostGIS 스키마: 사용자, 개인정보 설정, 최신 위치 TTL, 음악 상태, 채팅, 라운지·투표

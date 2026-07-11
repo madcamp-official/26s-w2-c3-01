@@ -215,6 +215,8 @@ GET /api/v1/building-lounges/nearby?latitude={lat}&longitude={lng}
 POST /api/v1/building-lounges/{loungeId}/enter
 POST /api/v1/building-lounges/{loungeId}/heartbeat
 POST /api/v1/building-lounges/{loungeId}/leave
+GET /api/v1/building-lounges/{loungeId}/sub-lounges
+POST /api/v1/building-lounges/{loungeId}/sub-lounges
 GET /api/v1/building-lounges/sub-lounges/{subLoungeId}
 POST /api/v1/building-lounges/sub-lounges/{subLoungeId}/join
 POST /api/v1/building-lounges/sub-lounges/{subLoungeId}/leave
@@ -226,29 +228,32 @@ PUT /api/v1/building-lounges/sub-lounges/{subLoungeId}/vote
 
 ```json
 {
-  "id": "room-campus",
-  "name": "캠퍼스 라운지",
-  "status": "LIVE",
-  "participantCount": 42,
-  "moodTags": ["INDIE", "CALM", "NIGHT"],
+  "id": "sub-lounge-uuid",
+  "buildingLoungeId": "building-lounge-uuid",
+  "title": "사용자가 만든 재즈방",
+  "style": "Jazz",
+  "memberCount": 2,
+  "joined": true,
   "cards": [
     {
-      "cardId": "card-uuid",
-      "title": "Blue Night",
-      "artist": "Wave to Earth",
+      "id": "card-uuid",
+      "trackTitle": "Blue Night",
+      "artistName": "Wave to Earth",
       "reactionCount": 12
     }
   ],
-  "vote": {
-    "voteType": "MOOD",
+  "poll": {
     "options": [
-      { "targetKey": "INDIE", "percentage": 46 },
-      { "targetKey": "RNB", "percentage": 31 },
-      { "targetKey": "POP", "percentage": 23 }
-    ]
+      { "key": "CHILL", "voteCount": 1 },
+      { "key": "FOCUS", "voteCount": 0 },
+      { "key": "ENERGY", "voteCount": 1 }
+    ],
+    "myVote": "CHILL"
   }
 }
 ```
+
+주변 조회는 OSM ID를 기준으로 실제 건물을 24시간 캐시합니다. OSM 장애 시 기존 캐시만 반환하며 테스트 fixture나 기본 하위 라운지를 생성하지 않습니다.
 
 ### 채팅 — 구현됨
 
