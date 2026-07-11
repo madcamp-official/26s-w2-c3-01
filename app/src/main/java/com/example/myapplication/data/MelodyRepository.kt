@@ -833,6 +833,7 @@ class DemoMelodyRepository(
     }
 
     override fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>) {
+        val previousProfile = _state.value.profile
         _state.update { current -> current.copy(profile = current.profile.copy(
             accountAlias = displayName.trim(), nearbyDisplayAlias = displayName.trim(), colorHex = colorHex,
             bio = bio.trim(), avatarDataUrl = avatarDataUrl, genres = genres, moods = moods,
@@ -849,7 +850,11 @@ class DemoMelodyRepository(
                 if (isCurrentSession(token)) applyRemoteProfile(it, "프로필을 변경했어요")
             }.onFailure {
                 if (isCurrentSession(token)) {
-                    _state.update { state -> state.copy(feedbackMessage = "프로필을 저장하지 못했어요") }
+                    _state.update { state -> state.copy(
+                        profile = previousProfile,
+                        feedbackMessage = "프로필을 저장하지 못해 이전 값으로 되돌렸어요",
+                    ) }
+                    persistProfile(previousProfile)
                 }
             }
         }
