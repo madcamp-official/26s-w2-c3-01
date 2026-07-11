@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tone.js Notification Melody Candidates</title>
+  <script src="https://unpkg.com/tone@15.1.22/build/Tone.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111315;
+      --panel: #1a1e21;
+      --panel-soft: #22272b;
+      --text: #eef3ee;
+      --muted: #aab6ad;
+      --line: #334039;
+      --accent: #74d7a8;
+      --accent-2: #f2c66d;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      padding: 28px 18px 40px;
+    }
+
+    header {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.5rem, 3vw, 2.2rem);
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      padding: 14px;
+      margin-bottom: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 13px;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: var(--accent);
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #092116;
+      font-weight: 650;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 14px;
+    }
+
+    .candidate {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .candidate h2 {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 650;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .notes {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      min-height: 35px;
+    }
+
+    .note {
+      min-width: 36px;
+      padding: 7px 8px;
+      text-align: center;
+      background: rgba(116, 215, 168, 0.1);
+      border: 1px solid rgba(116, 215, 168, 0.35);
+      border-radius: 8px;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bars {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      align-items: end;
+      gap: 4px;
+      height: 46px;
+      padding-top: 4px;
+    }
+
+    .bar {
+      min-height: 8px;
+      border-radius: 6px 6px 2px 2px;
+      background: linear-gradient(to top, var(--accent), var(--accent-2));
+      opacity: 0.86;
+    }
+
+    .candidate footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .id {
+      color: var(--muted);
+      font-size: 0.86rem;
+      overflow-wrap: anywhere;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>알림음 멜로디 후보 5개</h1>
+      <p>각 후보는 1초 안팎의 짧은 “띠리링” 톤입니다. 버튼을 누르면 브라우저 오디오가 활성화되고 바로 재생됩니다.</p>
+    </header>
+
+    <section class="toolbar" aria-label="전체 재생">
+      <button class="primary" type="button" id="playAll">5개 순서대로 듣기</button>
+      <button type="button" id="stopAll">정지</button>
+    </section>
+
+    <section class="grid" id="candidateGrid" aria-label="멜로디 후보 목록"></section>
+  </main>
+
+  <script>
+    const candidates = [
+      {
+        name: "Mint Ring",
+        mood: "밝고 깨끗함",
+        tone: "Bell",
+        tempo: 132,
+        notes: ["C6", "E6", "G6", "C7"],
+        durations: ["16n", "16n", "16n", "8n"],
+        gap: 0.105,
+        id: "MB-C6E6G6C7-BELL"
+      },
+      {
+        name: "Dream Tap",
+        mood: "몽환적",
+        tone: "Glass",
+        tempo: 108,
+        notes: ["A5", "C6", "E6", "B5", "G5"],
+        durations: ["16n", "16n", "8n", "16n", "8n"],
+        gap: 0.12,
+        id: "MB-A5C6E6B5G5-GLASS"
+      },
+      {
+        name: "Pixel Blink",
+        mood: "귀엽고 선명함",
+        tone: "Square",
+        tempo: 152,
+        notes: ["G5", "C6", "D6", "G6"],
+        durations: ["32n", "16n", "32n", "8n"],
+        gap: 0.095,
+        id: "MB-G5C6D6G6-PIX"
+      },
+      {
+        name: "Soft Signal",
+        mood: "차분함",
+        tone: "Warm",
+        tempo: 96,
+        notes: ["F5", "A5", "C6", "A5"],
+        durations: ["16n", "8n", "16n", "4n"],
+        gap: 0.14,
+        id: "MB-F5A5C6A5-SOFT"
+      },
+      {
+        name: "Lucky Chime",
+        mood: "설렘",
+        tone: "Pluck",
+        tempo: 124,
+        notes: ["D6", "F#6", "A6", "E6", "A6"],
+        durations: ["16n", "16n", "16n", "16n", "8n"],
+        gap: 0.105,
+        id: "MB-D6FS6A6E6A6-LUCK"
+      }
+    ];
+
+    let activeTimeouts = [];
+    let synths;
+
+    function createSynths() {
+      const limiter = new Tone.Limiter(-8).toDestination();
+      const reverb = new Tone.Reverb({ decay: 1.15, wet: 0.18 }).connect(limiter);
+      const delay = new Tone.FeedbackDelay({ delayTime: 0.055, feedback: 0.12, wet: 0.12 }).connect(reverb);
+
+      return {
+        Bell: new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "sine" },
+          envelope: { attack: 0.004, decay: 0.22, sustain: 0.05, release: 0.5 }
+        }).connect(delay),
+        Glass: new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "sine8" },
+          envelope: { attack: 0.006, decay: 0.28, sustain: 0.02, release: 0.62 }
+        }).connect(delay),
+        Square: new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "square" },
+          envelope: { attack: 0.002, decay: 0.08, sustain: 0.04, release: 0.16 }
+        }).connect(limiter),
+        Warm: new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "triangle" },
+          envelope: { attack: 0.012, decay: 0.2, sustain: 0.08, release: 0.45 }
+        }).connect(reverb),
+        Pluck: new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "triangle8" },
+          envelope: { attack: 0.003, decay: 0.16, sustain: 0.02, release: 0.34 }
+        }).connect(delay)
+      };
+    }
+
+    async function ensureAudio() {
+      if (!synths) {
+        synths = createSynths();
+      }
+      if (Tone.context.state !== "running") {
+        await Tone.start();
+      }
+    }
+
+    function stopAll() {
+      activeTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+      activeTimeouts = [];
+      if (synths) {
+        Object.values(synths).forEach((synth) => synth.releaseAll());
+      }
+    }
+
+    async function playCandidate(candidate, delaySeconds = 0) {
+      await ensureAudio();
+      const synth = synths[candidate.tone];
+      const startAt = Tone.now() + delaySeconds;
+      Tone.getTransport().bpm.value = candidate.tempo;
+      candidate.notes.forEach((note, index) => {
+        const when = startAt + index * candidate.gap;
+        synth.triggerAttackRelease(note, candidate.durations[index], when, 0.62);
+      });
+    }
+
+    function noteHeight(note) {
+      const octave = Number(note.match(/\d+/)?.[0] || 5);
+      const pitch = note.replace(/\d+/g, "");
+      const pitchIndex = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"].indexOf(pitch);
+      return 10 + ((octave - 5) * 12 + pitchIndex) * 1.6;
+    }
+
+    function renderCandidates() {
+      const grid = document.getElementById("candidateGrid");
+      grid.innerHTML = "";
+
+      candidates.forEach((candidate, index) => {
+        const card = document.createElement("article");
+        card.className = "candidate";
+        card.innerHTML = `
+          <div>
+            <h2>${index + 1}. ${candidate.name}</h2>
+            <div class="meta" aria-label="후보 정보">
+              <span class="chip">${candidate.mood}</span>
+              <span class="chip">${candidate.tone}</span>
+              <span class="chip">${candidate.tempo} BPM</span>
+            </div>
+          </div>
+          <div class="notes" aria-label="음계">${candidate.notes.map((note) => `<span class="note">${note}</span>`).join("")}</div>
+          <div class="bars" aria-hidden="true">
+            ${candidate.notes.map((note) => `<span class="bar" style="height:${Math.max(10, Math.min(44, noteHeight(note)))}px"></span>`).join("")}
+          </div>
+          <footer>
+            <button type="button" data-index="${index}">재생</button>
+            <span class="id">${candidate.id}</span>
+          </footer>
+        `;
+        grid.appendChild(card);
+      });
+
+      grid.querySelectorAll("button[data-index]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          stopAll();
+          await playCandidate(candidates[Number(button.dataset.index)]);
+        });
+      });
+    }
+
+    document.getElementById("playAll").addEventListener("click", async () => {
+      stopAll();
+      await ensureAudio();
+      candidates.forEach((candidate, index) => {
+        activeTimeouts.push(setTimeout(() => {
+          playCandidate(candidate);
+        }, index * 1450));
+      });
+    });
+
+    document.getElementById("stopAll").addEventListener("click", stopAll);
+    renderCandidates();
+  </script>
+</body>
+</html>
