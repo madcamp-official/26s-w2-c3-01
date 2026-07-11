@@ -424,6 +424,8 @@ private fun MainShell(
             )
             MainTab.MY -> MyScreen(
                 profile = state.profile,
+                profileSaving = state.profileSaving,
+                feedbackMessage = state.feedbackMessage,
                 offlineExchangeCount = state.offlineExchanges.size,
                 onDiscoverableChange = viewModel::setDiscoverable,
                 onAllowReactionsChange = viewModel::setAllowReactions,

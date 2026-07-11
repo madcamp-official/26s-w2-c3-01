@@ -465,6 +465,8 @@ fun ChatScreen(
 @Composable
 fun MyScreen(
     profile: ProfileSettings,
+    profileSaving: Boolean,
+    feedbackMessage: String?,
     offlineExchangeCount: Int,
     onDiscoverableChange: (Boolean) -> Unit,
     onAllowReactionsChange: (Boolean) -> Unit,
