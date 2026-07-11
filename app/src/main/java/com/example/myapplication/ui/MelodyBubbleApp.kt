@@ -49,8 +49,6 @@ import com.example.myapplication.ui.screens.BuildingLoungeMapScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
-import com.example.myapplication.ui.screens.LoungeDetailScreen
-import com.example.myapplication.ui.screens.LoungeListScreen
 import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
@@ -64,7 +62,6 @@ import com.example.myapplication.ui.theme.Ink
 private object Route {
     const val MAIN = "main"
     const val USER_DETAIL = "user-detail"
-    const val LOUNGE_DETAIL = "lounge-detail"
     const val CHAT = "chat/{roomId}"
     const val MELODY_ALIAS = "melody-alias"
     const val OFFLINE_EXCHANGE = "offline-exchange"
@@ -201,10 +198,6 @@ fun MelodyBubbleApp(
                         viewModel.selectNearby(handle)
                         navController.navigate(Route.USER_DETAIL)
                     },
-                    onOpenLounge = { roomId ->
-                        viewModel.selectLounge(roomId)
-                        navController.navigate(Route.LOUNGE_DETAIL)
-                    },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
                     onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenNotificationAccess = {
@@ -280,26 +273,6 @@ fun MelodyBubbleApp(
                     modifier = Modifier.safeDrawingPadding(),
                 )
             }
-            composable(Route.LOUNGE_DETAIL) {
-                val lounge = state.selectedLounge
-                if (lounge == null) {
-                    LaunchedEffect(Unit) { navController.popBackStack() }
-                } else {
-                    LoungeDetailScreen(
-                        lounge = lounge,
-                        onBack = { navController.popBackStack() },
-                        onJoin = { viewModel.joinLounge(lounge.id) },
-                        onLeave = {
-                            viewModel.joinLounge(lounge.id)
-                            navController.popBackStack()
-                        },
-                        onVote = { viewModel.vote(lounge.id, it) },
-                        onReactToCard = { viewModel.reactToMusicCard(lounge.id, it) },
-                        onSendCurrentTrack = { viewModel.sendMusicCard(lounge.id) },
-                        modifier = Modifier.safeDrawingPadding()
-                    )
-                }
-            }
             composable(
                 route = Route.CHAT,
                 arguments = listOf(navArgument("roomId") { type = NavType.StringType })
@@ -368,7 +341,6 @@ private fun MainShell(
     onStartSharing: () -> Unit,
     onStopSharing: () -> Unit,
     onOpenUser: (String) -> Unit,
-    onOpenLounge: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenMelodyAlias: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -435,6 +407,12 @@ private fun MainShell(
                 onEnter = viewModel::enterBuildingLounge,
                 onLeave = viewModel::leaveBuildingLounge,
                 onCreateSubLounge = viewModel::createBuildingSubLounge,
+                onOpenSubLounge = viewModel::openSubLounge,
+                onLeaveSubLounge = viewModel::leaveSubLounge,
+                onSendTrack = viewModel::sendDetectedTrackToLounge,
+                onReactToCard = viewModel::reactToLoungeCard,
+                onVote = viewModel::voteInSubLounge,
+                onRefreshSubLounge = viewModel::refreshSubLounge,
                 modifier = contentModifier
             )
             MainTab.INBOX -> InboxScreen(
