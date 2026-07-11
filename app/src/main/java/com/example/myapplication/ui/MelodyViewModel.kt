@@ -595,10 +595,74 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             buildingLoungeRepository.vote(token, subLoungeId, targetKey)
                 .onSuccess { refreshSelectedSubLounge(silent = true) }
                 .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "투표를 반영하지 못했어요.")
+                }
+        }
+    }
+
+    fun refreshSubLounge() = refreshSelectedSubLounge(silent = false)
+
+    private fun refreshSelectedSubLounge(silent: Boolean) {
+        val token = accessToken ?: return
+        val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        loungeSnapshotJob?.cancel()
+        loungeSnapshotJob = viewModelScope.launch {
+            if (silent) delay(80)
+            if (!silent) {
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(detailLoading = true)
+            }
+            buildingLoungeRepository.snapshot(token, subLoungeId)
+                .onSuccess { snapshot ->
+                    if (_buildingLoungeState.value.selectedSubLoungeId != subLoungeId) return@onSuccess
+                    if (latestSubLoungeSnapshotAt?.let { snapshot.generatedAt < it } == true) return@onSuccess
+                    latestSubLoungeSnapshotAt = snapshot.generatedAt
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        detailLoading = false,
+                        subLoungeSnapshot = snapshot,
                     )
                 }
                 .onFailure {
-                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "Could not create sub lounge.")
+                    if (_buildingLoungeState.value.selectedSubLoungeId == subLoungeId) {
+                        _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                            detailLoading = false,
+                            message = "라운지 상태를 불러오지 못했어요.",
+                        )
+                    }
+                }
+        }
+    }
+
+    private fun clearSelectedSubLounge() {
+        _buildingLoungeState.value.selectedSubLoungeId?.let { id ->
+            realtimeClient.unsubscribeTopic(RealtimeDestinations.subLounge(id))
+            presenceCoordinator.deactivateSubLounge(id)
+        }
+        _buildingLoungeState.value = _buildingLoungeState.value.copy(
+            selectedSubLoungeId = null,
+            subLoungeSnapshot = null,
+            detailLoading = false,
+        )
+        latestSubLoungeSnapshotAt = null
+    }
+
+    private fun restoreSubLoungeSession(token: String) {
+        if (restoredSubLoungeSession) return
+        restoredSubLoungeSession = true
+        viewModelScope.launch {
+            buildingLoungeRepository.activeSubLounge(token)
+                .onSuccess { snapshot ->
+                    snapshot ?: return@onSuccess
+                    latestSubLoungeSnapshotAt = snapshot.generatedAt
+                    realtimeClient.subscribeTopic(RealtimeDestinations.subLounge(snapshot.id))
+                    presenceCoordinator.activateSubLounge(snapshot.id)
+                    val rooms = buildingLoungeRepository.subLounges(token, snapshot.buildingLoungeId)
+                        .getOrDefault(emptyList())
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        enteredLoungeId = snapshot.buildingLoungeId,
+                        subLounges = rooms,
+                        selectedSubLoungeId = snapshot.id,
+                        subLoungeSnapshot = snapshot,
+                    )
                 }
         }
     }
@@ -610,6 +674,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun clearFeedback() = repository.clearFeedback()
 
     override fun onCleared() {
+        loungeFallbackJob?.cancel()
+        loungeSnapshotJob?.cancel()
         removeAccessTokenListener?.invoke()
         removeAccessTokenListener = null
         melodyAliasPreviewPlayer.release()
