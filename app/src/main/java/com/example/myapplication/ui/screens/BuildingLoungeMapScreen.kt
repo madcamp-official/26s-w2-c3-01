@@ -758,6 +758,52 @@ private fun SubLoungeDetailSheet(
 
             state.message?.let { message ->
                 item { Text(message, color = SignalGreen, style = MaterialTheme.typography.bodyMedium) }
+            }
+            item {
+                OutlinedButton(
+                    onClick = onLeave,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) {
+                    Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("하위 라운지 나가기")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricPanel(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(12.dp), color = MossSurfaceHigh) {
+        Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = SignalGreen, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(label, color = MutedMint, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(text: String) {
+    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = PaleMint)
+}
+
+@Composable
+private fun EmptyLoungePanel(title: String, body: String) {
+    Surface(shape = RoundedCornerShape(14.dp), color = MossSurfaceHigh, border = BorderStroke(1.dp, MossOutline)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(title, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            Text(body, color = MutedMint, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+private fun String.toMoodLabel(): String = when (this) {
+    "CHILL" -> "차분"
+    "FOCUS" -> "집중"
+    "ENERGY" -> "활기"
+    else -> this
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
