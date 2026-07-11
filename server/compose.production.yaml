@@ -13,6 +13,12 @@ services:
       DEMO_SEED_ENABLED: ${DEMO_SEED_ENABLED:-true}
       OPS_USERNAME: ${OPS_USERNAME:-ops}
       OPS_PASSWORD: ${OPS_PASSWORD:?Set OPS_PASSWORD in .env}
+      WEBSOCKET_BROKER_RELAY_ENABLED: ${WEBSOCKET_BROKER_RELAY_ENABLED:-true}
+      WEBSOCKET_BROKER_RELAY_HOST: ${WEBSOCKET_BROKER_RELAY_HOST:-rabbitmq}
+      WEBSOCKET_BROKER_RELAY_PORT: ${WEBSOCKET_BROKER_RELAY_PORT:-61613}
+      WEBSOCKET_BROKER_RELAY_LOGIN: ${RABBITMQ_USER:-melody}
+      WEBSOCKET_BROKER_RELAY_PASSCODE: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD in .env}
+      WEBSOCKET_BROKER_RELAY_VIRTUAL_HOST: ${WEBSOCKET_BROKER_RELAY_VIRTUAL_HOST:-/}
     ports:
       # cloudflared만 접근하며 VM 외부 인터페이스에는 직접 공개하지 않습니다.
       - "127.0.0.1:8080:8080"
@@ -42,6 +48,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.1-management
+    command: ["sh", "-c", "rabbitmq-plugins enable --offline rabbitmq_stomp && rabbitmq-server"]
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-melody}
@@ -51,6 +58,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    expose:
+      - "61613"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
 
