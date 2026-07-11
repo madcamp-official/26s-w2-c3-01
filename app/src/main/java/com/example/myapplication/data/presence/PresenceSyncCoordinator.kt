@@ -6,6 +6,8 @@ import com.example.myapplication.data.local.SecureTokenStore
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.MusicUpdateRequest
 import com.example.myapplication.data.remote.NearbyApi
+import com.example.myapplication.data.remote.BuildingLoungeApi
+import com.example.myapplication.data.remote.UpdateLoungeListeningRequestDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +35,7 @@ data class DetectedPlaybackState(
 class PresenceSyncCoordinator private constructor(
     context: Context,
     private val nearbyApi: NearbyApi = ApiClient.createNearbyApi(),
+    private val buildingLoungeApi: BuildingLoungeApi = ApiClient.createBuildingLoungeApi(),
 ) {
     private val applicationContext = context.applicationContext
     private val preferences = applicationContext.getSharedPreferences(
@@ -51,6 +54,9 @@ class PresenceSyncCoordinator private constructor(
 
     @Volatile
     private var lastSyncedFingerprint: String? = null
+
+    @Volatile
+    private var activeSubLoungeId: String? = null
 
     init {
         scope.launch { syncWorker() }
@@ -72,6 +78,7 @@ class PresenceSyncCoordinator private constructor(
 
     fun onSessionCleared() {
         accessToken = null
+        activeSubLoungeId = null
         lastSyncedFingerprint = null
         syncSignals.trySend(Unit)
     }
@@ -101,6 +108,31 @@ class PresenceSyncCoordinator private constructor(
         updatePlayback(DetectedPlaybackState())
     }
 
+    fun activateSubLounge(subLoungeId: String) {
+        if (activeSubLoungeId == subLoungeId) return
+        activeSubLoungeId = subLoungeId
+        lastSyncedFingerprint = null
+        scheduleLatestSync(force = true)
+    }
+
+    fun deactivateSubLounge(subLoungeId: String) {
+        if (activeSubLoungeId != subLoungeId) return
+        val token = accessToken
+        activeSubLoungeId = null
+        lastSyncedFingerprint = null
+        if (token != null) {
+            scope.launch {
+                runCatching {
+                    buildingLoungeApi.updateListening(
+                        "Bearer $token",
+                        subLoungeId,
+                        UpdateLoungeListeningRequestDto(isPlaying = false),
+                    )
+                }
+            }
+        }
+    }
+
     private fun updatePlayback(playback: DetectedPlaybackState) {
         persist(playback)
         _detectedPlayback.value = playback
@@ -128,10 +160,22 @@ class PresenceSyncCoordinator private constructor(
             val playback = _detectedPlayback.value
             val fingerprint = playback.fingerprint()
             val result = runCatching {
+                val request = playback.toMusicUpdateRequest()
                 nearbyApi.updateMusic(
                     authorization = "Bearer $token",
-                    request = playback.toMusicUpdateRequest(),
+                    request = request,
                 )
+                activeSubLoungeId?.let { subLoungeId ->
+                    buildingLoungeApi.updateListening(
+                        authorization = "Bearer $token",
+                        subLoungeId = subLoungeId,
+                        request = UpdateLoungeListeningRequestDto(
+                            trackTitle = request.title,
+                            artistName = request.artist,
+                            isPlaying = request.isPlaying,
+                        ),
+                    )
+                }
             }
 
             if (accessToken != token) continue
@@ -210,7 +254,7 @@ class PresenceSyncCoordinator private constructor(
     }
 
     private fun DetectedPlaybackState.fingerprint(): String =
-        "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.platform.orEmpty()}\u001F$isPlaying\u001F$verifiedInCurrentProcess"
+        "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.platform.orEmpty()}\u001F$isPlaying\u001F$verifiedInCurrentProcess\u001F${activeSubLoungeId.orEmpty()}"
 
     companion object {
         const val PREFERENCES_NAME = "melody_bubble_now_playing_fallback"
