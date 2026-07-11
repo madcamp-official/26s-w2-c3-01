@@ -1664,55 +1664,48 @@ class DemoMelodyRepository(
                                 .onSuccess { messages ->
                                     if (!isCurrentSession(token)) return@onSuccess
                                     _state.update { current ->
+                                        val existing = current.chatMessages[room.roomId].orEmpty()
+                                        val remoteMessages = messages.map { message ->
+                                            val previous = existing.firstOrNull {
+                                                it.messageId == message.messageId
+                                            }
+                                            ChatMessage(
+                                                message.messageId,
+                                                message.clientMessageId ?: message.messageId,
+                                                message.roomId,
+                                                message.isMine,
+                                                message.content,
+                                                "최근",
+                                                if (message.isMine && message.readByPeer == true) {
+                                                    DeliveryState.READ
+                                                } else previous?.deliveryState?.takeIf {
+                                                    it == DeliveryState.READ
+                                                } ?: DeliveryState.SENT,
+                                            )
+                                        }
+                                        val remoteClientIds = remoteMessages
+                                            .map(ChatMessage::clientMessageId)
+                                            .toSet()
+                                        val remoteMessageIds = remoteMessages
+                                            .map(ChatMessage::messageId)
+                                            .toSet()
+                                        val localOnly = existing.filter { message ->
+                                            message.messageId !in remoteMessageIds &&
+                                                message.clientMessageId !in remoteClientIds
+                                        }
                                         current.copy(
                                             chatMessages = current.chatMessages + (
-                                                room.roomId to messages.map { message ->
-                                                    ChatMessage(
-                                                        message.messageId,
-                                                        message.clientMessageId ?: message.messageId,
-                                                        message.roomId,
-                                                        message.isMine,
-                                                        message.content,
-                                                        "최근",
-                                                        DeliveryState.SENT,
-                                                    )
-                                                }
+                                                room.roomId to (remoteMessages + localOnly)
                                             )
                                         )
                                     }
                                 }
                         }
                     }
-                }.onFailure { error -> showRequestError(error, "대화방을 불러오지 못했어요") }
+                }.onFailure { error ->
+                    if (isCurrentSession(token)) showRequestError(error, "대화방을 불러오지 못했어요")
+                }
         }
-    }
-
-    private fun persistedNowPlayingTrack(): Track? {
-        val nowPlaying = applicationContext.getSharedPreferences(
-            NowPlayingNotificationListenerService.PREFERENCES_NAME,
-            Context.MODE_PRIVATE,
-        )
-        if (!nowPlaying.getBoolean(NowPlayingNotificationListenerService.KEY_ACTIVE, false)) {
-            return null
-        }
-        val title = nowPlaying.getString(NowPlayingNotificationListenerService.KEY_TITLE, null)
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-            ?: return null
-        val artist = nowPlaying.getString(NowPlayingNotificationListenerService.KEY_TEXT, null)
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-            ?: return null
-        val source = nowPlaying.getString(
-            NowPlayingNotificationListenerService.KEY_SOURCE,
-            NowPlayingNotificationListenerService.SOURCE_NOTIFICATION_FALLBACK,
-        ) ?: NowPlayingNotificationListenerService.SOURCE_NOTIFICATION_FALLBACK
-        return Track(
-            id = "notification-${title.hashCode()}-${artist.hashCode()}",
-            title = title,
-            artist = artist,
-            platform = source,
-        )
     }
 
     private fun RemoteChatSummary.toDomain() = ChatPreview(
