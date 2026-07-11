@@ -666,6 +666,98 @@ private fun SubLoungeDetailSheet(
                         Surface(
                             shape = RoundedCornerShape(14.dp),
                             color = MossSurfaceHigh,
+                            border = BorderStroke(1.dp, MossOutline),
+                        ) {
+                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = SignalGreen)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(listening.trackTitle ?: "재생을 멈췄어요", fontWeight = FontWeight.Bold)
+                                    Text(
+                                        listOfNotNull(listening.artistName, listening.listenerAlias).joinToString(" · "),
+                                        color = MutedMint,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item { SectionLabel("오늘의 분위기") }
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        room.poll.options.forEach { option ->
+                            val selected = room.poll.myVote == option.key
+                            OutlinedButton(
+                                onClick = { onVote(option.key) },
+                                modifier = Modifier.weight(1f).height(48.dp),
+                                border = BorderStroke(1.dp, if (selected) SignalGreen else MossOutline),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (selected) SignalGreen.copy(alpha = 0.14f) else Color.Transparent,
+                                ),
+                            ) {
+                                Text("${option.key.toMoodLabel()} ${option.voteCount}", maxLines = 1)
+                            }
+                        }
+                    }
+                }
+
+                item { SectionLabel("추천 음악 카드") }
+                item {
+                    OutlinedTextField(
+                        value = cardMessage,
+                        onValueChange = { cardMessage = it.take(120) },
+                        label = { Text("추천 한마디 (선택)") },
+                        supportingText = { Text("현재 실제 재생 중인 곡이 카드로 공유돼요.") },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 2,
+                    )
+                }
+                item {
+                    Button(
+                        onClick = {
+                            onSendTrack(cardMessage.ifBlank { null })
+                            cardMessage = ""
+                        },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SignalGreen),
+                    ) {
+                        Icon(Icons.Outlined.MusicNote, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("지금 듣는 곡 추천하기", fontWeight = FontWeight.Bold)
+                    }
+                }
+                if (room.cards.isEmpty()) {
+                    item { EmptyLoungePanel("첫 추천을 기다리고 있어요", "좋아하는 곡으로 대화를 시작해 보세요.") }
+                } else {
+                    items(room.cards, key = { it.id }) { card ->
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MossSurfaceHigh,
+                            border = BorderStroke(1.dp, MossOutline),
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(card.trackTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("${card.artistName} · ${card.senderAlias}", color = MutedMint)
+                                card.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                                OutlinedButton(
+                                    onClick = { onReactToCard(card.id, "LIKE") },
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                    border = BorderStroke(1.dp, if (card.reactedByMe) SignalGreen else MossOutline),
+                                ) {
+                                    Icon(Icons.Outlined.FavoriteBorder, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(if (card.reactedByMe) "공감했어요 · ${card.reactionCount}" else "공감 · ${card.reactionCount}")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            state.message?.let { message ->
+                item { Text(message, color = SignalGreen, style = MaterialTheme.typography.bodyMedium) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
