@@ -90,3 +90,47 @@ class RealtimePublisher(private val messaging: SimpMessagingTemplate) {
                     destination,
                     type,
                     error,
+                )
+            }
+        }
+    }
+
+    private fun afterCommit(action: () -> Unit) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            check(TransactionSynchronizationManager.isSynchronizationActive()) {
+                "An active transaction must have synchronization before scheduling realtime delivery"
+            }
+            TransactionSynchronizationManager.registerSynchronization(
+                object : TransactionSynchronization {
+                    override fun afterCommit() = action()
+                },
+            )
+        } else {
+            action()
+        }
+    }
+}
+
+data class RealtimeErrorPayload(val code: String, val message: String)
+
+/** Converts failures from authenticated STOMP application messages into the standard envelope. */
+@ControllerAdvice
+class RealtimeMessageExceptionHandler {
+    @MessageExceptionHandler(Exception::class)
+    @SendToUser(destinations = [RealtimeQueues.ERRORS], broadcast = false)
+    fun handle(error: Exception): RealtimeEnvelope<RealtimeErrorPayload> {
+        val responseError = generateSequence(error as Throwable?) { it.cause }
+            .filterIsInstance<ResponseStatusException>()
+            .firstOrNull()
+        val status = responseError?.statusCode ?: HttpStatus.BAD_REQUEST
+        val message = responseError?.reason
+            ?: if (status.is5xxServerError) "실시간 요청을 처리하지 못했습니다." else "유효하지 않은 실시간 요청입니다."
+        return RealtimeEnvelope(
+            type = RealtimeEventTypes.ERROR,
+            payload = RealtimeErrorPayload(
+                code = (status as? HttpStatus)?.name ?: "HTTP_${status.value()}",
+                message = message,
+            ),
+        )
+    }
+}
