@@ -99,6 +99,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.retrofit.core)
     implementation(libs.retrofit.converter.gson)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.google.identity.googleid)
