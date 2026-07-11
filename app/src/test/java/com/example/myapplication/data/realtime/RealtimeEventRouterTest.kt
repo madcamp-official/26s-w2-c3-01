@@ -1,0 +1,92 @@
+package com.example.myapplication.data.realtime
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class RealtimeEventRouterTest {
+    private val router = RealtimeEventRouter()
+
+    @Test
+    fun routesChatMessageEnvelope() {
+        val event = router.route(
+            RealtimeDestinations.CHAT,
+            """{
+              "eventId":"event-1",
+              "type":"CHAT_MESSAGE_CREATED",
+              "version":1,
+              "timestamp":"2026-07-11T20:00:00Z",
+              "payload":{
+                "messageId":"message-1",
+                "clientMessageId":"client-1",
+                "roomId":"room-1",
+                "senderAlias":"Lime",
+                "content":"안녕하세요",
+                "sentAt":"2026-07-11T20:00:00Z",
+                "isMine":true
+              }
+            }""".trimIndent(),
+        )
+
+        assertTrue(event is RealtimeEvent.ChatMessageCreated)
+        val payload = (event as RealtimeEvent.ChatMessageCreated).envelope.payload
+        assertEquals("message-1", payload.messageId)
+        assertEquals("client-1", payload.clientMessageId)
+        assertEquals(true, payload.isMine)
+    }
+
+    @Test
+    fun routesPopularTracksWithoutRequiringOptionalFields() {
+        val event = router.route(
+            RealtimeDestinations.NEARBY,
+            """{
+              "eventId":"event-2",
+              "type":"POPULAR_TRACKS_UPDATED",
+              "version":1,
+              "timestamp":"2026-07-11T20:00:00Z",
+              "payload":{"tracks":[{
+                "title":"Blue Night",
+                "artist":"Wave",
+                "listenerCount":3,
+                "reactionCount":5
+              }]}
+            }""".trimIndent(),
+        )
+
+        assertTrue(event is RealtimeEvent.PopularTracksUpdated)
+        val track = (event as RealtimeEvent.PopularTracksUpdated).envelope.payload.tracks.single()
+        assertEquals(3, track.listenerCount)
+        assertEquals(5, track.reactionCount)
+    }
+
+    @Test
+    fun malformedEnvelopeBecomesParsingError() {
+        val event = router.route(RealtimeDestinations.CHAT, "{\"type\":\"CHAT_MESSAGE_CREATED\"}")
+        assertTrue(event is RealtimeEvent.ParsingError)
+    }
+
+    @Test
+    fun unknownVersionedEventRemainsForwardCompatible() {
+        val event = router.route(
+            RealtimeDestinations.NOTIFICATIONS,
+            """{
+              "eventId":"event-3",
+              "type":"A_FUTURE_EVENT",
+              "version":2,
+              "timestamp":"2026-07-11T20:00:00Z",
+              "payload":{"newField":true}
+            }""".trimIndent(),
+        )
+        assertTrue(event is RealtimeEvent.Unknown)
+        assertEquals("event-3", event.eventId)
+    }
+
+    @Test
+    fun retryScheduleUsesRequiredBackoffAndCapsAtThirtySeconds() {
+        assertEquals(1_000L, StompRealtimeClient.retryDelay(1))
+        assertEquals(2_000L, StompRealtimeClient.retryDelay(2))
+        assertEquals(5_000L, StompRealtimeClient.retryDelay(3))
+        assertEquals(10_000L, StompRealtimeClient.retryDelay(4))
+        assertEquals(20_000L, StompRealtimeClient.retryDelay(5))
+        assertEquals(30_000L, StompRealtimeClient.retryDelay(6))
