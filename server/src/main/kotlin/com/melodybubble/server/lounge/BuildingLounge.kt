@@ -186,26 +186,6 @@ class BuildingLoungeService(
                 buildingId,
                 fixture.name,
             ).first()
-            fixture.subLounges.forEach { (title, style) ->
-                jdbc.update(
-                    """
-                    INSERT INTO sub_lounges(building_lounge_id, creator_user_id, title, style, active)
-                    SELECT ?, u.id, ?, ?, true
-                    FROM users u
-                    WHERE NOT EXISTS (
-                      SELECT 1 FROM sub_lounges sl
-                      WHERE sl.building_lounge_id = ? AND sl.title = ?
-                    )
-                    ORDER BY u.created_at
-                    LIMIT 1
-                    """.trimIndent(),
-                    loungeId,
-                    title,
-                    style,
-                    loungeId,
-                    title,
-                )
-            }
         }
     }
 
@@ -269,11 +249,6 @@ class BuildingLoungeService(
             longitude = lon,
             radiusMeters = radius.coerceIn(90, 420),
             category = category,
-            subLounges = listOf(
-                "Local Picks" to "Mixed",
-                "Focus Room" to "Focus",
-                "Jazz Corner" to "Jazz"
-            )
         )
     }
 
@@ -566,7 +541,6 @@ class BuildingLoungeService(
         val longitude: Double,
         val radiusMeters: Int,
         val category: String,
-        val subLounges: List<Pair<String, String>>,
     )
 
     private fun java.sql.ResultSet.toBuildingLoungeSummary(): BuildingLoungeSummary = BuildingLoungeSummary(
