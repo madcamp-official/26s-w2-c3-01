@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
+import com.example.myapplication.MelodyApplication
 import com.example.myapplication.core.model.ChatMessage
 import com.example.myapplication.core.model.ChatPreview
 import com.example.myapplication.core.model.BlockedUser
@@ -17,6 +18,7 @@ import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NotificationType
 import com.example.myapplication.core.model.OfflineExchangeRecord
+import com.example.myapplication.core.model.PopularTrack
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SharingState
@@ -26,18 +28,23 @@ import com.example.myapplication.data.local.MelodyDatabase
 import com.example.myapplication.data.local.MelodyAliasCandidateEntity
 import com.example.myapplication.data.local.OfflineExchangeEntity
 import com.example.myapplication.data.local.SyncOutboxEntity
+import com.example.myapplication.data.presence.PresenceSyncCoordinator
+import com.example.myapplication.data.realtime.RealtimeConnectionState
+import com.example.myapplication.data.realtime.RealtimeEvent
+import com.example.myapplication.data.realtime.RealtimeSyncRequest
+import com.example.myapplication.data.realtime.StompRealtimeClient
 import com.example.myapplication.data.remote.ApiEnvironment
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.LocationUpdateRequest
-import com.example.myapplication.data.remote.MusicUpdateRequest
+import com.example.myapplication.data.remote.NearbyReactionRequest
 import com.example.myapplication.data.remote.PresenceSettingsUpdateRequest
 import com.example.myapplication.data.remote.RemoteChatSummary
 import com.example.myapplication.data.remote.RemoteFollowResponse
 import com.example.myapplication.data.remote.RemoteNearbyBubble
+import com.example.myapplication.data.remote.RemotePopularTrack
 import com.example.myapplication.data.remote.ReportSubmitRequest
 import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
-import com.example.myapplication.data.remote.PrivacyUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
 import android.Manifest
 import android.content.pm.PackageManager
@@ -46,9 +53,9 @@ import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.service.SharingForegroundService
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -65,7 +72,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
 
 private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 15_000L
-private const val CHAT_SYNC_INTERVAL_MILLIS = 5_000L
+private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
+
+internal fun reactionTypeForLabel(label: String): String? = when (label.trim()) {
+    "이 곡 좋아요", "LIKE" -> "LIKE"
+    "취향이 닮았어요", "SAME_TASTE" -> "SAME_TASTE"
+    "선곡 멋져요", "GREAT_PICK" -> "GREAT_PICK"
+    "같이 듣고 싶어요", "LISTEN_TOGETHER" -> "LISTEN_TOGETHER"
+    else -> null
+}
 
 interface MelodyRepository {
     val state: StateFlow<MelodyUiState>
@@ -74,6 +89,8 @@ interface MelodyRepository {
     fun selectTab(tab: MainTab)
     fun selectNearby(handle: String?)
     fun selectLounge(roomId: String?)
+    fun openChat(roomId: String)
+    fun closeChat(roomId: String)
     fun startSharing()
     fun stopSharing()
     fun setSharingPermissionRequired()
@@ -105,6 +122,7 @@ interface MelodyRepository {
     fun syncExchange(exchangeId: String)
     fun clearFeedback()
     fun authenticate(accessToken: String)
+    fun refreshSession(accessToken: String)
     fun logout()
     fun close()
 }
@@ -120,11 +138,22 @@ class DemoMelodyRepository(
         Context.MODE_PRIVATE
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val presenceSyncCoordinator = PresenceSyncCoordinator.get(applicationContext)
+    private val applicationRealtimeClient =
+        (applicationContext as? MelodyApplication)?.realtimeClient
+    private val realtimeInboxStore =
+        (applicationContext as? MelodyApplication)?.realtimeInboxStore
+    private val realtimeClient = applicationRealtimeClient
+        ?: StompRealtimeClient(environment.stompWsUrl)
+    private val ownsRealtimeClient = applicationRealtimeClient == null
+    private val initialDetectedPlayback = presenceSyncCoordinator.detectedPlayback.value
     private val _state = MutableStateFlow(
         DemoCatalog.initialState(
             isOnboardingComplete = preferences.getBoolean("onboarding-complete", false)
         ).copy(
             profile = restoreProfile(DemoCatalog.initialState(false).profile),
+            detectedTrack = initialDetectedPlayback.track,
+            detectedTrackPlaying = initialDetectedPlayback.isPlaying,
             dataSourceLabel = if (environment.isConfigured) {
                 "DEMO FALLBACK"
             } else {
@@ -136,6 +165,13 @@ class DemoMelodyRepository(
 
     private var sharingJob: Job? = null
     private var chatSyncJob: Job? = null
+    private val chatRealtimeVersion = AtomicLong(0)
+    private val nearbyRealtimeVersion = AtomicLong(0)
+    private val popularRealtimeVersion = AtomicLong(0)
+    private val chatReadLock = Any()
+    private val chatReadJobs = mutableMapOf<String, Job>()
+    private val chatReadDirty = mutableSetOf<String>()
+    @Volatile private var activeChatRoomId: String? = null
     private val clientSessionId = preferences.getString("client-session-id", null)
         ?: UUID.randomUUID().toString().also { preferences.edit().putString("client-session-id", it).apply() }
     private val nearbyApi = ApiClient.createNearbyApi(environment)
@@ -169,6 +205,41 @@ class DemoMelodyRepository(
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         locationReceiverRegistered = true
+        scope.launch {
+            realtimeClient.events.collect(::handleRealtimeEvent)
+        }
+        scope.launch {
+            realtimeClient.connectionState.collect(::handleRealtimeConnectionState)
+        }
+        scope.launch {
+            realtimeClient.syncRequests.collect { request ->
+                if (request is RealtimeSyncRequest.FullSync) performFullRealtimeSync()
+            }
+        }
+        realtimeInboxStore?.let { store ->
+            scope.launch {
+                store.notifications.collect { durable ->
+                    if (accessToken == null) return@collect
+                    _state.update { current ->
+                        val durableIds = durable.map(InboxNotification::id).toSet()
+                        current.copy(
+                            notifications = durable + current.notifications
+                                .filterNot { it.id in durableIds }
+                        )
+                    }
+                }
+            }
+        }
+        scope.launch {
+            presenceSyncCoordinator.detectedPlayback.collect { playback ->
+                _state.update {
+                    it.copy(
+                        detectedTrack = playback.track,
+                        detectedTrackPlaying = playback.isPlaying,
+                    )
+                }
+            }
+        }
         scope.launch {
             database.offlineExchangeDao().deleteExpired(System.currentTimeMillis())
             database.offlineExchangeDao().observeAll().collect { entities ->
@@ -213,6 +284,15 @@ class DemoMelodyRepository(
         _state.update { it.copy(selectedLoungeId = roomId) }
     }
 
+    override fun openChat(roomId: String) {
+        activeChatRoomId = roomId
+        markChatRoomRead(roomId)
+    }
+
+    override fun closeChat(roomId: String) {
+        if (activeChatRoomId == roomId) activeChatRoomId = null
+    }
+
     override fun startSharing() {
         if (_state.value.sharingState == SharingState.ACTIVE || sharingJob?.isActive == true) return
         if (accessToken.isNullOrBlank()) {
@@ -233,7 +313,9 @@ class DemoMelodyRepository(
             _state.update {
                 it.copy(
                     sharingState = SharingState.ACTIVE,
-                    connectionState = if (synced) ConnectionState.LIVE else ConnectionState.RECONNECTING,
+                    connectionState = if (
+                        synced && realtimeClient.connectionState.value is RealtimeConnectionState.Connected
+                    ) ConnectionState.LIVE else ConnectionState.RECONNECTING,
                     feedbackMessage = if (synced) "실제 주변 기기와 음악을 공유 중이에요" else "연결이 복구되면 자동으로 다시 공유해요"
                 )
             }
