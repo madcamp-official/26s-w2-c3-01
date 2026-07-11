@@ -48,6 +48,9 @@ interface MelodyRepository {
     fun react(handle: String, reactionLabel: String)
     fun block(handle: String)
     fun report(handle: String)
+    fun registerMutualChat(roomId: String, peerHandle: String)
+    fun replaceChats(chats: List<ChatPreview>)
+    fun replaceChatMessages(roomId: String, messages: List<ChatMessage>)
     fun joinLounge(roomId: String)
     fun vote(roomId: String, optionId: String)
     fun sendMusicCard(roomId: String)
@@ -268,6 +271,45 @@ class DemoMelodyRepository(
             it.nearbyHandle == handle
         }?.displayAlias ?: return
         _state.update { it.copy(feedbackMessage = "$alias 님의 신고 초안을 접수했어요") }
+    }
+
+    override fun registerMutualChat(roomId: String, peerHandle: String) {
+        _state.update { current ->
+            val peer = current.nearbyListeners.firstOrNull { it.nearbyHandle == peerHandle }
+            val existing = current.chats.any { it.roomId == roomId || it.peerHandle == peerHandle }
+            if (peer == null || existing) return@update current
+            current.copy(
+                chats = listOf(
+                    ChatPreview(
+                        roomId = roomId,
+                        peerHandle = peerHandle,
+                        peerAlias = peer.displayAlias,
+                        peerColorHex = peer.colorHex,
+                        lastMessage = "서로 팔로우했어요",
+                        relativeTime = "방금",
+                        unreadCount = 0,
+                        relationship = RelationshipStatus.MUTUAL
+                    )
+                ) + current.chats
+            )
+        }
+    }
+
+    override fun replaceChats(chats: List<ChatPreview>) {
+        _state.update { current ->
+            current.copy(
+                chats = chats,
+                chatMessages = current.chatMessages.filterKeys { roomId ->
+                    chats.any { it.roomId == roomId }
+                }
+            )
+        }
+    }
+
+    override fun replaceChatMessages(roomId: String, messages: List<ChatMessage>) {
+        _state.update { current ->
+            current.copy(chatMessages = current.chatMessages + (roomId to messages))
+        }
     }
 
     override fun joinLounge(roomId: String) {

@@ -29,6 +29,12 @@ object ApiClient {
     fun createBuildingLoungeApi(environment: ApiEnvironment = ApiEnvironment()): BuildingLoungeApi =
         retrofit(environment).create(BuildingLoungeApi::class.java)
 
+    fun createSocialInteractionApi(environment: ApiEnvironment = ApiEnvironment()): SocialInteractionApi =
+        retrofit(environment).create(SocialInteractionApi::class.java)
+
+    fun createChatApi(environment: ApiEnvironment = ApiEnvironment()): ChatApi =
+        retrofit(environment).create(ChatApi::class.java)
+
     fun createLyriaMusicApi(environment: ApiEnvironment = ApiEnvironment()): LyriaMusicApi {
         val client = OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)

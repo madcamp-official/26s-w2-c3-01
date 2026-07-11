@@ -13,11 +13,14 @@ import com.example.myapplication.data.MelodyRepository
 import com.example.myapplication.data.remote.AuthRepository
 import com.example.myapplication.data.remote.BuildingLoungeRepository
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
+import com.example.myapplication.data.remote.ChatRepository
 import com.example.myapplication.data.remote.MelodyAliasGenerateRequest
 import com.example.myapplication.data.remote.MelodyAliasRepository
 import com.example.myapplication.data.remote.LyriaAliasGenerateRequest
 import com.example.myapplication.data.remote.LyriaMusicRepository
 import com.example.myapplication.data.remote.LyriaMusicResponse
+import com.example.myapplication.data.remote.SocialInteractionRepository
+import com.example.myapplication.data.remote.TokenResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -65,6 +68,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val melodyAliasRepository by lazy { MelodyAliasRepository() }
     private val lyriaRepository by lazy { LyriaMusicRepository() }
     private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
+    private val socialRepository by lazy { SocialInteractionRepository() }
+    private val chatRepository by lazy { ChatRepository() }
     private val lyriaClipPlayer = LyriaClipPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private var accessToken: String? = null
@@ -83,9 +88,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _loginState.value = LoginUiState.Loading
             authRepository.login(email, password)
+                .recoverCatching { error ->
+                    if (isDemoCredential(email, password)) {
+                        TokenResponse(accessToken = "", tokenType = "Bearer", expiresInSeconds = 0)
+                    } else {
+                        throw error
+                    }
+                }
                 .onSuccess { response ->
-                    accessToken = response.accessToken
+                    accessToken = response.accessToken.ifBlank { null }
                     _loginState.value = LoginUiState.Success(response.expiresInSeconds, response.isNewUser)
+                    refreshChats()
                 }
                 .onFailure {
                     _loginState.value = LoginUiState.Error(
@@ -103,6 +116,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 .onSuccess { response ->
                     accessToken = response.accessToken
                     _loginState.value = LoginUiState.Success(response.expiresInSeconds, response.isNewUser)
+                    refreshChats()
                 }
                 .onFailure {
                     _loginState.value = LoginUiState.Error(
@@ -112,6 +126,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun isDemoCredential(email: String, password: String): Boolean =
+        email.trim().equals("demo@melody.local", ignoreCase = true) && password == "demo1234"
+
     fun completeOnboarding() = repository.completeOnboarding()
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
     fun selectNearby(handle: String?) = repository.selectNearby(handle)
@@ -119,16 +136,98 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun startSharing() = repository.startSharing()
     fun stopSharing() = repository.stopSharing()
     fun sharingPermissionRequired() = repository.setSharingPermissionRequired()
-    fun follow(handle: String) = repository.follow(handle)
+    fun follow(handle: String) {
+        val token = accessToken
+        val currentRelationship = uiState.value.nearbyListeners
+            .firstOrNull { it.nearbyHandle == handle }
+            ?.relationship
+        repository.follow(handle)
+        if (token.isNullOrBlank()) return
+        viewModelScope.launch {
+            val result = if (currentRelationship == com.example.myapplication.core.model.RelationshipStatus.FOLLOWING) {
+                socialRepository.unfollow(token, handle)
+            } else {
+                socialRepository.follow(token, handle)
+            }
+            result.onFailure {
+                // Demo handles may not exist on the server; keep the local UX responsive.
+            }.onSuccess { response ->
+                response.chatRoomId?.let { roomId ->
+                    repository.registerMutualChat(roomId, handle)
+                    refreshChats()
+                }
+            }
+        }
+    }
     fun react(handle: String, reactionLabel: String) = repository.react(handle, reactionLabel)
-    fun block(handle: String) = repository.block(handle)
-    fun report(handle: String) = repository.report(handle)
+    fun block(handle: String) {
+        val token = accessToken
+        repository.block(handle)
+        if (token.isNullOrBlank()) return
+        viewModelScope.launch {
+            socialRepository.block(token, handle)
+        }
+    }
+
+    fun report(handle: String) {
+        val token = accessToken
+        repository.report(handle)
+        if (token.isNullOrBlank()) return
+        viewModelScope.launch {
+            socialRepository.report(token, handle)
+        }
+    }
     fun joinLounge(roomId: String) = repository.joinLounge(roomId)
     fun vote(roomId: String, optionId: String) = repository.vote(roomId, optionId)
     fun sendMusicCard(roomId: String) = repository.sendMusicCard(roomId)
     fun reactToMusicCard(roomId: String, cardId: String) =
         repository.reactToMusicCard(roomId, cardId)
-    fun sendChat(roomId: String, content: String) = repository.sendChat(roomId, content)
+
+    private fun refreshChats() {
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            chatRepository.rooms(token)
+                .onSuccess { repository.replaceChats(it) }
+        }
+    }
+
+    fun loadChatMessages(roomId: String) {
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            chatRepository.messages(token, roomId)
+                .onSuccess { repository.replaceChatMessages(roomId, it) }
+        }
+    }
+
+    fun openDirectChat(nearbyHandle: String, onReady: (String) -> Unit) {
+        val existingRoomId = uiState.value.chats.firstOrNull { it.peerHandle == nearbyHandle }?.roomId
+        if (existingRoomId != null) {
+            loadChatMessages(existingRoomId)
+            onReady(existingRoomId)
+            return
+        }
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            chatRepository.openDirectRoom(token, nearbyHandle)
+                .onSuccess { chat ->
+                    repository.replaceChats(listOf(chat) + uiState.value.chats.filterNot { it.roomId == chat.roomId })
+                    loadChatMessages(chat.roomId)
+                    onReady(chat.roomId)
+                }
+        }
+    }
+
+    fun sendChat(roomId: String, content: String) {
+        repository.sendChat(roomId, content)
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            chatRepository.send(token, roomId, content)
+                .onSuccess { loadChatMessages(roomId) }
+                .onFailure {
+                    // Keep the local optimistic message; the demo store marks it sent for offline trials.
+                }
+        }
+    }
     fun selectTrack(track: Track) = repository.selectTrack(track)
     fun markInboxRead() = repository.markInboxRead()
     fun setDiscoverable(enabled: Boolean) = repository.setDiscoverable(enabled)

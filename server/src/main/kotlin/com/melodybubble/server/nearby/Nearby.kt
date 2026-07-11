@@ -16,7 +16,7 @@ import java.util.UUID
 
 data class TrackSummary(val title: String, val artist: String, val albumArtUrl: String? = null)
 data class AbstractPosition(val x: Float, val y: Float)
-data class NearbyBubble(val nearbyHandle: String, val displayAlias: String, val profileColor: String, val displayPosition: AbstractPosition, val matchScore: Int, val proximity: String, val track: TrackSummary?)
+data class NearbyBubble(val nearbyHandle: String, val displayAlias: String, val profileColor: String, val displayPosition: AbstractPosition, val matchScore: Int, val proximity: String, val track: TrackSummary?, val relationship: String = "NONE")
 data class NearbySnapshot(val generatedAt: Instant = Instant.now(), val items: List<NearbyBubble>)
 data class LocationUpdate(val requestId: String, val clientSessionId: String, val latitude: Double, val longitude: Double, val accuracyMeters: Float? = null)
 data class Envelope<T>(val type: String, val data: T, val emittedAt: Instant = Instant.now())
@@ -27,20 +27,28 @@ class NearbyService(private val jdbc: JdbcTemplate, @Value("\${app.nearby.radius
         val sql = """
           SELECT ps.nearby_handle, u.display_name, u.profile_color,
                  ms.track_title, ms.artist_name,
-                 ST_DistanceSphere(me.point, other.point) AS distance_meters
+                 ST_DistanceSphere(me.point, other.point) AS distance_meters,
+                 EXISTS (SELECT 1 FROM user_follows uf WHERE uf.follower_id=? AND uf.followee_id=ps.user_id) AS following,
+                 EXISTS (SELECT 1 FROM user_follows uf WHERE uf.follower_id=ps.user_id AND uf.followee_id=?) AS follows_me
           FROM current_locations me
           JOIN presence_sessions mine ON mine.id=me.session_id AND mine.user_id=? AND mine.expires_at>now()
           JOIN current_locations other ON ST_DWithin(me.point::geography, other.point::geography, ?) AND other.expires_at>now()
           JOIN presence_sessions ps ON ps.id=other.session_id AND ps.expires_at>now() AND ps.user_id<>?
           JOIN users u ON u.id=ps.user_id
           LEFT JOIN music_statuses ms ON ms.user_id=u.id AND ms.expires_at>now()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM user_blocks ub
+            WHERE (ub.blocker_id=? AND ub.blocked_id=ps.user_id)
+               OR (ub.blocker_id=ps.user_id AND ub.blocked_id=?)
+          )
           ORDER BY distance_meters LIMIT 40
         """.trimIndent()
         return NearbySnapshot(items = jdbc.query(sql, { rs, _ ->
             val handle = rs.getString("nearby_handle")
             NearbyBubble(handle, rs.getString("display_name"), rs.getString("profile_color"), position(handle), 65 + (stable(handle, 31)), proximity(rs.getDouble("distance_meters")),
-                rs.getString("track_title")?.let { TrackSummary(it, rs.getString("artist_name")) })
-        }, userId, radius, userId))
+                rs.getString("track_title")?.let { TrackSummary(it, rs.getString("artist_name")) },
+                relationship(rs.getBoolean("following"), rs.getBoolean("follows_me")))
+        }, userId, userId, userId, radius, userId, userId, userId))
     }
 
     fun updateLocation(userId: UUID, update: LocationUpdate) {
@@ -54,6 +62,12 @@ class NearbyService(private val jdbc: JdbcTemplate, @Value("\${app.nearby.radius
             session, update.longitude, update.latitude, update.accuracyMeters)
     }
     private fun proximity(distance: Double) = when { distance < 45 -> "VERY_CLOSE"; distance < 130 -> "CLOSE"; else -> "AROUND" }
+    private fun relationship(following: Boolean, followsMe: Boolean) = when {
+        following && followsMe -> "MUTUAL"
+        following -> "FOLLOWING"
+        followsMe -> "FOLLOWS_ME"
+        else -> "NONE"
+    }
     private fun stable(value: String, modulo: Int) = (value.hashCode().toUInt().toLong() % modulo).toInt()
     private fun position(handle: String) = AbstractPosition((stable(handle, 161) - 80) / 100f, (stable(handle.reversed(), 161) - 80) / 100f)
 }

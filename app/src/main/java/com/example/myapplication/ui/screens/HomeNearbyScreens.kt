@@ -37,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.GraphicEq
@@ -296,6 +297,7 @@ fun UserDetailScreen(
     onDismissReactionSheet: () -> Unit = {},
     onReact: (NearbyListener, String) -> Unit = { _, _ -> },
     onFollow: (NearbyListener) -> Unit = {},
+    onOpenChat: (NearbyListener) -> Unit = {},
     onBlock: (NearbyListener) -> Unit = {},
     onReport: (NearbyListener) -> Unit = {}
 ) {
@@ -397,6 +399,24 @@ fun UserDetailScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(listener.relationship.followLabel(), fontWeight = FontWeight.Bold)
+                }
+            }
+            if (listener.relationship == RelationshipStatus.MUTUAL) {
+                item {
+                    Button(
+                        onClick = { onOpenChat(listener) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MelodyBubbleColors.Primary,
+                            contentColor = MelodyBubbleColors.OnPrimary
+                        )
+                    ) {
+                        Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("채팅하기", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             item {

@@ -172,7 +172,10 @@ fun MelodyBubbleApp(
                         viewModel.selectLounge(roomId)
                         navController.navigate(Route.LOUNGE_DETAIL)
                     },
-                    onOpenChat = { navController.navigate(Route.chat(it)) },
+                    onOpenChat = {
+                        viewModel.loadChatMessages(it)
+                        navController.navigate(Route.chat(it))
+                    },
                     onOpenMusicSelect = { navController.navigate(Route.MUSIC_SELECT) },
                     onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenNotificationAccess = {
@@ -209,6 +212,11 @@ fun MelodyBubbleApp(
                         onDismissReactionSheet = { reactionSheetVisible = false },
                         onReact = { selected, label -> viewModel.react(selected.nearbyHandle, label) },
                         onFollow = { viewModel.follow(it.nearbyHandle) },
+                        onOpenChat = { selected ->
+                            viewModel.openDirectChat(selected.nearbyHandle) { roomId ->
+                                navController.navigate(Route.chat(roomId))
+                            }
+                        },
                         onBlock = {
                             viewModel.block(it.nearbyHandle)
                             navController.popBackStack()
