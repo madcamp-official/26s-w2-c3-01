@@ -182,3 +182,95 @@ class SubLoungeRealtimeService(
 
     @Transactional
     fun expireStaleMemberships() {
+        val stale = jdbc.query(
+            """
+            select member.user_id,member.sub_lounge_id from sub_lounge_members member
+            join sub_lounges room on room.id=member.sub_lounge_id
+            left join building_lounge_sessions session
+              on session.building_lounge_id=room.building_lounge_id and session.user_id=member.user_id
+            where member.active=true
+              and (session.id is null or session.active=false or session.expires_at<=now())
+            limit 200
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString(1)) to UUID.fromString(rs.getString(2)) },
+        )
+        stale.forEach { (userId, subLoungeId) ->
+            deactivateMembership(userId, subLoungeId)
+            publishMemberChange(subLoungeId, userId, joined = false)
+            publishState(subLoungeId)
+        }
+    }
+
+    @Transactional
+    fun updateListening(userId: UUID, subLoungeId: UUID, request: UpdateLoungeListeningRequest) {
+        requireMember(userId, subLoungeId)
+        rateLimiter.enforce(userId, "LOUNGE_LISTENING", 40, Duration.ofMinutes(1))
+        val title = request.trackTitle.trim().take(160)
+        val artist = request.artistName.trim().take(160)
+        if (!request.isPlaying) {
+            jdbc.update(
+                "delete from sub_lounge_listening_statuses where sub_lounge_id=? and user_id=?",
+                subLoungeId,
+                userId,
+            )
+        } else {
+            if (title.isBlank() || artist.isBlank()) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "재생 중인 곡 정보가 필요합니다.")
+            }
+            jdbc.update(
+                """
+                insert into sub_lounge_listening_statuses(
+                  sub_lounge_id,user_id,track_title,artist_name,album_art_url,is_playing,expires_at
+                ) values (?,?,?,?,?,true,now()+interval '90 seconds')
+                on conflict(sub_lounge_id,user_id) do update set
+                  track_title=excluded.track_title,artist_name=excluded.artist_name,
+                  album_art_url=excluded.album_art_url,is_playing=true,
+                  updated_at=now(),expires_at=excluded.expires_at
+                """.trimIndent(),
+                subLoungeId,
+                userId,
+                title,
+                artist,
+                request.albumArtUrl?.take(2_000),
+            )
+        }
+        realtime.toTopicAfterCommit(
+            topic(subLoungeId),
+            RealtimeEventTypes.LISTENING_STATUS_UPDATED,
+            listeningPayload(userId, title, artist, request),
+        )
+    }
+
+    @Transactional
+    fun addCard(userId: UUID, subLoungeId: UUID, request: CreateLoungeCardRequest): LoungeRecommendationCard {
+        requireMember(userId, subLoungeId)
+        rateLimiter.enforce(userId, "LOUNGE_CARD", 10, Duration.ofMinutes(1))
+        val clientCardId = runCatching { UUID.fromString(request.clientCardId) }.getOrElse {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "유효한 clientCardId가 필요합니다.")
+        }
+        val title = request.trackTitle.trim().take(160)
+        val artist = request.artistName.trim().take(160)
+        if (title.isBlank() || artist.isBlank()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "곡 제목과 아티스트가 필요합니다.")
+        }
+        val inserted = jdbc.update(
+            """
+            insert into sub_lounge_recommendation_cards(
+              id,sub_lounge_id,sender_id,client_card_id,track_title,artist_name,message
+            ) values (gen_random_uuid(),?,?,?,?,?,?)
+            on conflict(sender_id,client_card_id) do nothing
+            """.trimIndent(),
+            subLoungeId,
+            userId,
+            clientCardId,
+            title,
+            artist,
+            request.message?.trim()?.take(240)?.ifBlank { null },
+        )
+        val card = cardByClientId(userId, clientCardId)
+        if (card.subLoungeId != subLoungeId || card.trackTitle != title || card.artistName != artist ||
+            card.message != request.message?.trim()?.take(240)?.ifBlank { null }
+        ) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "clientCardId가 다른 카드에 사용되었습니다.")
+        }
+        if (inserted == 1) {
