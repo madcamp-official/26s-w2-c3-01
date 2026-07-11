@@ -1400,6 +1400,98 @@ class DemoMelodyRepository(
 
     private fun applyChatMessageRead(event: RealtimeEvent.ChatMessageRead) {
         val payload = event.envelope.payload
+        val roomId = payload.roomId?.takeIf(String::isNotBlank) ?: return
+        _state.update { current ->
+            val currentMessages = current.chatMessages[roomId].orEmpty()
+            val lastReadIndex = payload.lastReadMessageId?.let { lastReadMessageId ->
+                currentMessages.indexOfFirst { it.messageId == lastReadMessageId }
+            } ?: -1
+            val messages = currentMessages.mapIndexed { index, message ->
+                if (payload.isMine == false && lastReadIndex >= 0 && index <= lastReadIndex &&
+                    message.isMine && message.deliveryState != DeliveryState.FAILED
+                ) {
+                    message.copy(deliveryState = DeliveryState.READ)
+                } else message
+            }
+            current.copy(
+                chatMessages = current.chatMessages + (roomId to messages),
+                chats = current.chats.map { chat ->
+                    if (chat.roomId == roomId && payload.isMine == true) {
+                        chat.copy(unreadCount = 0)
+                    } else chat
+                },
+            )
+        }
+    }
+
+    private fun applyChatRoomUpdated(event: RealtimeEvent.ChatRoomUpdated) {
+        val payload = event.envelope.payload
+        val roomId = payload.roomId?.takeIf(String::isNotBlank) ?: return
+        var found = false
+        _state.update { current ->
+            current.copy(
+                chats = current.chats.map { chat ->
+                    if (chat.roomId != roomId) return@map chat
+                    found = true
+                    chat.copy(
+                        lastMessage = payload.lastMessageContent ?: chat.lastMessage,
+                        relativeTime = if (payload.lastMessageAt == null) chat.relativeTime else "방금",
+                        unreadCount = if (activeChatRoomId == roomId) 0
+                        else payload.unreadCount?.coerceAtLeast(0) ?: chat.unreadCount,
+                    )
+                }
+            )
+        }
+        if (!found) loadChatRooms()
+    }
+
+    private fun applyNearbyReaction(event: RealtimeEvent.NearbyReactionCreated) {
+        val payload = event.envelope.payload
+        val alias = payload.senderAlias?.takeIf(String::isNotBlank) ?: "주변 사용자"
+        val actorColor = payload.senderNearbyHandle?.let { handle ->
+            _state.value.nearbyListeners.firstOrNull { it.nearbyHandle == handle }?.colorHex
+        }
+        val reaction = reactionLabelForType(payload.reactionType)
+        val preview = payload.trackTitle?.takeIf(String::isNotBlank)?.let { title ->
+            "$reaction · ‘$title’"
+        } ?: reaction
+        val notification = InboxNotification(
+            id = payload.reactionId?.takeIf(String::isNotBlank) ?: event.envelope.eventId,
+            type = NotificationType.REACTION,
+            actorAlias = alias,
+            actorColorHex = actorColor,
+            preview = preview,
+            relativeTime = "방금",
+        )
+        _state.update { current ->
+            current.copy(
+                notifications = listOf(notification) + current.notifications
+                    .filterNot { it.id == notification.id },
+                feedbackMessage = "$alias 님이 ‘$reaction’ 리액션을 보냈어요",
+            )
+        }
+    }
+
+    private fun applyNearbyMusicUpdated(event: RealtimeEvent.NearbyMusicUpdated) {
+        val payload = event.envelope.payload
+        val handle = payload.nearbyHandle?.takeIf(String::isNotBlank) ?: return
+        val title = payload.track?.title?.trim()?.takeIf(String::isNotEmpty)
+        val artist = payload.track?.artist?.trim()?.takeIf(String::isNotEmpty)
+        val playingTrack = if (payload.isPlaying == true && title != null && artist != null) {
+            Track(
+                id = "remote-${handle}-${title.hashCode()}-${artist.hashCode()}",
+                title = title,
+                artist = artist,
+                platform = "REMOTE",
+            )
+        } else null
+        var found = false
+        _state.update { current ->
+            current.copy(
+                nearbyListeners = current.nearbyListeners.map { listener ->
+                    if (listener.nearbyHandle != handle) return@map listener
+                    found = true
+                    listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
     private fun startChatSync(token: String) {
         chatSyncJob?.cancel()
         chatSyncJob = scope.launch {
