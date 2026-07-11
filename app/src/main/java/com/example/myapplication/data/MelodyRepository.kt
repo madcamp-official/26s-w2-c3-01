@@ -1726,6 +1726,27 @@ class DemoMelodyRepository(
         blockedAt = blockedAt,
     )
 
+    private fun RemotePopularTrack.toDomain() = PopularTrack(
+        track = Track(
+            id = "popular-${title.hashCode()}-${artist.hashCode()}",
+            title = title,
+            artist = artist,
+            platform = "SERVER_AGGREGATE",
+        ),
+        listenerCount = listenerCount.coerceAtLeast(0),
+        reactionCount = reactionCount.coerceAtLeast(0),
+    )
+
+    private fun reactionLabelForType(type: String?): String = when (type) {
+        "LIKE" -> "이 곡 좋아요"
+        "SAME_TASTE" -> "취향이 닮았어요"
+        "GREAT_PICK" -> "선곡 멋져요"
+        "LISTEN_TOGETHER" -> "같이 듣고 싶어요"
+        else -> "새 리액션"
+    }
+
+    private fun isCurrentSession(token: String): Boolean = accessToken == token
+
     private fun showRequestError(error: Throwable, fallback: String) {
         _state.update { it.copy(feedbackMessage = requestErrorMessage(error, fallback)) }
     }
@@ -1742,6 +1763,7 @@ class DemoMelodyRepository(
             runCatching { applicationContext.unregisterReceiver(locationReceiver) }
             locationReceiverRegistered = false
         }
+        if (ownsRealtimeClient) realtimeClient.close()
         scope.coroutineContext[Job]?.cancel()
     }
 
