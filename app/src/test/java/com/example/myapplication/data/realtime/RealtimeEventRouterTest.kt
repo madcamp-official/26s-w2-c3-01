@@ -83,6 +83,25 @@ class RealtimeEventRouterTest {
     }
 
     @Test
+    fun loungeTopicEventIsRoutedForFeatureSpecificHandling() {
+        val destination = RealtimeDestinations.subLounge("11111111-1111-4111-8111-111111111111")
+        val event = router.route(
+            destination,
+            """{
+              "eventId":"lounge-event-1",
+              "type":"RECOMMENDATION_CARD_CREATED",
+              "version":1,
+              "timestamp":"2026-07-12T01:00:00Z",
+              "payload":{"id":"card-1"}
+            }""".trimIndent(),
+        )
+
+        assertTrue(event is RealtimeEvent.SubLoungeUpdated)
+        assertEquals(destination, event.destination)
+        assertEquals("lounge-event-1", event.eventId)
+    }
+
+    @Test
     fun retryScheduleUsesRequiredBackoffAndCapsAtThirtySeconds() {
         assertEquals(1_000L, StompRealtimeClient.retryDelay(1))
         assertEquals(2_000L, StompRealtimeClient.retryDelay(2))
