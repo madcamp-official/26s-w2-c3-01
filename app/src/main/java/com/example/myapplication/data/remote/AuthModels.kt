@@ -11,4 +11,5 @@ data class TokenResponse(
     val accessToken: String,
     val tokenType: String,
     val expiresInSeconds: Long,
+    val isNewUser: Boolean = false,
 )

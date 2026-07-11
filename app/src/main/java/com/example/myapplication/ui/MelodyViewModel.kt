@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 sealed interface LoginUiState {
     data object Idle : LoginUiState
     data object Loading : LoginUiState
-    data class Success(val expiresInSeconds: Long) : LoginUiState
+    data class Success(val expiresInSeconds: Long, val isNewUser: Boolean = false) : LoginUiState
     data class Error(val message: String) : LoginUiState
 }
 
@@ -35,7 +35,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             authRepository.login(email, password)
                 .onSuccess { response ->
                     accessToken = response.accessToken
-                    _loginState.value = LoginUiState.Success(response.expiresInSeconds)
+                    _loginState.value = LoginUiState.Success(response.expiresInSeconds, response.isNewUser)
                 }
                 .onFailure {
                     _loginState.value = LoginUiState.Error(
@@ -52,7 +52,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             authRepository.googleLogin(idToken)
                 .onSuccess { response ->
                     accessToken = response.accessToken
-                    _loginState.value = LoginUiState.Success(response.expiresInSeconds)
+                    _loginState.value = LoginUiState.Success(response.expiresInSeconds, response.isNewUser)
                 }
                 .onFailure {
                     _loginState.value = LoginUiState.Error(

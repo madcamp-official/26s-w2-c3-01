@@ -1,4 +1,7 @@
 .gradle
 build
-.env
+.idea
+*.iml
 .git
+.env
+app.jar

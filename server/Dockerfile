@@ -2,7 +2,7 @@ FROM gradle:8.14.3-jdk21 AS builder
 WORKDIR /workspace
 COPY settings.gradle.kts build.gradle.kts ./
 COPY src ./src
-RUN gradle bootJar --no-daemon
+RUN gradle clean bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre-jammy
 RUN useradd --system --uid 10001 --create-home melody

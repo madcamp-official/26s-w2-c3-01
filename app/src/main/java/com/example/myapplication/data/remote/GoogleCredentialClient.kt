@@ -12,6 +12,7 @@ class GoogleCredentialClient(context: Context) {
     private val credentialManager = CredentialManager.create(context)
 
     suspend fun getIdToken(activityContext: Context): String {
+        check(isConfigured) { "GOOGLE_WEB_CLIENT_ID is not configured" }
         val option = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
         val credential = credentialManager.getCredential(activityContext, request).credential
@@ -20,5 +21,10 @@ class GoogleCredentialClient(context: Context) {
                 credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
         ) { "Google ID credential was not returned" }
         return GoogleIdTokenCredential.createFrom(credential.data).idToken
+    }
+
+    companion object {
+        val isConfigured: Boolean
+            get() = BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
     }
 }

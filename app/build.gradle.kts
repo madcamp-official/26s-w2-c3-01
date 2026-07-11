@@ -16,8 +16,8 @@ fun configuredValue(name: String): String =
         ?: providers.environmentVariable(name).orNull
         ?: localProperties.getProperty(name)
         ?: when (name) {
-            "API_BASE_URL" -> "https://api.batiger00.madcamp-kaist.org"
-            "STOMP_WS_URL" -> "wss://api.batiger00.madcamp-kaist.org/ws"
+            "API_BASE_URL" -> "https://sy-725ad61798e54aca9aca4901becbef0b.ecs.ap-northeast-2.on.aws"
+            "STOMP_WS_URL" -> "wss://sy-725ad61798e54aca9aca4901becbef0b.ecs.ap-northeast-2.on.aws/ws"
             "GOOGLE_WEB_CLIENT_ID" -> "170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com"
             else -> ""
         }
