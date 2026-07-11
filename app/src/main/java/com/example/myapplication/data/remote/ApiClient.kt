@@ -12,10 +12,18 @@ import okhttp3.Route
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CopyOnWriteArraySet
 
 object ApiClient {
     fun configureSession(tokenStore: SecureTokenStore, onSessionExpired: () -> Unit) {
         SessionRuntime.configure(tokenStore, onSessionExpired)
+    }
+
+    fun addAccessTokenListener(listener: (String) -> Unit): () -> Unit =
+        SessionRuntime.addAccessTokenListener(listener)
+
+    fun addSessionExpiredListener(listener: () -> Unit) {
+        SessionRuntime.addSessionExpiredListener(listener)
     }
 
     private fun retrofit(environment: ApiEnvironment): Retrofit = Retrofit.Builder()
@@ -87,6 +95,8 @@ private object SessionRuntime {
     @Volatile private var store: SecureTokenStore? = null
     @Volatile private var expiredCallback: (() -> Unit)? = null
     private val refreshLock = Any()
+    private val accessTokenListeners = CopyOnWriteArraySet<(String) -> Unit>()
+    private val sessionExpiredListeners = CopyOnWriteArraySet<() -> Unit>()
 
     fun configure(tokenStore: SecureTokenStore, onSessionExpired: () -> Unit) {
         store = tokenStore
@@ -94,6 +104,15 @@ private object SessionRuntime {
     }
 
     fun accessToken(): String? = store?.load()?.accessToken
+
+    fun addAccessTokenListener(listener: (String) -> Unit): () -> Unit {
+        accessTokenListeners += listener
+        return { accessTokenListeners -= listener }
+    }
+
+    fun addSessionExpiredListener(listener: () -> Unit) {
+        sessionExpiredListeners += listener
+    }
 
     fun refresh(environment: ApiEnvironment, rejectedAccessToken: String?): String? = synchronized(refreshLock) {
         val tokenStore = store ?: return@synchronized null
@@ -114,6 +133,9 @@ private object SessionRuntime {
             val session = runCatching { Gson().fromJson(it.body?.charStream(), TokenResponse::class.java) }.getOrNull()
                 ?: return@synchronized expire(tokenStore)
             tokenStore.save(session.accessToken, session.refreshToken ?: refreshToken)
+            accessTokenListeners.forEach { listener ->
+                runCatching { listener(session.accessToken) }
+            }
             session.accessToken
         }
     }
@@ -121,6 +143,7 @@ private object SessionRuntime {
     private fun expire(tokenStore: SecureTokenStore): String? {
         tokenStore.clear()
         expiredCallback?.invoke()
+        sessionExpiredListeners.forEach { listener -> runCatching(listener) }
         return null
     }
 }
