@@ -72,6 +72,7 @@ data class UserMapLocation(
 
 data class BuildingLoungeUiState(
     val loading: Boolean = false,
+    val loadFailed: Boolean = false,
     val userLocation: UserMapLocation? = null,
     val lounges: List<BuildingLoungeSummaryDto> = emptyList(),
     val enteredLoungeId: String? = null,
@@ -385,6 +386,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 loading = true,
+                loadFailed = false,
                 userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
                 message = null
             )
@@ -392,6 +394,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 .onSuccess { lounges ->
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
+                        loadFailed = false,
                         lounges = lounges,
                         message = if (lounges.isEmpty()) "주변에 이용 가능한 실제 건물 라운지가 없어요." else null
                     )
@@ -399,6 +402,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 .onFailure {
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
+                        loadFailed = true,
                         lounges = emptyList(),
                         message = "주변 건물 라운지를 불러오지 못했어요."
                     )
