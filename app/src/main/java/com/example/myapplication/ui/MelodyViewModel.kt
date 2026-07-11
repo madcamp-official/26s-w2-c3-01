@@ -503,6 +503,98 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         subLounges = subLounges,
+                        message = "Created ${created.title}."
+                    )
+                    openSubLounge(created.id)
+                }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "Could not create sub lounge.")
+                }
+        }
+    }
+
+    fun openSubLounge(subLoungeId: String) {
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(detailLoading = true, message = null)
+            buildingLoungeRepository.joinSubLounge(token, subLoungeId)
+                .onSuccess {
+                    val previous = _buildingLoungeState.value.selectedSubLoungeId
+                    if (previous != null && previous != subLoungeId) {
+                        realtimeClient.unsubscribeTopic(RealtimeDestinations.subLounge(previous))
+                    }
+                    realtimeClient.subscribeTopic(RealtimeDestinations.subLounge(subLoungeId))
+                    presenceCoordinator.activateSubLounge(subLoungeId)
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        selectedSubLoungeId = subLoungeId,
+                        detailLoading = true,
+                    )
+                    refreshSelectedSubLounge(silent = false)
+                }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        detailLoading = false,
+                        message = "하위 라운지에 입장하지 못했어요.",
+                    )
+                }
+        }
+    }
+
+    fun leaveSubLounge() {
+        val token = accessToken ?: return
+        val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        viewModelScope.launch {
+            presenceCoordinator.deactivateSubLounge(subLoungeId)
+            buildingLoungeRepository.leaveSubLounge(token, subLoungeId)
+            clearSelectedSubLounge()
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "하위 라운지에서 나왔어요.")
+        }
+    }
+
+    fun sendDetectedTrackToLounge(message: String?) {
+        val token = accessToken ?: return
+        val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        val playback = presenceCoordinator.detectedPlayback.value
+        val track = playback.track?.takeIf { playback.isPlaying && playback.verifiedInCurrentProcess }
+        if (track == null) {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "재생 중인 음악을 찾지 못했어요.")
+            return
+        }
+        viewModelScope.launch {
+            buildingLoungeRepository.addCard(
+                token,
+                subLoungeId,
+                CreateLoungeCardRequestDto(
+                    clientCardId = UUID.randomUUID().toString(),
+                    trackTitle = track.title,
+                    artistName = track.artist,
+                    message = message,
+                ),
+            ).onSuccess { refreshSelectedSubLounge(silent = true) }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 보내지 못했어요.")
+                }
+        }
+    }
+
+    fun reactToLoungeCard(cardId: String, reactionType: String = "LIKE") {
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.reactToCard(token, cardId, reactionType)
+                .onSuccess { refreshSelectedSubLounge(silent = true) }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "리액션을 반영하지 못했어요.")
+                }
+        }
+    }
+
+    fun voteInSubLounge(targetKey: String) {
+        val token = accessToken ?: return
+        val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.vote(token, subLoungeId, targetKey)
+                .onSuccess { refreshSelectedSubLounge(silent = true) }
+                .onFailure {
                     )
                 }
                 .onFailure {
