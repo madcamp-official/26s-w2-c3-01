@@ -6,6 +6,7 @@ import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.PUT
 
 data class BuildingLoungeSummaryDto(
     val id: String,
@@ -68,7 +69,67 @@ data class SubLoungeSummaryDto(
     val createdAt: String
 )
 
+data class LoungeListeningStatusDto(
+    val listenerAlias: String,
+    val trackTitle: String?,
+    val artistName: String?,
+    val albumArtUrl: String?,
+    val isPlaying: Boolean,
+    val updatedAt: String
+)
+
+data class LoungeRecommendationCardDto(
+    val id: String,
+    val subLoungeId: String,
+    val clientCardId: String,
+    val senderAlias: String,
+    val trackTitle: String,
+    val artistName: String,
+    val message: String?,
+    val reactionCount: Int,
+    val reactedByMe: Boolean,
+    val createdAt: String
+)
+
+data class LoungePollOptionDto(val key: String, val voteCount: Int)
+data class LoungePollStateDto(val options: List<LoungePollOptionDto>, val myVote: String?)
+
+data class SubLoungeSnapshotDto(
+    val id: String,
+    val buildingLoungeId: String,
+    val title: String,
+    val style: String?,
+    val memberCount: Int,
+    val joined: Boolean,
+    val listeningStatuses: List<LoungeListeningStatusDto>,
+    val cards: List<LoungeRecommendationCardDto>,
+    val poll: LoungePollStateDto,
+    val generatedAt: String
+)
+
+data class UpdateLoungeListeningRequestDto(
+    val trackTitle: String = "",
+    val artistName: String = "",
+    val albumArtUrl: String? = null,
+    val isPlaying: Boolean = true
+)
+
+data class CreateLoungeCardRequestDto(
+    val clientCardId: String,
+    val trackTitle: String,
+    val artistName: String,
+    val message: String? = null
+)
+
+data class LoungeReactionRequestDto(val reactionType: String)
+data class LoungeVoteRequestDto(val targetKey: String)
+
 interface BuildingLoungeApi {
+    @GET("api/v1/building-lounges/sub-lounges/active")
+    suspend fun activeSubLounge(
+        @Header("Authorization") authorization: String
+    ): SubLoungeSnapshotDto?
+
     @GET("api/v1/building-lounges/nearby")
     suspend fun nearby(
         @Header("Authorization") authorization: String,
