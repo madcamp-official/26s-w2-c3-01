@@ -1000,6 +1000,17 @@ class DemoMelodyRepository(
         refreshPopularTracks(accessToken)
         syncReceivedReactions(accessToken)
         loadBlockedUsers()
+        realtimeClient.connect(accessToken)
+        handleRealtimeConnectionState(realtimeClient.connectionState.value)
+        startChatSync(accessToken)
+    }
+
+    override fun refreshSession(accessToken: String) {
+        if (this.accessToken == null) return
+        this.accessToken = accessToken
+        realtimeInboxStore?.activate(accessToken)
+        presenceSyncCoordinator.onSessionAvailable(accessToken)
+        realtimeClient.connect(accessToken)
         startChatSync(accessToken)
     }
 
@@ -1007,7 +1018,16 @@ class DemoMelodyRepository(
         stopSharing()
         chatSyncJob?.cancel()
         chatSyncJob = null
+        synchronized(chatReadLock) {
+            chatReadJobs.values.forEach(Job::cancel)
+            chatReadJobs.clear()
+            chatReadDirty.clear()
+        }
+        activeChatRoomId = null
+        presenceSyncCoordinator.onSessionCleared()
         accessToken = null
+        realtimeClient.disconnect()
+        realtimeInboxStore?.clear()
         preferences.edit().clear().apply()
         _state.update { it.copy(
             isOnboardingComplete = false,
@@ -1033,6 +1053,7 @@ class DemoMelodyRepository(
                     ),
                 )
             }.onSuccess { remote ->
+                if (!isCurrentSession(token)) return@onSuccess
                 _state.update {
                     it.copy(
                         discoveryRadiusMeters = remote.discoveryRadiusMeters,
@@ -1041,7 +1062,9 @@ class DemoMelodyRepository(
                         feedbackMessage = "주변 공개 범위를 저장했어요",
                     )
                 }
-            }.onFailure { error -> showRequestError(error, "공개 범위를 저장하지 못했어요") }
+            }.onFailure { error ->
+                if (isCurrentSession(token)) showRequestError(error, "공개 범위를 저장하지 못했어요")
+            }
         }
     }
 
@@ -1099,6 +1122,7 @@ class DemoMelodyRepository(
 
     private suspend fun syncPresence(fix: LocationFix? = null): Boolean {
         val token = accessToken ?: return false
+        val nearbyVersionAtRequest = nearbyRealtimeVersion.get()
         val location = fix ?: currentLocation()?.let {
             LocationFix(it.latitude, it.longitude, it.accuracy.takeIf(Float::isFinite))
         } ?: run {
@@ -1112,16 +1136,6 @@ class DemoMelodyRepository(
             return false
         }
         return runCatching {
-            val playback = _state.value
-            nearbyApi.updateMusic(
-                "Bearer $token",
-                MusicUpdateRequest(
-                    playback.currentTrack.title,
-                    playback.currentTrack.artist,
-                    playback.currentTrack.platform,
-                    playback.currentTrackPlaying,
-                ),
-            )
             val snapshot = nearbyApi.updateLocation(
                 "Bearer $token",
                 LocationUpdateRequest(
@@ -1132,18 +1146,37 @@ class DemoMelodyRepository(
                     location.accuracyMeters,
                 )
             )
+            if (!isCurrentSession(token)) return@runCatching false
             _state.update { current ->
+                val remoteListeners = snapshot.items.map { it.toDomain() }
+                val listeners = if (nearbyRealtimeVersion.get() == nearbyVersionAtRequest) {
+                    remoteListeners
+                } else {
+                    val currentByHandle = current.nearbyListeners.associateBy { it.nearbyHandle }
+                    remoteListeners.map { remote ->
+                        currentByHandle[remote.nearbyHandle]?.let { latest ->
+                            remote.copy(
+                                isPlaying = latest.isPlaying,
+                                currentTrack = latest.currentTrack,
+                            )
+                        } ?: remote
+                    }
+                }
                 current.copy(
-                    nearbyListeners = snapshot.items.map { it.toDomain() },
-                    connectionState = ConnectionState.LIVE,
+                    nearbyListeners = listeners,
+                    connectionState = if (
+                        realtimeClient.connectionState.value is RealtimeConnectionState.Connected
+                    ) ConnectionState.LIVE else ConnectionState.RECONNECTING,
                     discoveryRadiusMeters = snapshot.radiusMeters ?: current.discoveryRadiusMeters,
                     nearbyLoadState = if (snapshot.items.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
                     nearbyErrorMessage = null,
                     dataSourceLabel = "SERVER LIVE",
                 )
             }
+            refreshPopularTracks(token)
             true
         }.getOrElse { error ->
+            if (!isCurrentSession(token)) return false
             _state.update { current ->
                 current.copy(
                     connectionState = ConnectionState.RECONNECTING,
@@ -1155,29 +1188,20 @@ class DemoMelodyRepository(
         }
     }
 
-    private fun syncMusicIfSharing() {
-        if (_state.value.sharingState != SharingState.ACTIVE) return
-        val token = accessToken ?: return
-        val state = _state.value
+    private fun refreshPopularTracks(token: String? = accessToken) {
+        if (token.isNullOrBlank()) return
+        val versionAtRequest = popularRealtimeVersion.get()
         scope.launch {
-            runCatching {
-                nearbyApi.updateMusic(
-                    "Bearer $token",
-                    MusicUpdateRequest(
-                        state.currentTrack.title,
-                        state.currentTrack.artist,
-                        state.currentTrack.platform,
-                        state.currentTrackPlaying,
-                    ),
-                )
-            }.onFailure { error ->
-                _state.update {
-                    it.copy(
-                        connectionState = ConnectionState.RECONNECTING,
-                        nearbyErrorMessage = requestErrorMessage(error, "음악 상태를 공유하지 못했어요."),
-                    )
+            runCatching { nearbyApi.popularTracks("Bearer $token") }
+                .onSuccess { tracks ->
+                    if (!isCurrentSession(token)) return@onSuccess
+                    if (popularRealtimeVersion.get() != versionAtRequest) return@onSuccess
+                    _state.update { current ->
+                        current.copy(popularTracks = tracks.map { it.toDomain() })
+                    }
                 }
-            }
+            // Popular-track aggregation is supplementary. A failed refresh must not downgrade an
+            // otherwise healthy nearby-presence connection.
         }
     }
 
