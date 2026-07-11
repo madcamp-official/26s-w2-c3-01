@@ -550,3 +550,29 @@ internal fun hasActiveMembership(jdbc: JdbcTemplate, userId: UUID, subLoungeId: 
             on session.building_lounge_id=room.building_lounge_id and session.user_id=member.user_id
           where member.user_id=? and member.sub_lounge_id=? and member.active=true
             and session.active=true and session.expires_at>now()
+        )
+        """.trimIndent(),
+        Boolean::class.java,
+        userId,
+        subLoungeId,
+    ) == true
+
+internal fun activeMemberCount(jdbc: JdbcTemplate, subLoungeId: UUID): Int =
+    jdbc.queryForObject(
+        """
+        select count(*) from sub_lounge_members member
+        join sub_lounges room on room.id=member.sub_lounge_id
+        join building_lounge_sessions session
+          on session.building_lounge_id=room.building_lounge_id and session.user_id=member.user_id
+        where member.sub_lounge_id=? and member.active=true
+          and session.active=true and session.expires_at>now()
+        """.trimIndent(),
+        Int::class.java,
+        subLoungeId,
+    ) ?: 0
+
+@Component
+class SubLoungeExpiryCleaner(private val service: SubLoungeRealtimeService) {
+    @Scheduled(fixedDelay = 30_000)
+    fun clean() = service.expireStaleMemberships()
+}
