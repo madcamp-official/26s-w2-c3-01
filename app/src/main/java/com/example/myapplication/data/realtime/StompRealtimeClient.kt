@@ -274,3 +274,95 @@ class StompRealtimeClient(
                     delay(RECONNECT_STABILITY_RESET_MILLIS)
                     synchronized(lock) {
                         if (connection.serial == activeConnectionSerial &&
+                            _connectionState.value is RealtimeConnectionState.Connected
+                        ) {
+                            reconnectAttempt = 0
+                        }
+                    }
+                }
+            }
+            RealtimeDestinations.userQueues.forEachIndexed { index, destination ->
+                webSocket.send(
+                    stompFrame(
+                        command = "SUBSCRIBE",
+                        headers = linkedMapOf(
+                            "id" to "user-$index",
+                            "destination" to destination,
+                            "ack" to "auto",
+                        ),
+                    )
+                )
+            }
+            startHeartbeat(webSocket, connection, heartbeat, lastServerActivity)
+            if (connection.isReconnect) {
+                _syncRequests.tryEmit(
+                    RealtimeSyncRequest.FullSync(connectedAt, connection.attempt)
+                )
+            }
+        }
+
+        private fun terminal(cause: String) {
+            if (terminalHandled.compareAndSet(false, true)) handleTerminal(connection, cause)
+        }
+    }
+
+    private fun startHeartbeat(
+        socket: WebSocket,
+        connection: Connection,
+        heartbeat: StompHeartbeat,
+        lastServerActivity: AtomicLong,
+    ) {
+        synchronized(lock) {
+            if (connection.serial != activeConnectionSerial || desiredAccessToken == null) return
+            heartbeatJob?.cancel()
+            heartbeatWatchdogJob?.cancel()
+            if (heartbeat.canSendEveryMillis > 0) {
+                heartbeatJob = scope.launch {
+                    while (isActive && isActive(connection)) {
+                        delay(heartbeat.canSendEveryMillis)
+                        if (isActive(connection)) socket.send("\n")
+                    }
+                }
+            }
+            if (heartbeat.wantsReceiveEveryMillis > 0) {
+                heartbeatWatchdogJob = scope.launch {
+                    val timeout = (heartbeat.wantsReceiveEveryMillis * HEARTBEAT_GRACE_MULTIPLIER)
+                        .coerceAtLeast(MIN_HEARTBEAT_TIMEOUT_MILLIS)
+                    while (isActive && isActive(connection)) {
+                        delay(heartbeat.wantsReceiveEveryMillis)
+                        if (SystemClock.elapsedRealtime() - lastServerActivity.get() > timeout) {
+                            socket.cancel()
+                            handleTerminal(connection, "Server heartbeat timeout")
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun handleTerminal(connection: Connection, cause: String) {
+        val retry = synchronized(lock) {
+            if (connection.serial != activeConnectionSerial || desiredAccessToken == null) return
+            webSocket = null
+            // Invalidate every callback belonging to the failed socket before scheduling another
+            // one. This also prevents an onFailure following a watchdog cancel from double-retrying.
+            activeConnectionSerial += 1
+            connectTimeoutJob?.cancel()
+            heartbeatJob?.cancel()
+            heartbeatWatchdogJob?.cancel()
+            reconnectStabilityJob?.cancel()
+            reconnectJob?.cancel()
+            reconnectAttempt += 1
+            val attempt = reconnectAttempt
+            val retryIn = retryDelay(attempt)
+            _connectionState.value = RealtimeConnectionState.Reconnecting(attempt, retryIn, cause)
+            Retry(activeConnectionSerial, attempt, retryIn)
+        }
+        reconnectJob = scope.launch {
+            delay(retry.delayMillis)
+            val shouldReconnect = synchronized(lock) {
+                desiredAccessToken != null && retry.connectionSerial == activeConnectionSerial
+            }
+            if (shouldReconnect) openSocket(isReconnect = true, attempt = retry.attempt)
+        }
