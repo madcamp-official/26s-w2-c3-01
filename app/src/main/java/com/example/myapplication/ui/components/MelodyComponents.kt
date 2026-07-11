@@ -180,6 +180,7 @@ fun SharingStatusCard(
         SharingState.STARTING -> "주변 공유를 준비하는 중"
         SharingState.ACTIVE -> "주변 공유 중"
         SharingState.PERMISSION_REQUIRED -> "권한 확인이 필요해요"
+        SharingState.FAILED -> "공유 시작에 실패했어요"
     }
     val connectionLabel = when (connectionState) {
         ConnectionState.OFFLINE -> "오프라인"

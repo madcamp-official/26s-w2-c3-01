@@ -58,6 +58,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.NearbyListener
+import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.PopularTrack
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.SharingState
@@ -87,6 +89,7 @@ import com.example.myapplication.core.model.Track
 import com.example.myapplication.ui.components.MelodyBubbleColors
 import com.example.myapplication.ui.components.MelodyCard
 import com.example.myapplication.ui.components.SectionTitle
+import com.example.myapplication.ui.components.SharingStatusCard
 
 private val ScreenHorizontalPadding = 20.dp
 
@@ -143,6 +146,15 @@ fun HomeScreen(
             )
         }
         item {
+            SharingStatusCard(
+                sharingState = state.sharingState,
+                connectionState = state.connectionState,
+                scopeLabel = "반경 ${state.discoveryRadiusMeters}m",
+                onStart = onStartSharing,
+                onStop = onStopSharing,
+            )
+        }
+        item {
             CompactRadar(
                 listeners = visibleListeners,
                 nearestMusic = nearestMusic,
@@ -185,6 +197,10 @@ fun NearbyScreen(
     similarityThreshold: Int = 60,
     musicFilter: NearbyMusicFilter = NearbyMusicFilter.ALL,
     onSimilarityThresholdChange: (Int) -> Unit = {},
+    radiusMeters: Int = state.discoveryRadiusMeters,
+    onRadiusChange: (Int) -> Unit = {},
+    onRadiusChangeFinished: () -> Unit = {},
+    onRetry: () -> Unit = {},
     onMusicFilterChange: (NearbyMusicFilter) -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
     onOpenListenerDetail: (NearbyListener) -> Unit = {},
@@ -219,9 +235,32 @@ fun NearbyScreen(
                 title = "근처",
                 subtitle = when {
                     state.connectionState == ConnectionState.LIVE -> "공유 중 · 실시간 연결"
+                    state.connectionState == ConnectionState.RECONNECTING -> "서버에 다시 연결하는 중이에요"
+                    state.sharingState == SharingState.FAILED -> "공유를 시작하지 못했어요"
                     else -> "위치 공유가 꺼져 있어 주변 버블을 볼 수 없어요"
                 }
             )
+        }
+        item {
+            RadiusSelector(
+                radiusMeters = radiusMeters,
+                enabled = state.sharingState != SharingState.STARTING,
+                onRadiusChange = onRadiusChange,
+                onRadiusChangeFinished = onRadiusChangeFinished,
+            )
+        }
+        if (state.nearbyLoadState == NearbyLoadState.ERROR ||
+            state.nearbyLoadState == NearbyLoadState.LOADING ||
+            state.nearbyLoadState == NearbyLoadState.EMPTY
+        ) {
+            item {
+                NearbyResultState(
+                    state = state.nearbyLoadState,
+                    message = state.nearbyErrorMessage,
+                    radiusMeters = state.discoveryRadiusMeters,
+                    onRetry = onRetry,
+                )
+            }
         }
         item {
             NearbyMusicFilterRow(
@@ -251,7 +290,8 @@ fun NearbyScreen(
                 title = "선택한 리스너",
                 subtitle = when {
                     !isSharingActive -> "위치 공유를 켜야 주변 리스너를 확인할 수 있어요"
-                    filteredListeners.isEmpty() -> "조건에 맞는 리스너가 없어요"
+                    state.nearbyLoadState == NearbyLoadState.ERROR -> "서버 연결을 확인한 뒤 다시 시도해 주세요"
+                    filteredListeners.isEmpty() -> "반경 ${state.discoveryRadiusMeters}m 안에 조건에 맞는 리스너가 없어요"
                     selected == null -> "레이더의 이름을 눌러 상세를 확인하세요"
                     else -> null
                 }
@@ -263,7 +303,8 @@ fun NearbyScreen(
                     threshold = similarityThreshold,
                     message = when {
                         !isSharingActive -> "위치 공유안함 상태예요"
-                        filteredListeners.isEmpty() -> "조건에 맞는 버블이 없어요"
+                        state.nearbyLoadState == NearbyLoadState.ERROR -> "주변 목록을 불러오지 못했어요"
+                        filteredListeners.isEmpty() -> "반경 ${state.discoveryRadiusMeters}m 안에 버블이 없어요"
                         else -> "확인할 리스너를 선택해 주세요"
                     }
                 )
@@ -356,7 +397,7 @@ fun UserDetailScreen(
             item {
                 Button(
                     onClick = onShowReactionSheet,
-                    enabled = listener.relationship != RelationshipStatus.BLOCKED,
+                enabled = listener.relationship != RelationshipStatus.BLOCKED && listener.canReact,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -509,7 +550,7 @@ private fun MyCurrentTrackCard(
 ) {
     MelodyCard(
         onClick = onClick,
-        onClickLabel = "${track.title} 현재 음악 선택",
+        onClickLabel = "${track.title} 음악 상세 보기",
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1332,6 +1373,7 @@ private fun SelectedListenerCard(
         ) {
             OutlinedButton(
                 onClick = onReact,
+                enabled = listener.canReact,
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp),
@@ -1357,6 +1399,87 @@ private fun SelectedListenerCard(
                 )
             ) {
                 Text(listener.relationship.followLabel(), fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RadiusSelector(
+    radiusMeters: Int,
+    enabled: Boolean,
+    onRadiusChange: (Int) -> Unit,
+    onRadiusChangeFinished: () -> Unit,
+) {
+    MelodyCard {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("검색 반경", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        "정확한 좌표는 숨기고 이 반경 안의 공개 허용 사용자만 찾아요",
+                        color = MelodyBubbleColors.TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    "$radiusMeters m",
+                    color = MelodyBubbleColors.Primary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Slider(
+                value = radiusMeters.toFloat(),
+                onValueChange = { value -> onRadiusChange((value / 50).toInt() * 50) },
+                onValueChangeFinished = onRadiusChangeFinished,
+                valueRange = 50f..2000f,
+                steps = 38,
+                enabled = enabled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NearbyResultState(
+    state: NearbyLoadState,
+    message: String?,
+    radiusMeters: Int,
+    onRetry: () -> Unit,
+) {
+    MelodyCard {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(
+                imageVector = if (state == NearbyLoadState.ERROR) {
+                    Icons.Outlined.ReportGmailerrorred
+                } else Icons.Outlined.Radar,
+                contentDescription = null,
+                modifier = Modifier.size(36.dp),
+                tint = if (state == NearbyLoadState.ERROR) MelodyBubbleColors.Danger else MelodyBubbleColors.TextMuted,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = when (state) {
+                    NearbyLoadState.LOADING -> "주변을 안전하게 찾고 있어요"
+                    NearbyLoadState.EMPTY -> "반경 ${radiusMeters}m 안에 공개된 버블이 없어요"
+                    NearbyLoadState.ERROR -> "주변 목록을 불러오지 못했어요"
+                    else -> "주변 상태를 확인하고 있어요"
+                },
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            if (!message.isNullOrBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(message, color = MelodyBubbleColors.TextMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            }
+            if (state == NearbyLoadState.ERROR) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(onClick = onRetry) { Text("다시 연결") }
             }
         }
     }
