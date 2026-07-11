@@ -17,12 +17,23 @@ Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Comp
 ## 제공 범위
 
 - `POST /api/v1/auth/login` JWT 발급
-- 인증된 `GET /api/v1/nearby/snapshot`, `GET /api/v1/nearby/{handle}`
+- 인증된 `GET /api/v1/nearby/snapshot`, `GET /api/v1/nearby/popular-tracks`, `GET /api/v1/nearby/{handle}`
+- `POST /api/v1/nearby/{handle}/reactions`, 재연결 복구용 `GET /api/v1/nearby/reactions`, 음악 상태 변경 실시간 push
+- 채팅 메시지 저장·읽음 처리와 `/user/queue/chat` 실시간 이벤트
 - `GET /api/v1/rooms`, `GET /api/v1/rooms/{roomId}`
-- STOMP `/ws`: `location/update`, `room/vote`; 개인 `/user/queue/nearby|ack`, 라운지 `/topic/room/{roomId}/votes`
+- STOMP `/ws`: `Authorization: Bearer {accessToken}` CONNECT 인증, 10초 heartbeat
+- 개인 queue: `/user/queue/chat|reactions|nearby|notifications|errors|ack`
 - Flyway 기반 PostGIS 스키마: 사용자, 개인정보 설정, 최신 위치 TTL, 음악 상태, 채팅, 라운지·투표
 
 `current_locations`에는 세션당 최신 위치만 유지하며 90초 TTL 뒤 주변 조회에서 제외됩니다. `displayPosition`은 `nearbyHandle`에서 결정되는 추상 좌표로, 실제 위치와 방향을 표현하지 않습니다.
+
+실시간 이벤트는 모두 아래 envelope를 사용하며, 채팅·리액션·음악 쓰기 이벤트는 DB commit 이후에만 발행합니다.
+
+```json
+{"eventId":"uuid","type":"CHAT_MESSAGE_CREATED","version":1,"timestamp":"2026-07-11T12:00:00Z","payload":{}}
+```
+
+로컬 기본값은 단일 인스턴스용 simple broker입니다. `compose.production.yaml`은 RabbitMQ STOMP plugin과 broker relay를 활성화하며, `/user` destination registry도 broker를 통해 인스턴스 간 공유합니다. 외부 relay가 없는 ECS 설정은 누락 방지를 위해 최대 task 수를 1로 제한합니다.
 
 ## VM 배포
 
