@@ -26,8 +26,6 @@ object MelodyApiContract {
         const val NEARBY_REACTION = "/api/v1/nearby/{nearbyHandle}/reactions"
         const val RECEIVED_NEARBY_REACTIONS = "/api/v1/nearby/reactions"
         const val POPULAR_TRACKS = "/api/v1/nearby/popular-tracks"
-        const val LOUNGES = "/api/v1/rooms"
-        const val LOUNGE_DETAIL = "/api/v1/rooms/{roomId}"
         const val BUILDING_LOUNGES = "/api/v1/building-lounges/nearby"
         const val SUB_LOUNGE = "/api/v1/building-lounges/sub-lounges/{subLoungeId}"
         const val CHAT_ROOMS = "/api/v1/chat/rooms"
