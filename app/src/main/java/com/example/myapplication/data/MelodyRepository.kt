@@ -102,8 +102,6 @@ interface MelodyRepository {
     fun report(handle: String, reason: ReportReason = ReportReason.OTHER, description: String? = null)
     fun loadBlockedUsers()
     fun unblock(blockId: String)
-    fun joinLounge(roomId: String)
-    fun vote(roomId: String, optionId: String)
     fun sendMusicCard(roomId: String)
     fun reactToMusicCard(roomId: String, cardId: String)
     fun sendChat(roomId: String, content: String)
@@ -512,43 +510,6 @@ class DemoMelodyRepository(
                 }.onFailure { error ->
                     if (isCurrentSession(token)) showRequestError(error, "차단을 해제하지 못했어요")
                 }
-        }
-    }
-
-    override fun joinLounge(roomId: String) {
-        _state.update { current ->
-            val lounges = current.lounges.map { lounge ->
-                if (lounge.id != roomId) return@map lounge
-                val joined = !lounge.isJoined
-                lounge.copy(
-                    isJoined = joined,
-                    memberCount = (lounge.memberCount + if (joined) 1 else -1).coerceAtLeast(0)
-                )
-            }
-            val selected = lounges.firstOrNull { it.id == roomId }
-            current.copy(
-                lounges = lounges,
-                feedbackMessage = if (selected?.isJoined == true) {
-                    "${selected.name}에 입장했어요"
-                } else {
-                    "라운지에서 나왔어요"
-                }
-            )
-        }
-    }
-
-    override fun vote(roomId: String, optionId: String) {
-        _state.update { current ->
-            val lounges = current.lounges.map { lounge ->
-                if (lounge.id != roomId || lounge.poll == null || !lounge.poll.isOpen) {
-                    return@map lounge
-                }
-                lounge.copy(poll = MelodyReducers.applyVote(lounge.poll, optionId))
-            }
-            current.copy(
-                lounges = lounges,
-                feedbackMessage = "투표가 실시간으로 반영됐어요"
-            )
         }
     }
 

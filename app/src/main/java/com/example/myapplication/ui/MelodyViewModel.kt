@@ -294,8 +294,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         repository.report(handle, reason, description)
     fun loadBlockedUsers() = repository.loadBlockedUsers()
     fun unblock(blockId: String) = repository.unblock(blockId)
-    fun joinLounge(roomId: String) = repository.joinLounge(roomId)
-    fun vote(roomId: String, optionId: String) = repository.vote(roomId, optionId)
     fun sendMusicCard(roomId: String) = repository.sendMusicCard(roomId)
     fun reactToMusicCard(roomId: String, cardId: String) =
         repository.reactToMusicCard(roomId, cardId)
