@@ -175,6 +175,52 @@ interface BuildingLoungeApi {
         @Path("loungeId") loungeId: String,
         @Body request: CreateSubLoungeRequestDto
     ): SubLoungeSummaryDto
+
+    @GET("api/v1/building-lounges/sub-lounges/{subLoungeId}")
+    suspend fun subLoungeSnapshot(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String
+    ): SubLoungeSnapshotDto
+
+    @POST("api/v1/building-lounges/sub-lounges/{subLoungeId}/join")
+    suspend fun joinSubLounge(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String
+    ): SubLoungeSummaryDto
+
+    @POST("api/v1/building-lounges/sub-lounges/{subLoungeId}/leave")
+    suspend fun leaveSubLounge(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String
+    )
+
+    @PUT("api/v1/building-lounges/sub-lounges/{subLoungeId}/listening")
+    suspend fun updateListening(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String,
+        @Body request: UpdateLoungeListeningRequestDto
+    )
+
+    @POST("api/v1/building-lounges/sub-lounges/{subLoungeId}/cards")
+    suspend fun addCard(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String,
+        @Body request: CreateLoungeCardRequestDto
+    ): LoungeRecommendationCardDto
+
+    @POST("api/v1/building-lounges/cards/{cardId}/reactions")
+    suspend fun reactToCard(
+        @Header("Authorization") authorization: String,
+        @Path("cardId") cardId: String,
+        @Body request: LoungeReactionRequestDto
+    ): LoungeRecommendationCardDto
+
+    @PUT("api/v1/building-lounges/sub-lounges/{subLoungeId}/vote")
+    suspend fun vote(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String,
+        @Body request: LoungeVoteRequestDto
+    ): LoungePollStateDto
 }
 
 class BuildingLoungeRepository(
@@ -182,6 +228,9 @@ class BuildingLoungeRepository(
 ) {
     suspend fun nearby(token: String, latitude: Double, longitude: Double): Result<List<BuildingLoungeSummaryDto>> =
         runCatching { api.nearby(token.bearer(), latitude, longitude) }
+
+    suspend fun activeSubLounge(token: String): Result<SubLoungeSnapshotDto?> =
+        runCatching { api.activeSubLounge(token.bearer()) }
 
     suspend fun enter(
         token: String,
@@ -216,6 +265,27 @@ class BuildingLoungeRepository(
 
     suspend fun createSubLounge(token: String, loungeId: String, title: String, style: String?): Result<SubLoungeSummaryDto> =
         runCatching { api.createSubLounge(token.bearer(), loungeId, CreateSubLoungeRequestDto(title, style)) }
+
+    suspend fun snapshot(token: String, subLoungeId: String): Result<SubLoungeSnapshotDto> =
+        runCatching { api.subLoungeSnapshot(token.bearer(), subLoungeId) }
+
+    suspend fun joinSubLounge(token: String, subLoungeId: String): Result<SubLoungeSummaryDto> =
+        runCatching { api.joinSubLounge(token.bearer(), subLoungeId) }
+
+    suspend fun leaveSubLounge(token: String, subLoungeId: String): Result<Unit> =
+        runCatching { api.leaveSubLounge(token.bearer(), subLoungeId) }
+
+    suspend fun updateListening(token: String, subLoungeId: String, request: UpdateLoungeListeningRequestDto): Result<Unit> =
+        runCatching { api.updateListening(token.bearer(), subLoungeId, request) }
+
+    suspend fun addCard(token: String, subLoungeId: String, request: CreateLoungeCardRequestDto): Result<LoungeRecommendationCardDto> =
+        runCatching { api.addCard(token.bearer(), subLoungeId, request) }
+
+    suspend fun reactToCard(token: String, cardId: String, reactionType: String): Result<LoungeRecommendationCardDto> =
+        runCatching { api.reactToCard(token.bearer(), cardId, LoungeReactionRequestDto(reactionType)) }
+
+    suspend fun vote(token: String, subLoungeId: String, targetKey: String): Result<LoungePollStateDto> =
+        runCatching { api.vote(token.bearer(), subLoungeId, LoungeVoteRequestDto(targetKey)) }
 
     private fun String.bearer(): String = "Bearer $this"
 }
