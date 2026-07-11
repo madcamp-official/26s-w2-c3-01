@@ -1,0 +1,68 @@
+{
+  "serviceArn": "arn:aws:ecs:ap-northeast-2:507219091593:service/default/sync-server",
+  "executionRoleArn": "arn:aws:iam::507219091593:role/service-role/ecsTaskExecutionRole",
+  "healthCheckPath": "/actuator/health",
+  "primaryContainer": {
+    "image": "__IMAGE__",
+    "containerPort": 8080,
+    "awsLogsConfiguration": {
+      "logGroup": "/aws/ecs/default/sync-server-7ccf",
+      "logStreamPrefix": "ecs"
+    },
+    "environment": [
+      {
+        "name": "DATABASE_URL",
+        "value": "jdbc:postgresql://sync-db.cbgaiiscsq53.ap-northeast-2.rds.amazonaws.com:5432/postgres?sslmode=require"
+      },
+      {
+        "name": "POSTGRES_USER",
+        "value": "melody"
+      },
+      {
+        "name": "GOOGLE_WEB_CLIENT_ID",
+        "value": "170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com"
+      },
+      {
+        "name": "DEMO_SEED_ENABLED",
+        "value": "false"
+      },
+      {
+        "name": "OPS_USERNAME",
+        "value": "ops"
+      }
+    ],
+    "secrets": [
+      {
+        "name": "POSTGRES_PASSWORD",
+        "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:POSTGRES_PASSWORD::"
+      },
+      {
+        "name": "JWT_SECRET",
+        "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:JWT_SECRET::"
+      },
+      {
+        "name": "OPS_PASSWORD",
+        "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:OPS_PASSWORD::"
+      }
+    ]
+  },
+  "networkConfiguration": {
+    "securityGroups": [
+      "sg-01c471419997cda98"
+    ],
+    "subnets": [
+      "subnet-037aebf69d4a86a7e",
+      "subnet-020f03c11bb72ec2a",
+      "subnet-06944612a847f49c6",
+      "subnet-043616b7c54f5852d"
+    ]
+  },
+  "cpu": "1024",
+  "memory": "2048",
+  "scalingTarget": {
+    "minTaskCount": 1,
+    "maxTaskCount": 20,
+    "autoScalingMetric": "AVERAGE_CPU",
+    "autoScalingTargetValue": 60
+  }
+}
