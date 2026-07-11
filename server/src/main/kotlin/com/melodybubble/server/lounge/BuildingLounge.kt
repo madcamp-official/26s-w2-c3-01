@@ -2,7 +2,7 @@ package com.melodybubble.server.lounge
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.melodybubble.server.nearby.Envelope
+import com.melodybubble.server.realtime.RealtimeEnvelope
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -692,7 +692,10 @@ class BuildingLoungeMessageController(
             subLoungeId,
             ListeningStatusRequest(update.trackTitle, update.artistName, update.albumArtUrl, update.isPlaying),
         )
-        messaging.convertAndSend("/topic/sub-lounges/$subLoungeId", Envelope("LISTENING_STATUS_UPDATED", update))
+        messaging.convertAndSend(
+            "/topic/sub-lounges/$subLoungeId",
+            RealtimeEnvelope(type = "LISTENING_STATUS_UPDATED", payload = update),
+        )
     }
 }
 
