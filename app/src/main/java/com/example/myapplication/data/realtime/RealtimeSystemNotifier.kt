@@ -90,3 +90,18 @@ class RealtimeSystemNotifier(context: Context) {
                 .build(),
         )
     }
+
+    private fun reactionLabel(type: String?): String = when (type) {
+        "LIKE" -> "이 곡 좋아요"
+        "SAME_TASTE" -> "취향이 닮았어요"
+        "GREAT_PICK" -> "선곡 멋져요"
+        "LISTEN_TOGETHER" -> "같이 듣고 싶어요"
+        else -> "새 리액션"
+    }
+
+    private data class NotificationContent(val id: String, val title: String, val body: String)
+
+    companion object {
+        private const val CHANNEL_ID = "realtime_updates"
+    }
+}
