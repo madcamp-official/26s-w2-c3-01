@@ -108,4 +108,21 @@ class WebSocketConfig(
             }
         })
     }
+
+    override fun configureClientOutboundChannel(registration: ChannelRegistration) {
+        registration.interceptors(object : ChannelInterceptor {
+            override fun preSend(message: Message<*>, channel: MessageChannel): Message<*>? {
+                val accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor::class.java)
+                    ?: return message
+                val session = accessor.sessionId?.let(authenticatedSessions::get) ?: return message
+                return message.takeIf { realtimeSessions.isAllowed(session) }
+            }
+        })
+    }
+
+    private fun isInternalBrokerTopic(destination: String): Boolean =
+        destination == "/topic/unresolved-user" ||
+            destination.startsWith("/topic/unresolved-user/") ||
+            destination == "/topic/simp-user-registry" ||
+            destination.startsWith("/topic/simp-user-registry/")
 }
