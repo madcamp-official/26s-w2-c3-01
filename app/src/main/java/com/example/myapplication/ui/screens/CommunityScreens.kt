@@ -475,6 +475,8 @@ fun MyScreen(
     onOfflineExchangeChange: (Boolean) -> Unit,
     onMusicVisibilityChange: (String) -> Unit,
     onProfileUpdate: (String, Long, String, String?, List<String>, List<String>) -> Unit,
+    onPlayProfileMusic: () -> Unit,
+    onDeleteProfileMusic: () -> Unit,
     onLogout: () -> Unit,
     onDeleteAccount: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
@@ -840,6 +842,7 @@ fun MelodyAliasScreen(
     onGenerate: (Map<String, Int>, String, List<String>, Int, Int) -> Unit,
     onPlayFull: () -> Unit,
     onPlaySelection: (Float) -> Unit,
+    onSaveProfile: () -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier
 ) {

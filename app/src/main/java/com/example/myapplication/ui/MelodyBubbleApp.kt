@@ -308,6 +308,7 @@ fun MelodyBubbleApp(
                     onGenerate = viewModel::generateLyriaSong,
                     onPlayFull = viewModel::playLyriaSong,
                     onPlaySelection = viewModel::playLyriaSelection,
+                    onSaveProfile = viewModel::saveLyriaAsProfileMusic,
                     onReset = viewModel::resetLyriaSong,
                     modifier = Modifier.safeDrawingPadding()
                 )
@@ -432,6 +433,8 @@ private fun MainShell(
                 onOfflineExchangeChange = viewModel::setOfflineExchangeEnabled,
                 onMusicVisibilityChange = viewModel::setMusicVisibility,
                 onProfileUpdate = viewModel::updateProfile,
+                onPlayProfileMusic = viewModel::playProfileMusic,
+                onDeleteProfileMusic = viewModel::deleteProfileMusic,
                 onLogout = viewModel::logout,
                 onDeleteAccount = viewModel::deleteAccount,
                 onOpenMelodyAlias = onOpenMelodyAlias,
