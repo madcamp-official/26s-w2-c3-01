@@ -1,6 +1,7 @@
 package com.melodybubble.server.social
 
 import com.melodybubble.server.chat.ChatService
+import com.melodybubble.server.profile.ProfileMediaStorage
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -38,6 +39,16 @@ data class BlockedUser(
     val blockedAt: Instant,
 )
 
+data class SocialConnection(
+    val relationshipId: UUID?,
+    val displayAlias: String,
+    val profileColor: String,
+    val avatarUrl: String?,
+    val bio: String,
+    val mutual: Boolean,
+    val followedAt: Instant,
+)
+
 data class ReportRequest(val requestId: String, val reason: String, val description: String? = null)
 data class ReportResponse(val reportId: UUID, val status: String = "SUBMITTED", val submittedAt: Instant = Instant.now())
 
@@ -48,6 +59,7 @@ class SocialService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val chat: ChatService,
+    private val media: ProfileMediaStorage,
 ) {
     @Transactional
     fun follow(userId: UUID, handle: String): FollowResponse {
@@ -111,6 +123,47 @@ class SocialService(
         },
         userId,
     )
+
+    fun following(userId: UUID): List<SocialConnection> = jdbc.query(
+        """
+        select mine.id,u.display_name,u.profile_color,u.avatar_data_url,u.avatar_object_key,u.bio,
+          exists(select 1 from user_follows back where back.follower_id=u.id and back.followed_id=?),
+          mine.created_at
+        from user_follows mine join users u on u.id=mine.followed_id
+        where mine.follower_id=?
+          and not exists(select 1 from user_blocks b where
+            (b.blocker_id=? and b.blocked_id=u.id) or (b.blocker_id=u.id and b.blocked_id=?))
+        order by mine.created_at desc
+        """.trimIndent(),
+        ::connection,
+        userId, userId, userId, userId,
+    )
+
+    fun followers(userId: UUID): List<SocialConnection> = jdbc.query(
+        """
+        select mine.id,u.display_name,u.profile_color,u.avatar_data_url,u.avatar_object_key,u.bio,
+          (mine.id is not null),incoming.created_at
+        from user_follows incoming join users u on u.id=incoming.follower_id
+        left join user_follows mine on mine.follower_id=? and mine.followed_id=u.id
+        where incoming.followed_id=?
+          and not exists(select 1 from user_blocks b where
+            (b.blocker_id=? and b.blocked_id=u.id) or (b.blocker_id=u.id and b.blocked_id=?))
+        order by incoming.created_at desc
+        """.trimIndent(),
+        ::connection,
+        userId, userId, userId, userId,
+    )
+
+    @Transactional
+    fun unfollowRelationship(userId: UUID, relationshipId: UUID) {
+        rateLimiter.enforce(userId, "FOLLOW", 20, Duration.ofMinutes(1))
+        val deleted = jdbc.update(
+            "delete from user_follows where id=? and follower_id=?",
+            relationshipId,
+            userId,
+        )
+        if (deleted == 0) throw ResponseStatusException(HttpStatus.NOT_FOUND, "팔로우 관계를 찾을 수 없습니다.")
+    }
 
     @Transactional
     fun unblock(userId: UUID, blockId: UUID) {
@@ -228,6 +281,16 @@ class SocialService(
     private fun blockedUser(userId: UUID, blockId: UUID): BlockedUser = blocks(userId)
         .firstOrNull { it.blockId == blockId }
         ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없습니다.")
+
+    private fun connection(rs: java.sql.ResultSet, @Suppress("UNUSED_PARAMETER") row: Int) = SocialConnection(
+        relationshipId = rs.getString(1)?.let(UUID::fromString),
+        displayAlias = rs.getString(2),
+        profileColor = rs.getString(3),
+        avatarUrl = media.signedUrl(rs.getString(5)) ?: rs.getString(4),
+        bio = rs.getString(6).orEmpty(),
+        mutual = rs.getBoolean(7),
+        followedAt = rs.getTimestamp(8).toInstant(),
+    )
 
     companion object {
         private val REPORT_REASONS = setOf(
