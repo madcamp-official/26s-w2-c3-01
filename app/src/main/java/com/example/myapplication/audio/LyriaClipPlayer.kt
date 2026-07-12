@@ -11,13 +11,22 @@ class LyriaClipPlayer(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
     private var audioFile: File? = null
+    private var audioUrl: String? = null
 
     fun load(audioBase64: String) {
         stop()
+        audioUrl = null
         audioFile?.delete()
         audioFile = File(context.cacheDir, "lyria-alias-preview.mp3").apply {
             writeBytes(Base64.decode(audioBase64, Base64.DEFAULT))
         }
+    }
+
+    fun loadUrl(url: String) {
+        stop()
+        audioFile?.delete()
+        audioFile = null
+        audioUrl = url
     }
 
     fun playFull() = play(0, 30_000)
@@ -25,15 +34,18 @@ class LyriaClipPlayer(private val context: Context) {
     fun playSelection(startSeconds: Float) = play((startSeconds * 1_000).toInt(), 5_000)
 
     private fun play(startMs: Int, durationMs: Int) {
-        val file = audioFile ?: return
+        val source = audioFile?.absolutePath ?: audioUrl ?: return
         stop()
         player = MediaPlayer().apply {
-            setDataSource(file.absolutePath)
-            prepare()
-            seekTo(startMs)
-            start()
+            setDataSource(source)
+            setOnPreparedListener {
+                it.seekTo(startMs)
+                it.start()
+                handler.postDelayed({ stop() }, durationMs.toLong())
+            }
+            setOnErrorListener { _, _, _ -> stop(); true }
+            prepareAsync()
         }
-        handler.postDelayed({ stop() }, durationMs.toLong())
     }
 
     fun stop() {
