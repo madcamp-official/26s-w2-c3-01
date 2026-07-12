@@ -28,6 +28,7 @@ data class LyriaGenerateResponse(
     val description: String?,
     val model: String,
     val durationSeconds: Int = 30,
+    val candidateKey: String? = null,
 )
 
 @Service
