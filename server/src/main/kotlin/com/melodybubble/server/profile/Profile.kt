@@ -47,16 +47,27 @@ class ProfileController(
 ) {
     @GetMapping fun me(principal: Principal): ProfileResponse = load(UUID.fromString(principal.name))
 
-    @PatchMapping fun update(principal: Principal, @RequestBody request: ProfileUpdate): ProfileResponse {
+    @PatchMapping
+    fun update(principal: Principal, @RequestBody request: ProfileUpdate): ProfileResponse {
+        val userId = UUID.fromString(principal.name)
         val name = request.displayName.trim().take(40)
         val color = request.profileColor.takeIf { it.matches(Regex("#[0-9A-Fa-f]{6}")) } ?: "#6750A4"
         require(name.length >= 2) { "Display name must contain at least 2 characters" }
-        val avatar = request.avatarDataUrl?.takeIf { it.startsWith("data:image/") && it.length <= 700_000 }
-        jdbc.update("""update users set display_name=?,profile_color=?,bio=?,avatar_data_url=?,
-            preferred_genres=?,mood_tags=?,updated_at=now() where id=?""", name, color,
-            request.bio.trim().take(160), avatar, request.genres.take(8).joinToString(","),
-            request.moods.take(8).joinToString(","), UUID.fromString(principal.name))
-        return load(UUID.fromString(principal.name))
+        val previous = jdbc.query(
+            "select avatar_object_key,avatar_mime_type from users where id=?",
+            { rs, _ -> rs.getString(1)?.let { StoredMedia(it, rs.getString(2).orEmpty()) } }, userId,
+        ).firstOrNull { it != null }
+        val avatar = when {
+            request.avatarDataUrl == null -> null
+            request.avatarDataUrl.startsWith("data:image/") -> media.storeAvatar(userId, request.avatarDataUrl)
+            else -> previous
+        }
+        jdbc.update("""update users set display_name=?,profile_color=?,bio=?,avatar_data_url=null,
+            avatar_object_key=?,avatar_mime_type=?,preferred_genres=?,mood_tags=?,updated_at=now() where id=?""",
+            name, color, request.bio.trim().take(160), avatar?.key, avatar?.mimeType,
+            request.genres.take(8).joinToString(","), request.moods.take(8).joinToString(","), userId)
+        if (previous?.key != avatar?.key) media.delete(previous?.key)
+        return load(userId)
     }
 
     @PutMapping("/privacy")
