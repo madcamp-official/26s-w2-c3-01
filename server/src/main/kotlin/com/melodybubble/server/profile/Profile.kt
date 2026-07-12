@@ -98,6 +98,39 @@ class ProfileController(
         return load(userId)
     }
 
+    @PutMapping("/music")
+    fun setMusic(principal: Principal, @RequestBody request: ProfileMusicUpdate): ProfileResponse {
+        val userId = UUID.fromString(principal.name)
+        val previous = jdbc.queryForObject(
+            "select profile_music_object_key from users where id=?",
+            String::class.java, userId,
+        )
+        val stored = media.promoteCandidate(userId, request.candidateKey)
+        jdbc.update(
+            """update users set profile_music_object_key=?,profile_music_mime_type=?,
+                profile_music_description=?,profile_music_updated_at=now(),updated_at=now() where id=?""",
+            stored.key, stored.mimeType, request.description?.trim()?.take(500), userId,
+        )
+        if (previous != stored.key) media.delete(previous)
+        return load(userId)
+    }
+
+    @DeleteMapping("/music")
+    fun deleteMusic(principal: Principal): ProfileResponse {
+        val userId = UUID.fromString(principal.name)
+        val previous = jdbc.queryForObject(
+            "select profile_music_object_key from users where id=?",
+            String::class.java, userId,
+        )
+        jdbc.update(
+            """update users set profile_music_object_key=null,profile_music_mime_type=null,
+                profile_music_description=null,profile_music_updated_at=null,updated_at=now() where id=?""",
+            userId,
+        )
+        media.delete(previous)
+        return load(userId)
+    }
+
     private fun load(userId: UUID): ProfileResponse = jdbc.query("""select u.display_name,u.profile_color,u.bio,
         u.avatar_data_url,u.preferred_genres,u.mood_tags,
         coalesce(p.discoverable,true) discoverable,coalesce(p.share_music,true) share_music
