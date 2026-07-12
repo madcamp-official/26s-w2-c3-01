@@ -45,6 +45,7 @@ import com.example.myapplication.data.remote.RemotePopularTrack
 import com.example.myapplication.data.remote.ReportSubmitRequest
 import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
+import com.example.myapplication.data.remote.ProfileMusicUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
 import android.Manifest
 import android.content.pm.PackageManager
@@ -111,6 +112,8 @@ interface MelodyRepository {
     fun setMusicVisibility(label: String)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
     fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>)
+    fun setProfileMusic(candidateKey: String, description: String?)
+    fun deleteProfileMusic()
     fun selectMelodyAlias(candidateId: String)
     fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
     fun createDemoExchange(peerAlias: String)
@@ -758,6 +761,28 @@ class DemoMelodyRepository(
                     persistProfile(previousProfile)
                 }
             }
+        }
+    }
+
+    override fun setProfileMusic(candidateKey: String, description: String?) {
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching {
+                profileApi.setMusic("Bearer $token", ProfileMusicUpdateRequest(candidateKey, description))
+            }.onSuccess {
+                if (isCurrentSession(token)) applyRemoteProfile(it, "프로필 음악을 설정했어요")
+            }.onFailure {
+                if (isCurrentSession(token)) showRequestError(it, "프로필 음악을 저장하지 못했어요")
+            }
+        }
+    }
+
+    override fun deleteProfileMusic() {
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching { profileApi.deleteMusic("Bearer $token") }
+                .onSuccess { if (isCurrentSession(token)) applyRemoteProfile(it, "프로필 음악을 삭제했어요") }
+                .onFailure { if (isCurrentSession(token)) showRequestError(it, "프로필 음악을 삭제하지 못했어요") }
         }
     }
 
