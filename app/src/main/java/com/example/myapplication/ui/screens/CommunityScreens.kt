@@ -668,6 +668,56 @@ private fun ConnectionCount(
 }
 
 @Composable
+fun SettingsScreen(
+    profile: ProfileSettings,
+    offlineExchangeCount: Int,
+    onBack: () -> Unit,
+    onDiscoverableChange: (Boolean) -> Unit,
+    onAllowReactionsChange: (Boolean) -> Unit,
+    onOfflineExchangeChange: (Boolean) -> Unit,
+    onMusicVisibilityChange: (String) -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    onOpenOfflineExchange: () -> Unit,
+    onOpenBlockedUsers: () -> Unit,
+    onLogout: () -> Unit,
+    onDeleteAccount: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var visibilityEditing by rememberSaveable { mutableStateOf(false) }
+    var deleteConfirm by rememberSaveable { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로")
+                }
+                Column(Modifier.padding(start = 8.dp)) {
+                    Text("SETTINGS", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
+                    Text("설정", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        item { SectionLabel("공개 및 연결") }
+        item { SettingsLink(Icons.Outlined.Shield, "음악 공개 범위", profile.musicVisibilityLabel) { visibilityEditing = true } }
+        item { SettingsToggle(Icons.Outlined.Radio, "주변에서 발견 가능", "정확한 위치와 방향은 항상 숨겨요", profile.discoverable, onDiscoverableChange) }
+        item { SettingsToggle(Icons.Outlined.FavoriteBorder, "음악 리액션 받기", "정해진 안전한 리액션만 받아요", profile.allowReactions, onAllowReactionsChange) }
+        item { SettingsLink(Icons.Outlined.Block, "차단 사용자 관리", "차단 해제와 목록 확인", onOpenBlockedUsers) }
+        item { SectionLabel("기기 기능") }
+        item { SettingsLink(Icons.Outlined.Notifications, "자동 음악 감지", "재생 알림으로 현재 곡을 감지해요", onOpenNotificationAccess) }
+        item { SettingsToggle(Icons.AutoMirrored.Outlined.BluetoothSearching, "오프라인 음악 카드 교환", "가까운 상대와 승인한 카드만 교환해요", profile.offlineExchangeEnabled, onOfflineExchangeChange) }
+        item { SettingsLink(Icons.Outlined.History, "교환 기록", "이 기기에 저장된 기록 ${offlineExchangeCount}건", onOpenOfflineExchange) }
+        item { SectionLabel("계정") }
+        item { OutlinedButton(onClick = onLogout, Modifier.fillMaxWidth().height(50.dp)) { Text("로그아웃") } }
+        item { TextButton(onClick = { deleteConfirm = true }, Modifier.fillMaxWidth()) { Text("회원 탈퇴", color = MaterialTheme.colorScheme.error) } }
+    }
+}
+
+@Composable
 private fun ProfileAvatar(dataUrl: String?, name: String, colorHex: Long, size: androidx.compose.ui.unit.Dp) {
     val remoteUrl = dataUrl?.takeIf { it.startsWith("https://") }
     val bitmap = remember(dataUrl) { dataUrl?.substringAfter("base64,", "")?.takeIf(String::isNotBlank)?.let { encoded -> runCatching { BitmapFactory.decodeByteArray(Base64.decode(encoded, Base64.DEFAULT), 0, Base64.decode(encoded, Base64.DEFAULT).size) }.getOrNull() } }
