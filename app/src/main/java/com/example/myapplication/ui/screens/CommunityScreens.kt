@@ -667,6 +667,7 @@ private fun ConnectionCount(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     profile: ProfileSettings,
@@ -685,6 +686,44 @@ fun SettingsScreen(
 ) {
     var visibilityEditing by rememberSaveable { mutableStateOf(false) }
     var deleteConfirm by rememberSaveable { mutableStateOf(false) }
+
+    if (deleteConfirm) AlertDialog(
+        onDismissRequest = { deleteConfirm = false },
+        title = { Text("계정을 탈퇴할까요?") },
+        text = { Text("프로필과 계정 데이터가 삭제되며 되돌릴 수 없습니다.") },
+        confirmButton = { TextButton(onClick = { deleteConfirm = false; onDeleteAccount() }) { Text("탈퇴", color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { deleteConfirm = false }) { Text("취소") } },
+    )
+    if (visibilityEditing) ModalBottomSheet(
+        onDismissRequest = { visibilityEditing = false },
+        containerColor = MossSurface,
+        contentColor = PaleMint,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(24.dp)) {
+            Text("음악 공개 범위", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("주변 사용자에게 현재 음악을 어떻게 보여줄지 선택하세요.", color = MutedMint)
+            Spacer(Modifier.height(18.dp))
+            listOf(
+                "제목과 아티스트 공개" to "곡 제목과 아티스트만 보여줘요.",
+                "맞팔에게만 공개" to "서로 팔로우한 사용자에게만 보여줘요.",
+                "비공개" to "취향 유사도만 보여주고 음악은 숨겨요.",
+            ).forEach { (option, description) ->
+                MelodyCard(
+                    Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    onClick = { onMusicVisibilityChange(option); visibilityEditing = false },
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(option, fontWeight = FontWeight.Bold)
+                            Text(description, color = MutedMint)
+                        }
+                        if (profile.musicVisibilityLabel == option) Text("✓", color = SignalGreen)
+                    }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
