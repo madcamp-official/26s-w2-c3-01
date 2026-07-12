@@ -310,6 +310,16 @@ class SocialController(private val social: SocialService) {
     fun unfollow(principal: Principal, @PathVariable handle: String) =
         social.unfollow(UUID.fromString(principal.name), handle)
 
+    @GetMapping("/me/following")
+    fun following(principal: Principal) = social.following(UUID.fromString(principal.name))
+
+    @GetMapping("/me/followers")
+    fun followers(principal: Principal) = social.followers(UUID.fromString(principal.name))
+
+    @DeleteMapping("/me/following/{relationshipId}")
+    fun unfollowRelationship(principal: Principal, @PathVariable relationshipId: UUID) =
+        social.unfollowRelationship(UUID.fromString(principal.name), relationshipId)
+
     @PutMapping("/nearby/{handle}/block")
     fun block(principal: Principal, @PathVariable handle: String) =
         social.block(UUID.fromString(principal.name), handle)
