@@ -1,6 +1,7 @@
 package com.example.myapplication.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.PATCH
@@ -11,6 +12,8 @@ data class RemoteProfile(
     val profileColor: String,
     val bio: String?,
     val avatarDataUrl: String?,
+    val profileMusicUrl: String?,
+    val profileMusicDescription: String?,
     val genres: List<String>?,
     val moods: List<String>?,
     val discoverable: Boolean,
@@ -25,6 +28,7 @@ data class ProfileUpdateRequest(
     val moods: List<String>,
 )
 data class PrivacyUpdateRequest(val discoverable: Boolean, val shareMusic: Boolean)
+data class ProfileMusicUpdateRequest(val candidateKey: String, val description: String?)
 
 interface ProfileApi {
     @GET("api/v1/me") suspend fun me(@Header("Authorization") authorization: String): RemoteProfile
@@ -35,5 +39,12 @@ interface ProfileApi {
     @PUT("api/v1/me/privacy") suspend fun privacy(
         @Header("Authorization") authorization: String,
         @Body request: PrivacyUpdateRequest,
+    ): RemoteProfile
+    @PUT("api/v1/me/music") suspend fun setMusic(
+        @Header("Authorization") authorization: String,
+        @Body request: ProfileMusicUpdateRequest,
+    ): RemoteProfile
+    @DELETE("api/v1/me/music") suspend fun deleteMusic(
+        @Header("Authorization") authorization: String,
     ): RemoteProfile
 }

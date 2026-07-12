@@ -165,7 +165,9 @@ data class ProfileSettings(
     val musicVisibilityLabel: String,
     val discoverable: Boolean,
     val allowReactions: Boolean,
-    val offlineExchangeEnabled: Boolean
+    val offlineExchangeEnabled: Boolean,
+    val profileMusicUrl: String? = null,
+    val profileMusicDescription: String? = null
 )
 
 data class MelodyAliasCandidate(

@@ -17,7 +17,8 @@ data class LyriaMusicResponse(
     val mimeType: String,
     val description: String?,
     val model: String,
-    val durationSeconds: Int
+    val durationSeconds: Int,
+    val candidateKey: String?
 )
 
 interface LyriaMusicApi {
