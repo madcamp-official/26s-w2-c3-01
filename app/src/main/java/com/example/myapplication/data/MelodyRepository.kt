@@ -524,8 +524,8 @@ class DemoMelodyRepository(
                 if (!isCurrentSession(token)) return@onSuccess
                 _state.update {
                     it.copy(
-                        following = following.map(RemoteSocialConnection::toDomain),
-                        followers = followers.map(RemoteSocialConnection::toDomain),
+                        following = following.map { it.toDomain() },
+                        followers = followers.map { it.toDomain() },
                         socialConnectionsLoading = false,
                     )
                 }

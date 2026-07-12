@@ -209,11 +209,9 @@ fun MelodyBubbleApp(
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
                     onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
-                    onOpenNotificationAccess = {
-                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                    },
-                    onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) },
-                    onOpenBlockedUsers = { navController.navigate(Route.BLOCKED_USERS) },
+                    onOpenSettings = { navController.navigate(Route.SETTINGS) },
+                    onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
+                    onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
                 )
             }
             composable(Route.USER_DETAIL) {
@@ -396,9 +394,9 @@ private fun MainShell(
     onOpenUser: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenMelodyAlias: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
-    onOpenOfflineExchange: () -> Unit,
-    onOpenBlockedUsers: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenFollowing: () -> Unit,
+    onOpenFollowers: () -> Unit,
 ) {
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
@@ -479,20 +477,16 @@ private fun MainShell(
                 profile = state.profile,
                 profileSaving = state.profileSaving,
                 feedbackMessage = state.feedbackMessage,
-                offlineExchangeCount = state.offlineExchanges.size,
-                onDiscoverableChange = viewModel::setDiscoverable,
-                onAllowReactionsChange = viewModel::setAllowReactions,
-                onOfflineExchangeChange = viewModel::setOfflineExchangeEnabled,
-                onMusicVisibilityChange = viewModel::setMusicVisibility,
+                followingCount = state.following.size,
+                followerCount = state.followers.size,
+                onLoadConnections = viewModel::loadSocialConnections,
+                onOpenFollowing = onOpenFollowing,
+                onOpenFollowers = onOpenFollowers,
+                onOpenSettings = onOpenSettings,
                 onProfileUpdate = viewModel::updateProfile,
                 onPlayProfileMusic = viewModel::playProfileMusic,
                 onDeleteProfileMusic = viewModel::deleteProfileMusic,
-                onLogout = viewModel::logout,
-                onDeleteAccount = viewModel::deleteAccount,
                 onOpenMelodyAlias = onOpenMelodyAlias,
-                onOpenNotificationAccess = onOpenNotificationAccess,
-                onOpenOfflineExchange = onOpenOfflineExchange,
-                onOpenBlockedUsers = onOpenBlockedUsers,
                 modifier = contentModifier.safeDrawingPadding()
             )
         }
