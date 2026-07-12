@@ -1004,6 +1004,8 @@ class DemoMelodyRepository(
             colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
             bio = remote.bio.orEmpty(),
             avatarDataUrl = remote.avatarDataUrl,
+            profileMusicUrl = remote.profileMusicUrl,
+            profileMusicDescription = remote.profileMusicDescription,
             genres = remote.genres.orEmpty(),
             moods = remote.moods.orEmpty(),
             discoverable = current.discoverabilityScope != "HIDDEN",
@@ -1023,6 +1025,8 @@ class DemoMelodyRepository(
             .putLong("profile-color", profile.colorHex)
             .putString("profile-bio", profile.bio)
             .putString("profile-avatar", profile.avatarDataUrl)
+            .putString("profile-music-url", profile.profileMusicUrl)
+            .putString("profile-music-description", profile.profileMusicDescription)
             .putString("profile-genres", profile.genres.joinToString("\u001F"))
             .putString("profile-moods", profile.moods.joinToString("\u001F"))
             .putString("profile-music-visibility", profile.musicVisibilityLabel)
@@ -1040,6 +1044,8 @@ class DemoMelodyRepository(
             colorHex = preferences.getLong("profile-color", fallback.colorHex),
             bio = preferences.getString("profile-bio", fallback.bio) ?: fallback.bio,
             avatarDataUrl = preferences.getString("profile-avatar", null),
+            profileMusicUrl = preferences.getString("profile-music-url", null),
+            profileMusicDescription = preferences.getString("profile-music-description", null),
             genres = preferences.getString("profile-genres", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.genres,
             moods = preferences.getString("profile-moods", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.moods,
             musicVisibilityLabel = preferences.getString("profile-music-visibility", fallback.musicVisibilityLabel) ?: fallback.musicVisibilityLabel,
