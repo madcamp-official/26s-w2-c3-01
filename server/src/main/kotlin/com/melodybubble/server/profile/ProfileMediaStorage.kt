@@ -5,6 +5,8 @@ import org.springframework.stereotype.Service
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.ServerSideEncryption
 import software.amazon.awssdk.services.s3.model.S3Exception
@@ -44,6 +46,25 @@ class ProfileMediaStorage(
         return presigner.presignGetObject(
             GetObjectPresignRequest.builder().signatureDuration(Duration.ofHours(1)).getObjectRequest(request).build(),
         ).url().toString()
+    }
+
+    fun promoteCandidate(userId: UUID, candidateKey: String): StoredMedia {
+        val prefix = "users/$userId/candidates/"
+        require(candidateKey.startsWith(prefix) && !candidateKey.removePrefix(prefix).contains('/')) {
+            "Invalid music candidate"
+        }
+        check(bucket.isNotBlank()) { "MEDIA_BUCKET is not configured" }
+        val metadata = s3.headObject(HeadObjectRequest.builder().bucket(bucket).key(candidateKey).build())
+        val mimeType = metadata.contentType().orEmpty()
+        require(mimeType.startsWith("audio/")) { "Candidate is not audio" }
+        val destination = "users/$userId/profile-music/${UUID.randomUUID()}.${extension(mimeType)}"
+        s3.copyObject(
+            CopyObjectRequest.builder().bucket(bucket).key(destination)
+                .copySource("$bucket/$candidateKey").contentType(mimeType)
+                .metadataDirective("REPLACE").serverSideEncryption(ServerSideEncryption.AES256).build(),
+        )
+        delete(candidateKey)
+        return StoredMedia(destination, mimeType)
     }
 
     fun delete(key: String?) {
