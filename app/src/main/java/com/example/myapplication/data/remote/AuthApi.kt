@@ -5,8 +5,13 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.DELETE
 import retrofit2.http.Header
+import retrofit2.http.GET
+import retrofit2.http.Query
 
 interface AuthApi {
+    @GET("/api/v1/auth/email-availability")
+    suspend fun emailAvailability(@Query("email") email: String): EmailAvailabilityResponse
+
     @POST(MelodyApiContract.Rest.LOGIN)
     suspend fun login(@Body request: LoginRequest): TokenResponse
 
