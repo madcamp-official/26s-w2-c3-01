@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
@@ -470,6 +471,12 @@ fun MyScreen(
     profileSaving: Boolean,
     feedbackMessage: String?,
     offlineExchangeCount: Int,
+    followingCount: Int,
+    followerCount: Int,
+    onLoadConnections: () -> Unit,
+    onOpenFollowing: () -> Unit,
+    onOpenFollowers: () -> Unit,
+    onOpenSettings: () -> Unit,
     onDiscoverableChange: (Boolean) -> Unit,
     onAllowReactionsChange: (Boolean) -> Unit,
     onOfflineExchangeChange: (Boolean) -> Unit,
@@ -485,6 +492,7 @@ fun MyScreen(
     onOpenBlockedUsers: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    LaunchedEffect(Unit) { onLoadConnections() }
     var editing by rememberSaveable { mutableStateOf(false) }
     var awaitingProfileSave by rememberSaveable { mutableStateOf(false) }
     var profileSaveStarted by rememberSaveable { mutableStateOf(false) }
@@ -637,7 +645,9 @@ fun MyScreen(
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Text("PROFILE", color = SignalGreen, style = MaterialTheme.typography.labelLarge); Text("내 프로필", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
-                OutlinedButton(onClick = { editing = true }) { Text("편집") }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Outlined.Settings, contentDescription = "설정")
+                }
             }
         }
         item {
@@ -652,6 +662,15 @@ fun MyScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { (profile.genres + profile.moods).take(3).forEach { MiniTag(it, true) } }
                     }
                 }
+            }
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ConnectionCount("팔로잉", followingCount, onOpenFollowing, Modifier.weight(1f))
+                ConnectionCount("팔로워", followerCount, onOpenFollowers, Modifier.weight(1f))
             }
         }
         item { SectionLabel("음악 정체성") }
@@ -673,17 +692,25 @@ fun MyScreen(
             }
         }
         item { SettingsLink(Icons.Outlined.Tune, "멜로디 별칭", if (profile.profileMusicUrl == null) "30초 프로필 음악 만들기" else "새 음악 만들기", onOpenMelodyAlias) }
-        item { SettingsLink(Icons.Outlined.Shield, "음악 공개 범위", profile.musicVisibilityLabel, { visibilityEditing = true }) }
-        item { SectionLabel("공개 및 연결") }
-        item { SettingsToggle(Icons.Outlined.Radio, "주변에서 발견 가능", "정확한 위치와 방향은 항상 숨겨요", profile.discoverable, onDiscoverableChange) }
-        item { SettingsToggle(Icons.Outlined.FavoriteBorder, "음악 리액션 받기", "정해진 안전한 리액션만 받아요", profile.allowReactions, onAllowReactionsChange) }
-        item { SettingsLink(Icons.Outlined.Block, "차단 사용자 관리", "차단 해제와 목록 확인", onOpenBlockedUsers) }
-        item { SectionLabel("기기 기능") }
-        item { SettingsLink(Icons.Outlined.Notifications, "자동 음악 감지", "음악 앱의 재생 알림으로 현재 곡을 감지해요", onOpenNotificationAccess) }
-        item { SettingsToggle(Icons.AutoMirrored.Outlined.BluetoothSearching, "오프라인 음악 카드 교환", "가까운 상대와 승인한 카드만 교환해요", profile.offlineExchangeEnabled, onOfflineExchangeChange) }
-        item { SettingsLink(Icons.Outlined.History, "교환 기록", "이 기기에 저장된 기록 ${offlineExchangeCount}건", onOpenOfflineExchange) }
-        item { Spacer(Modifier.height(4.dp)); OutlinedButton(onClick = onLogout, Modifier.fillMaxWidth().height(50.dp)) { Text("로그아웃") } }
-        item { TextButton(onClick = { deleteConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("회원 탈퇴", color = MaterialTheme.colorScheme.error) } }
+    }
+}
+
+@Composable
+private fun ConnectionCount(
+    label: String,
+    count: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = MossSurfaceHigh,
+    ) {
+        Column(Modifier.padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(count.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(label, color = MutedMint, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
