@@ -201,6 +201,16 @@ data class BlockedUser(
     val blockedAt: String
 )
 
+data class SocialConnection(
+    val relationshipId: String?,
+    val displayAlias: String,
+    val colorHex: Long,
+    val avatarUrl: String?,
+    val bio: String,
+    val mutual: Boolean,
+    val followedAt: String,
+)
+
 enum class ReportReason(val label: String) {
     SPAM("스팸·광고"),
     HARASSMENT("괴롭힘·위협"),
@@ -230,6 +240,9 @@ data class MelodyUiState(
     val melodyAliasCandidates: List<MelodyAliasCandidate> = emptyList(),
     val offlineExchanges: List<OfflineExchangeRecord> = emptyList(),
     val blockedUsers: List<BlockedUser> = emptyList(),
+    val following: List<SocialConnection> = emptyList(),
+    val followers: List<SocialConnection> = emptyList(),
+    val socialConnectionsLoading: Boolean = false,
     val discoveryRadiusMeters: Int = 300,
     val discoverabilityScope: String = "NEARBY",
     val musicVisibility: String = "TITLE_ARTIST",
