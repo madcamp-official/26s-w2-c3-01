@@ -556,6 +556,7 @@ class DemoMelodyRepository(
                             feedbackMessage = if (wasMutual) "맞팔을 취소했어요" else "팔로우를 취소했어요",
                         )
                     }
+                    loadChatRooms()
                 }.onFailure { error ->
                     if (isCurrentSession(token)) showRequestError(error, "팔로우를 취소하지 못했어요")
                 }
