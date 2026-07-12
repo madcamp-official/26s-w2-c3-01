@@ -24,6 +24,16 @@ data class RemoteBlockedUser(
     val blockedAt: String
 )
 
+data class RemoteSocialConnection(
+    val relationshipId: String?,
+    val displayAlias: String,
+    val profileColor: String,
+    val avatarUrl: String?,
+    val bio: String,
+    val mutual: Boolean,
+    val followedAt: String,
+)
+
 data class ReportSubmitRequest(val requestId: String, val reason: String, val description: String?)
 data class RemoteReportResponse(val reportId: String, val status: String, val submittedAt: String)
 
@@ -67,6 +77,18 @@ interface SocialApi {
         @Header("Authorization") authorization: String,
         @Path("handle") handle: String
     ): RemoteFollowResponse
+
+    @GET("api/v1/me/following")
+    suspend fun following(@Header("Authorization") authorization: String): List<RemoteSocialConnection>
+
+    @GET("api/v1/me/followers")
+    suspend fun followers(@Header("Authorization") authorization: String): List<RemoteSocialConnection>
+
+    @DELETE("api/v1/me/following/{relationshipId}")
+    suspend fun unfollowRelationship(
+        @Header("Authorization") authorization: String,
+        @Path("relationshipId") relationshipId: String,
+    )
 
     @PUT("api/v1/nearby/{handle}/block")
     suspend fun block(
