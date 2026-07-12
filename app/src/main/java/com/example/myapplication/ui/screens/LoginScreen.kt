@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,18 +41,23 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.myapplication.data.remote.GoogleCredentialClient
 import com.example.myapplication.ui.LoginUiState
+import com.example.myapplication.ui.EmailAvailabilityUiState
 import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(
     state: LoginUiState,
+    emailAvailabilityState: EmailAvailabilityUiState,
     onLogin: (String, String) -> Unit,
-    onSignup: (String, String, String) -> Unit,
+    onSignup: (String, String, String, String) -> Unit,
+    onCheckEmail: (String) -> Unit,
+    onEmailChanged: () -> Unit,
     onGoogleLogin: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var passwordConfirmation by remember { mutableStateOf("") }
     var displayName by rememberSaveable { mutableStateOf("") }
     var signupMode by rememberSaveable { mutableStateOf(false) }
     var showEmailLogin by rememberSaveable { mutableStateOf(false) }
@@ -59,16 +66,26 @@ fun LoginScreen(
     val scope = rememberCoroutineScope()
     val googleClient = remember(context) { GoogleCredentialClient(context) }
     val loading = state == LoginUiState.Loading
-    val canSubmit = email.isNotBlank() && password.length >= 6 && (!signupMode || displayName.length >= 2) && !loading
+    val normalizedEmail = email.trim().lowercase()
+    val validEmail = android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()
+    val validPassword = password.length in 8..72 && password.any(Char::isLetter) && password.any(Char::isDigit)
+    val emailAvailable = emailAvailabilityState is EmailAvailabilityUiState.Available &&
+        emailAvailabilityState.email == normalizedEmail
+    val passwordsMatch = passwordConfirmation.isNotEmpty() && password == passwordConfirmation
+    val canSubmit = validEmail && validPassword && !loading && if (signupMode) {
+        displayName.trim().length >= 2 && emailAvailable && passwordsMatch
+    } else true
 
     fun submit() {
         if (canSubmit) {
-            if (signupMode) onSignup(email, password, displayName) else onLogin(email, password)
+            if (signupMode) onSignup(email, password, passwordConfirmation, displayName)
+            else onLogin(email, password)
         }
     }
 
     Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -182,16 +199,41 @@ fun LoginScreen(
             }
             OutlinedTextField(
                 value = email,
-                onValueChange = { email = it },
+                onValueChange = { email = it; onEmailChanged() },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !loading,
                 singleLine = true,
-                label = { Text("아이디") },
+                label = { Text("이메일") },
                 keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
+                    keyboardType = KeyboardType.Email,
                     imeAction = ImeAction.Next,
                 ),
             )
+            if (signupMode) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { onCheckEmail(normalizedEmail) },
+                    enabled = validEmail && !loading && emailAvailabilityState != EmailAvailabilityUiState.Loading,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                ) {
+                    if (emailAvailabilityState == EmailAvailabilityUiState.Loading) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else Text("이메일 중복 확인")
+                }
+                val availabilityMessage = when (emailAvailabilityState) {
+                    is EmailAvailabilityUiState.Available -> "사용할 수 있는 이메일입니다."
+                    is EmailAvailabilityUiState.Unavailable -> "이미 가입된 이메일입니다."
+                    is EmailAvailabilityUiState.Error -> emailAvailabilityState.message
+                    else -> null
+                }
+                availabilityMessage?.let {
+                    Text(
+                        it,
+                        color = if (emailAvailable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 value = password,
@@ -200,13 +242,35 @@ fun LoginScreen(
                 enabled = !loading,
                 singleLine = true,
                 label = { Text("비밀번호") },
+                supportingText = if (signupMode) ({ Text("영문과 숫자를 포함한 8자 이상") }) else null,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Password,
-                    imeAction = ImeAction.Done,
+                    imeAction = if (signupMode) ImeAction.Next else ImeAction.Done,
                 ),
                 keyboardActions = KeyboardActions(onDone = { submit() }),
             )
+            if (signupMode) {
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = passwordConfirmation,
+                    onValueChange = { passwordConfirmation = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !loading,
+                    singleLine = true,
+                    isError = passwordConfirmation.isNotEmpty() && !passwordsMatch,
+                    label = { Text("비밀번호 확인") },
+                    supportingText = if (passwordConfirmation.isNotEmpty() && !passwordsMatch) {
+                        ({ Text("비밀번호가 일치하지 않습니다.") })
+                    } else null,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { submit() }),
+                )
+            }
             Spacer(Modifier.height(14.dp))
             OutlinedButton(
                 onClick = ::submit,
