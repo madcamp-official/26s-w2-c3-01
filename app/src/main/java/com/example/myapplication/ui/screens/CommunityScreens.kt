@@ -102,6 +102,7 @@ import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.SyncState
+import com.example.myapplication.core.model.SocialConnection
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.ui.theme.MossOutline
 import com.example.myapplication.ui.theme.MossSurface
@@ -753,6 +754,85 @@ fun SettingsScreen(
         item { SectionLabel("계정") }
         item { OutlinedButton(onClick = onLogout, Modifier.fillMaxWidth().height(50.dp)) { Text("로그아웃") } }
         item { TextButton(onClick = { deleteConfirm = true }, Modifier.fillMaxWidth()) { Text("회원 탈퇴", color = MaterialTheme.colorScheme.error) } }
+    }
+}
+
+@Composable
+fun SocialConnectionsScreen(
+    following: List<SocialConnection>,
+    followers: List<SocialConnection>,
+    loading: Boolean,
+    initialFollowing: Boolean,
+    onBack: () -> Unit,
+    onUnfollow: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var selectedTab by rememberSaveable { mutableIntStateOf(if (initialFollowing) 0 else 1) }
+    var pendingRemoval by remember { mutableStateOf<SocialConnection?>(null) }
+    val connections = if (selectedTab == 0) following else followers
+
+    pendingRemoval?.let { connection ->
+        AlertDialog(
+            onDismissRequest = { pendingRemoval = null },
+            title = { Text(if (connection.mutual) "맞팔을 취소할까요?" else "팔로우를 취소할까요?") },
+            text = { Text("${connection.displayAlias} 님과의 팔로우 관계가 변경됩니다.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    connection.relationshipId?.let(onUnfollow)
+                    pendingRemoval = null
+                }) { Text("취소하기", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { pendingRemoval = null }) { Text("돌아가기") } },
+        )
+    }
+
+    Column(modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로")
+            }
+            Text("팔로우 관계", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        }
+        PrimaryTabRow(selectedTabIndex = selectedTab) {
+            Tab(selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("팔로잉 ${following.size}") })
+            Tab(selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("팔로워 ${followers.size}") })
+        }
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (!loading && connections.isEmpty()) item {
+                Text(
+                    if (selectedTab == 0) "아직 팔로우한 사용자가 없어요." else "아직 팔로워가 없어요.",
+                    color = MutedMint,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                )
+            }
+            items(connections, key = { "${selectedTab}-${it.followedAt}-${it.displayAlias}" }) { connection ->
+                MelodyCard(Modifier.fillMaxWidth()) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ProfileAvatar(connection.avatarUrl, connection.displayAlias, connection.colorHex, 52.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(connection.displayAlias, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (connection.mutual) "서로 팔로우 중" else connection.bio.ifBlank { "음악으로 연결된 사용자" },
+                                color = if (connection.mutual) SignalGreen else MutedMint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (connection.relationshipId != null) {
+                            TextButton(onClick = { pendingRemoval = connection }) {
+                                Text(if (connection.mutual) "맞팔 취소" else "취소")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
