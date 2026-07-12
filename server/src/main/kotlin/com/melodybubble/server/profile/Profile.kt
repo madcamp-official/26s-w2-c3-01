@@ -4,6 +4,7 @@ import com.melodybubble.server.nearby.NearbyService
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -11,12 +12,16 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import java.security.Principal
 import java.util.UUID
+import java.time.Instant
 
 data class ProfileResponse(
     val displayName: String,
     val profileColor: String,
     val bio: String,
     val avatarDataUrl: String?,
+    val profileMusicUrl: String?,
+    val profileMusicDescription: String?,
+    val profileMusicUpdatedAt: Instant?,
     val genres: List<String>,
     val moods: List<String>,
     val discoverable: Boolean,
@@ -31,12 +36,14 @@ data class ProfileUpdate(
     val moods: List<String> = emptyList(),
 )
 data class PrivacyUpdate(val discoverable: Boolean, val shareMusic: Boolean)
+data class ProfileMusicUpdate(val candidateKey: String, val description: String? = null)
 
 @RestController
 @RequestMapping("/api/v1/me")
 class ProfileController(
     private val jdbc: JdbcTemplate,
     private val nearby: NearbyService,
+    private val media: ProfileMediaStorage,
 ) {
     @GetMapping fun me(principal: Principal): ProfileResponse = load(UUID.fromString(principal.name))
 
