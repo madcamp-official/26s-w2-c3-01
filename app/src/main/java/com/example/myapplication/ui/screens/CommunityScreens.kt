@@ -655,7 +655,24 @@ fun MyScreen(
             }
         }
         item { SectionLabel("음악 정체성") }
-        item { SettingsLink(Icons.Outlined.Tune, "멜로디 별칭", "${profile.melodyNotes.joinToString(" · ")} · ${profile.melodyAliasTone}", onOpenMelodyAlias) }
+        if (profile.profileMusicUrl != null) item {
+            MelodyCard(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.MusicNote, null, tint = SignalGreen)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("나의 30초 프로필 음악", fontWeight = FontWeight.Bold)
+                        Text(profile.profileMusicDescription ?: "나의 바이브를 담은 음악", color = MutedMint, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onPlayProfileMusic, modifier = Modifier.weight(1f)) { Text("재생") }
+                    TextButton(onClick = onDeleteProfileMusic) { Text("삭제", color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+        item { SettingsLink(Icons.Outlined.Tune, "멜로디 별칭", if (profile.profileMusicUrl == null) "30초 프로필 음악 만들기" else "새 음악 만들기", onOpenMelodyAlias) }
         item { SettingsLink(Icons.Outlined.Shield, "음악 공개 범위", profile.musicVisibilityLabel, { visibilityEditing = true }) }
         item { SectionLabel("공개 및 연결") }
         item { SettingsToggle(Icons.Outlined.Radio, "주변에서 발견 가능", "정확한 위치와 방향은 항상 숨겨요", profile.discoverable, onDiscoverableChange) }
