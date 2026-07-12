@@ -56,6 +56,8 @@ import com.example.myapplication.ui.screens.NearbyMusicFilter
 import com.example.myapplication.ui.screens.OfflineExchangeScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.screens.ReportUserScreen
+import com.example.myapplication.ui.screens.SettingsScreen
+import com.example.myapplication.ui.screens.SocialConnectionsScreen
 import com.example.myapplication.ui.screens.UserDetailScreen
 import com.example.myapplication.ui.theme.Ink
 
@@ -67,6 +69,9 @@ private object Route {
     const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
+    const val SETTINGS = "settings"
+    const val FOLLOWING = "social-connections/following"
+    const val FOLLOWERS = "social-connections/followers"
 
     fun chat(roomId: String) = "chat/$roomId"
 }
@@ -274,6 +279,49 @@ fun MelodyBubbleApp(
                     users = state.blockedUsers,
                     onBack = { navController.popBackStack() },
                     onUnblock = viewModel::unblock,
+                    modifier = Modifier.safeDrawingPadding(),
+                )
+            }
+            composable(Route.SETTINGS) {
+                SettingsScreen(
+                    profile = state.profile,
+                    offlineExchangeCount = state.offlineExchanges.size,
+                    onBack = { navController.popBackStack() },
+                    onDiscoverableChange = viewModel::setDiscoverable,
+                    onAllowReactionsChange = viewModel::setAllowReactions,
+                    onOfflineExchangeChange = viewModel::setOfflineExchangeEnabled,
+                    onMusicVisibilityChange = viewModel::setMusicVisibility,
+                    onOpenNotificationAccess = {
+                        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    },
+                    onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) },
+                    onOpenBlockedUsers = { navController.navigate(Route.BLOCKED_USERS) },
+                    onLogout = viewModel::logout,
+                    onDeleteAccount = viewModel::deleteAccount,
+                    modifier = Modifier.safeDrawingPadding(),
+                )
+            }
+            composable(Route.FOLLOWING) {
+                LaunchedEffect(Unit) { viewModel.loadSocialConnections() }
+                SocialConnectionsScreen(
+                    following = state.following,
+                    followers = state.followers,
+                    loading = state.socialConnectionsLoading,
+                    initialFollowing = true,
+                    onBack = { navController.popBackStack() },
+                    onUnfollow = viewModel::unfollowRelationship,
+                    modifier = Modifier.safeDrawingPadding(),
+                )
+            }
+            composable(Route.FOLLOWERS) {
+                LaunchedEffect(Unit) { viewModel.loadSocialConnections() }
+                SocialConnectionsScreen(
+                    following = state.following,
+                    followers = state.followers,
+                    loading = state.socialConnectionsLoading,
+                    initialFollowing = false,
+                    onBack = { navController.popBackStack() },
+                    onUnfollow = viewModel::unfollowRelationship,
                     modifier = Modifier.safeDrawingPadding(),
                 )
             }
