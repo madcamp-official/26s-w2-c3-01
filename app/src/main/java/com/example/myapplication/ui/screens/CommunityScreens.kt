@@ -470,44 +470,25 @@ fun MyScreen(
     profile: ProfileSettings,
     profileSaving: Boolean,
     feedbackMessage: String?,
-    offlineExchangeCount: Int,
     followingCount: Int,
     followerCount: Int,
     onLoadConnections: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
     onOpenSettings: () -> Unit,
-    onDiscoverableChange: (Boolean) -> Unit,
-    onAllowReactionsChange: (Boolean) -> Unit,
-    onOfflineExchangeChange: (Boolean) -> Unit,
-    onMusicVisibilityChange: (String) -> Unit,
     onProfileUpdate: (String, Long, String, String?, List<String>, List<String>) -> Unit,
     onPlayProfileMusic: () -> Unit,
     onDeleteProfileMusic: () -> Unit,
-    onLogout: () -> Unit,
-    onDeleteAccount: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
-    onOpenOfflineExchange: () -> Unit,
-    onOpenBlockedUsers: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(Unit) { onLoadConnections() }
     var editing by rememberSaveable { mutableStateOf(false) }
     var awaitingProfileSave by rememberSaveable { mutableStateOf(false) }
     var profileSaveStarted by rememberSaveable { mutableStateOf(false) }
-    var visibilityEditing by rememberSaveable { mutableStateOf(false) }
-    var deleteConfirm by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
     var bio by rememberSaveable(profile.bio) { mutableStateOf(profile.bio) }
     var avatar by rememberSaveable(profile.avatarDataUrl) { mutableStateOf(profile.avatarDataUrl) }
-    if (deleteConfirm) AlertDialog(
-        onDismissRequest = { deleteConfirm = false },
-        title = { Text("계정을 탈퇴할까요?") },
-        text = { Text("프로필, 인증 정보와 서버에 저장된 계정 데이터가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.") },
-        confirmButton = { TextButton(onClick = { deleteConfirm = false; onDeleteAccount() }) { Text("탈퇴", color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton(onClick = { deleteConfirm = false }) { Text("취소") } },
-    )
     var colorHex by rememberSaveable(profile.colorHex) { mutableStateOf(profile.colorHex) }
     var genres by rememberSaveable(profile.genres) { mutableStateOf(profile.genres) }
     var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
@@ -604,34 +585,6 @@ fun MyScreen(
             }
             if (!awaitingProfileSave && feedbackMessage?.contains("저장하지 못해") == true) {
                 Text(feedbackMessage, color = MaterialTheme.colorScheme.error)
-            }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-
-    if (visibilityEditing) ModalBottomSheet(
-        onDismissRequest = { visibilityEditing = false },
-        containerColor = MossSurface,
-        contentColor = PaleMint,
-    ) {
-        Column(Modifier.fillMaxWidth().padding(24.dp)) {
-            Text("음악 공개 범위", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("주변 리스너에게 현재 음악을 어떻게 보여줄지 선택하세요.", color = MutedMint)
-            Spacer(Modifier.height(18.dp))
-            listOf(
-                "제목과 아티스트 공개" to "곡 제목과 아티스트만 보여줘요.",
-                "맞팔에게만 공개" to "서로 팔로우한 사용자에게만 현재 음악을 보여줘요.",
-                "비공개" to "취향 유사도만 보여주고 현재 음악은 숨겨요.",
-            ).forEach { (option, description) ->
-                MelodyCard(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    onClick = { onMusicVisibilityChange(option); visibilityEditing = false },
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { Text(option, fontWeight = FontWeight.Bold); Text(description, color = MutedMint) }
-                        if (profile.musicVisibilityLabel == option || profile.musicVisibilityLabel.replace("·", "과 ") == option) Text("✓", color = SignalGreen, fontWeight = FontWeight.Bold)
-                    }
-                }
             }
             Spacer(Modifier.height(24.dp))
         }
