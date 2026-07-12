@@ -22,6 +22,7 @@ import com.example.myapplication.core.model.PopularTrack
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SharingState
+import com.example.myapplication.core.model.SocialConnection
 import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.local.MelodyDatabase
@@ -47,6 +48,7 @@ import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
 import com.example.myapplication.data.remote.ProfileMusicUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
+import com.example.myapplication.data.remote.RemoteSocialConnection
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.LocationManager
@@ -102,6 +104,8 @@ interface MelodyRepository {
     fun report(handle: String, reason: ReportReason = ReportReason.OTHER, description: String? = null)
     fun loadBlockedUsers()
     fun unblock(blockId: String)
+    fun loadSocialConnections()
+    fun unfollowRelationship(relationshipId: String)
     fun sendChat(roomId: String, content: String)
     fun selectTrack(track: Track)
     fun setCurrentMusicPlaying(isPlaying: Boolean)
@@ -509,6 +513,55 @@ class DemoMelodyRepository(
         }
     }
 
+    override fun loadSocialConnections() {
+        val token = accessToken ?: return
+        _state.update { it.copy(socialConnectionsLoading = true) }
+        scope.launch {
+            runCatching {
+                val authorization = "Bearer $token"
+                socialApi.following(authorization) to socialApi.followers(authorization)
+            }.onSuccess { (following, followers) ->
+                if (!isCurrentSession(token)) return@onSuccess
+                _state.update {
+                    it.copy(
+                        following = following.map(RemoteSocialConnection::toDomain),
+                        followers = followers.map(RemoteSocialConnection::toDomain),
+                        socialConnectionsLoading = false,
+                    )
+                }
+            }.onFailure { error ->
+                if (!isCurrentSession(token)) return@onFailure
+                _state.update { it.copy(socialConnectionsLoading = false) }
+                showRequestError(error, "팔로우 목록을 불러오지 못했어요")
+            }
+        }
+    }
+
+    override fun unfollowRelationship(relationshipId: String) {
+        val token = accessToken ?: return
+        val wasMutual = _state.value.following
+            .firstOrNull { it.relationshipId == relationshipId }?.mutual == true
+        scope.launch {
+            runCatching { socialApi.unfollowRelationship("Bearer $token", relationshipId) }
+                .onSuccess {
+                    if (!isCurrentSession(token)) return@onSuccess
+                    _state.update { state ->
+                        state.copy(
+                            following = state.following.filterNot { it.relationshipId == relationshipId },
+                            followers = state.followers.map { connection ->
+                                if (connection.relationshipId == relationshipId) {
+                                    connection.copy(relationshipId = null, mutual = false)
+                                } else connection
+                            },
+                            feedbackMessage = if (wasMutual) "맞팔을 취소했어요" else "팔로우를 취소했어요",
+                        )
+                    }
+                }.onFailure { error ->
+                    if (isCurrentSession(token)) showRequestError(error, "팔로우를 취소하지 못했어요")
+                }
+        }
+    }
+
     override fun sendChat(roomId: String, content: String) {
         val chat = _state.value.chats.firstOrNull { it.roomId == roomId }
         val validationError = MelodyReducers.chatValidationError(
@@ -894,6 +947,9 @@ class DemoMelodyRepository(
                 notifications = realtimeInboxStore?.load().orEmpty(),
                 chats = emptyList(),
                 chatMessages = emptyMap(),
+                following = emptyList(),
+                followers = emptyList(),
+                socialConnectionsLoading = false,
                 detectedTrack = detectedPlayback.track,
                 detectedTrackPlaying = detectedPlayback.isPlaying,
                 selectedNearbyHandle = null,
@@ -962,6 +1018,9 @@ class DemoMelodyRepository(
             isOnboardingComplete = false,
             selectedTab = MainTab.HOME,
             profile = DemoCatalog.initialState(false).profile,
+            following = emptyList(),
+            followers = emptyList(),
+            socialConnectionsLoading = false,
             feedbackMessage = null,
             dataSourceLabel = "SIGNED OUT",
         ) }
@@ -1660,6 +1719,16 @@ class DemoMelodyRepository(
         displayAlias = displayAlias,
         colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
         blockedAt = blockedAt,
+    )
+
+    private fun RemoteSocialConnection.toDomain() = SocialConnection(
+        relationshipId = relationshipId,
+        displayAlias = displayAlias,
+        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+        avatarUrl = avatarUrl,
+        bio = bio,
+        mutual = mutual,
+        followedAt = followedAt,
     )
 
     private fun RemotePopularTrack.toDomain() = PopularTrack(
