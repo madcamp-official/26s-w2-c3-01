@@ -31,6 +31,7 @@ import javax.crypto.SecretKey
 import jakarta.servlet.http.HttpServletRequest
 import org.springframework.http.HttpHeaders
 import com.melodybubble.server.realtime.RealtimeSessionPolicy
+import com.melodybubble.server.profile.ProfileMediaStorage
 
 data class LoginRequest(val email: String, val password: String)
 data class SignupRequest(val email: String, val password: String, val displayName: String)
@@ -110,6 +111,7 @@ class AuthService(
     private val jwt: JwtService,
     private val googleTokens: GoogleTokenVerifier,
     private val realtimeSessions: RealtimeSessionPolicy,
+    private val profileMedia: ProfileMediaStorage,
 ) {
     private val encoder = BCryptPasswordEncoder()
     private val refreshDays = 30L
@@ -210,7 +212,12 @@ class AuthService(
 
     @Transactional
     fun deleteAccount(userId: UUID) {
+        val mediaKeys = jdbc.query(
+            "select avatar_object_key,profile_music_object_key from users where id=?",
+            { rs, _ -> listOfNotNull(rs.getString(1), rs.getString(2)) }, userId,
+        ).flatten()
         jdbc.update("delete from users where id=?", userId)
+        mediaKeys.forEach { runCatching { profileMedia.delete(it) } }
     }
 
     private fun linkOrCreateGoogleUser(payload: GoogleIdToken.Payload): Pair<UUID, Boolean> {
