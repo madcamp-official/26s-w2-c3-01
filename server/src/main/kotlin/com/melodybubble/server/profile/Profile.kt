@@ -132,14 +132,17 @@ class ProfileController(
     }
 
     private fun load(userId: UUID): ProfileResponse = jdbc.query("""select u.display_name,u.profile_color,u.bio,
-        u.avatar_data_url,u.preferred_genres,u.mood_tags,
+        u.avatar_data_url,u.avatar_object_key,u.preferred_genres,u.mood_tags,
+        u.profile_music_object_key,u.profile_music_description,u.profile_music_updated_at,
         coalesce(p.discoverable,true) discoverable,coalesce(p.share_music,true) share_music
         from users u left join user_privacy_settings p on p.user_id=u.id where u.id=?""", { rs, _ ->
         ProfileResponse(
-            rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
-            rs.getString(5).orEmpty().split(',').filter(String::isNotBlank),
+            rs.getString(1), rs.getString(2), rs.getString(3),
+            media.signedUrl(rs.getString(5)) ?: rs.getString(4),
+            media.signedUrl(rs.getString(8)), rs.getString(9), rs.getTimestamp(10)?.toInstant(),
             rs.getString(6).orEmpty().split(',').filter(String::isNotBlank),
-            rs.getBoolean(7), rs.getBoolean(8),
+            rs.getString(7).orEmpty().split(',').filter(String::isNotBlank),
+            rs.getBoolean(11), rs.getBoolean(12),
         )
     }, userId).first()
 }
