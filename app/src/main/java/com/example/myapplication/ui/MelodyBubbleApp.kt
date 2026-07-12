@@ -78,6 +78,7 @@ fun MelodyBubbleApp(
 ) {
     val state by viewModel.uiState.collectAsState()
     val loginState by viewModel.loginState.collectAsState()
+    val emailAvailabilityState by viewModel.emailAvailabilityState.collectAsState()
     val buildingLoungeState by viewModel.buildingLoungeState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -161,8 +162,11 @@ fun MelodyBubbleApp(
     if (loginState !is LoginUiState.Success) {
         LoginScreen(
             state = loginState,
+            emailAvailabilityState = emailAvailabilityState,
             onLogin = viewModel::login,
             onSignup = viewModel::signup,
+            onCheckEmail = viewModel::checkEmailAvailability,
+            onEmailChanged = viewModel::resetEmailAvailability,
             onGoogleLogin = viewModel::loginWithGoogle,
             modifier = modifier.safeDrawingPadding()
         )

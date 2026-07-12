@@ -38,6 +38,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
+import retrofit2.HttpException
 
 sealed interface LoginUiState {
     data object Idle : LoginUiState
@@ -48,6 +49,14 @@ sealed interface LoginUiState {
         val onboardingComplete: Boolean = false,
     ) : LoginUiState
     data class Error(val message: String) : LoginUiState
+}
+
+sealed interface EmailAvailabilityUiState {
+    data object Idle : EmailAvailabilityUiState
+    data object Loading : EmailAvailabilityUiState
+    data class Available(val email: String) : EmailAvailabilityUiState
+    data class Unavailable(val email: String) : EmailAvailabilityUiState
+    data class Error(val message: String) : EmailAvailabilityUiState
 }
 
 sealed interface MelodyAliasGenerationState {
@@ -95,6 +104,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val presenceCoordinator = PresenceSyncCoordinator.get(application)
     private val lyriaClipPlayer = LyriaClipPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
+    private val _emailAvailabilityState = MutableStateFlow<EmailAvailabilityUiState>(EmailAvailabilityUiState.Idle)
     @Volatile private var accessToken: String? = null
     private var refreshToken: String? = null
     private var removeAccessTokenListener: (() -> Unit)? = null
@@ -109,6 +119,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
+    val emailAvailabilityState = _emailAvailabilityState.asStateFlow()
     val melodyAliasGenerationState = _melodyAliasGenerationState.asStateFlow()
     val lyriaGenerationState = _lyriaGenerationState.asStateFlow()
     val buildingLoungeState = _buildingLoungeState.asStateFlow()
@@ -217,14 +228,41 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun signup(email: String, password: String, displayName: String) {
+    fun checkEmailAvailability(email: String) {
+        if (_emailAvailabilityState.value == EmailAvailabilityUiState.Loading) return
+        viewModelScope.launch {
+            _emailAvailabilityState.value = EmailAvailabilityUiState.Loading
+            authRepository.emailAvailability(email)
+                .onSuccess { response ->
+                    _emailAvailabilityState.value = if (response.available) {
+                        EmailAvailabilityUiState.Available(response.email)
+                    } else {
+                        EmailAvailabilityUiState.Unavailable(response.email)
+                    }
+                }
+                .onFailure {
+                    _emailAvailabilityState.value = EmailAvailabilityUiState.Error(
+                        "중복 확인에 실패했습니다. 잠시 후 다시 시도해 주세요."
+                    )
+                }
+        }
+    }
+
+    fun resetEmailAvailability() {
+        _emailAvailabilityState.value = EmailAvailabilityUiState.Idle
+    }
+
+    fun signup(email: String, password: String, passwordConfirmation: String, displayName: String) {
         if (_loginState.value == LoginUiState.Loading) return
         viewModelScope.launch {
             _loginState.value = LoginUiState.Loading
-            authRepository.signup(email, password, displayName)
+            authRepository.signup(email, password, passwordConfirmation, displayName)
                 .onSuccess(::acceptSession)
-                .onFailure {
-                    _loginState.value = LoginUiState.Error("회원가입하지 못했습니다. 이미 사용 중인 아이디인지 확인해주세요.")
+                .onFailure { error ->
+                    _loginState.value = LoginUiState.Error(
+                        if (error is HttpException && error.code() == 409) "이미 가입된 이메일입니다."
+                        else "회원가입하지 못했습니다. 입력 내용을 다시 확인해 주세요."
+                    )
                 }
         }
     }
