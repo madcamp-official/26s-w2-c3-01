@@ -25,6 +25,9 @@ app:
   gemini:
     api-key: ${GEMINI_API_KEY:}
     model: ${GEMINI_MUSIC_MODEL:lyria-3-clip-preview}
+  media:
+    bucket: ${MEDIA_BUCKET:}
+    region: ${MEDIA_REGION:ap-northeast-2}
   ops:
     username: ${OPS_USERNAME:ops}
     password: ${OPS_PASSWORD:local-ops-password-change-me}

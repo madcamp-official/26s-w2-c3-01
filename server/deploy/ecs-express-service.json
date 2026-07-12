@@ -1,6 +1,7 @@
 {
   "serviceArn": "arn:aws:ecs:ap-northeast-2:507219091593:service/default/sync-server",
   "executionRoleArn": "arn:aws:iam::507219091593:role/service-role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::507219091593:role/melody-bubble-sync-task-role",
   "healthCheckPath": "/actuator/health",
   "primaryContainer": {
     "image": "__IMAGE__",
@@ -37,6 +38,10 @@
       {
         "name": "GEMINI_MUSIC_MODEL",
         "value": "lyria-3-clip-preview"
+      },
+      {
+        "name": "MEDIA_BUCKET",
+        "value": "melody-bubble-profile-media-507219091593-ap-northeast-2"
       }
     ],
     "secrets": [
