@@ -378,6 +378,22 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun playLyriaSong() = lyriaClipPlayer.playFull()
     fun playLyriaSelection(startSeconds: Float) = lyriaClipPlayer.playSelection(startSeconds)
+    fun saveLyriaAsProfileMusic() {
+        val song = (_lyriaGenerationState.value as? LyriaGenerationState.Success)?.song ?: return
+        val candidateKey = song.candidateKey ?: run {
+            _lyriaGenerationState.value = LyriaGenerationState.Error("저장할 음악 정보를 찾지 못했어요.")
+            return
+        }
+        repository.setProfileMusic(candidateKey, song.description)
+    }
+
+    fun playProfileMusic() {
+        val url = repository.state.value.profile.profileMusicUrl ?: return
+        lyriaClipPlayer.loadUrl(url)
+        lyriaClipPlayer.playFull()
+    }
+
+    fun deleteProfileMusic() = repository.deleteProfileMusic()
     fun resetLyriaSong() {
         lyriaClipPlayer.stop()
         _lyriaGenerationState.value = LyriaGenerationState.Idle
