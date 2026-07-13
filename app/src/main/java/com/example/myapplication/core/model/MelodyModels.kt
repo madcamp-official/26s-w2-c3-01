@@ -4,7 +4,7 @@ enum class MainTab(val label: String) {
     HOME("홈"),
     NEARBY("근처"),
     LOUNGE("라운지"),
-    INBOX("인박스"),
+    INBOX("채팅"),
     MY("마이")
 }
 
@@ -424,5 +424,8 @@ data class MelodyUiState(
         get() = nearbyListeners.firstOrNull { it.nearbyHandle == selectedNearbyHandle }
 
     val unreadNotificationCount: Int
-        get() = notifications.count { !it.isRead } + chats.sumOf { it.unreadCount }
+        get() = notifications.count { !it.isRead }
+
+    val unreadChatCount: Int
+        get() = chats.sumOf { it.unreadCount }
 }

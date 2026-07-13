@@ -241,7 +241,7 @@ class BuildingLoungeService(
     fun enter(userId: UUID, loungeId: UUID, request: EnterBuildingLoungeRequest): BuildingLoungeSessionResponse {
         validateWifiFingerprint(request.wifiFingerprint)
         requireCompatibleWifi(loungeId, request.wifiFingerprint)
-        val lounge = requireInside(loungeId, request.latitude, request.longitude)
+        val lounge = requireInsideUnlessWifi(loungeId, request.latitude, request.longitude)
         jdbc.update(
             """
             INSERT INTO building_lounge_sessions(
@@ -379,8 +379,9 @@ class BuildingLoungeService(
         }
         val lounge = loungeAt(loungeId, request.latitude, request.longitude)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Building lounge not found")
-        val nextOutsideCount = if (lounge.inside) 0 else currentOutsideCount(userId, loungeId) + 1
-        val forcedExit = nextOutsideCount >= 3
+        val ignoresRadius = lounge.category == "WIFI"
+        val nextOutsideCount = if (ignoresRadius || lounge.inside) 0 else currentOutsideCount(userId, loungeId) + 1
+        val forcedExit = !ignoresRadius && nextOutsideCount >= 3
         jdbc.update(
             """
             UPDATE building_lounge_sessions
@@ -577,7 +578,32 @@ class BuildingLoungeService(
         return lounge
     }
 
+    private fun requireInsideUnlessWifi(loungeId: UUID, latitude: Double, longitude: Double): BuildingLoungeSummary {
+        val lounge = loungeAt(loungeId, latitude, longitude)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Building lounge not found")
+        if (lounge.category != "WIFI" && !lounge.inside) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "You are outside this lounge area")
+        }
+        return if (lounge.category == "WIFI") lounge.copy(inside = true) else lounge
+    }
+
     private fun requireCompatibleWifi(loungeId: UUID, wifiFingerprint: String) {
+        val loungeMatchesWifi = jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM building_lounges lounge
+              JOIN lounge_buildings building ON building.id=lounge.building_id
+              WHERE lounge.id=? AND lounge.active=true AND building.active=true
+                AND (building.category<>'WIFI' OR building.google_place_id LIKE ?)
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            loungeId,
+            "wifi-$wifiFingerprint-%",
+        ) == true
+        if (!loungeMatchesWifi) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Connect to the lounge Wi-Fi first")
+        }
         val incompatible = jdbc.queryForObject(
             """
             SELECT EXISTS (

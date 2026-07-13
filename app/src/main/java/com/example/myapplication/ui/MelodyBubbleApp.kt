@@ -66,6 +66,7 @@ import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
+import com.example.myapplication.ui.screens.NotificationScreen
 import com.example.myapplication.ui.screens.OfflineExchangeScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.screens.PublicProfileScreen
@@ -83,6 +84,7 @@ private object Route {
     const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
+    const val NOTIFICATIONS = "notifications"
     const val SETTINGS = "settings"
     const val FOLLOWING = "social-connections/following"
     const val FOLLOWERS = "social-connections/followers"
@@ -268,6 +270,7 @@ fun MelodyBubbleApp(
                         navController.navigate(Route.USER_DETAIL)
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
+                    onOpenNotifications = { navController.navigate(Route.NOTIFICATIONS) },
                     onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenSettings = { navController.navigate(Route.SETTINGS) },
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
@@ -547,6 +550,14 @@ fun MelodyBubbleApp(
                     modifier = Modifier.safeDrawingPadding()
                 )
             }
+            composable(Route.NOTIFICATIONS) {
+                NotificationScreen(
+                    notifications = state.notifications,
+                    onBack = { navController.popBackStack() },
+                    onMarkRead = viewModel::markInboxRead,
+                    modifier = Modifier.safeDrawingPadding(),
+                )
+            }
         }
 
         if (state.sessionMode == SessionMode.OFFLINE) {
@@ -587,6 +598,7 @@ private fun MainShell(
     onStopSharing: () -> Unit,
     onOpenUser: (String) -> Unit,
     onOpenChat: (String) -> Unit,
+    onOpenNotifications: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenFollowing: () -> Unit,
@@ -596,10 +608,6 @@ private fun MainShell(
 ) {
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
-    var nearbyRadius by rememberSaveable { mutableFloatStateOf(state.discoveryRadiusMeters.toFloat()) }
-    LaunchedEffect(state.discoveryRadiusMeters) {
-        nearbyRadius = state.discoveryRadiusMeters.toFloat()
-    }
 
     Scaffold(
         containerColor = Ink,
@@ -607,7 +615,7 @@ private fun MainShell(
         bottomBar = {
             MelodyBottomNavigationBar(
                 selectedTab = state.selectedTab,
-                unreadCount = state.unreadNotificationCount,
+                unreadCount = state.unreadChatCount,
                 onTabSelected = viewModel::selectTab
             )
         }
@@ -622,8 +630,8 @@ private fun MainShell(
                 onStartSharing = onStartSharing,
                 onStopSharing = onStopSharing,
                 onOpenNearby = { viewModel.selectTab(MainTab.NEARBY) },
+                onOpenNotifications = onOpenNotifications,
                 onSelectListener = { onOpenUser(it.nearbyHandle) },
-                onSelectTrack = viewModel::selectTrack,
                 onOpenTrack = onOpenTrack
             )
             MainTab.NEARBY -> if (state.sessionMode == SessionMode.OFFLINE) {
@@ -632,17 +640,8 @@ private fun MainShell(
                 state = state,
                 modifier = contentModifier,
                 similarityThreshold = similarityThreshold.toInt(),
-                radiusMeters = nearbyRadius.toInt(),
                 musicFilter = nearbyMusicFilter,
                 onSimilarityThresholdChange = { similarityThreshold = it.toFloat() },
-                onRadiusChange = { nearbyRadius = it.toFloat() },
-                onRadiusChangeFinished = {
-                    viewModel.updatePresenceSettings(
-                        nearbyRadius.toInt(),
-                        state.discoverabilityScope,
-                        state.musicVisibility,
-                    )
-                },
                 onRetry = viewModel::retrySharing,
                 onMusicFilterChange = { nearbyMusicFilter = it },
                 onSelectListener = { viewModel.selectNearby(it.nearbyHandle) },
@@ -656,25 +655,28 @@ private fun MainShell(
             } else BuildingLoungeMapScreen(
                 state = buildingLoungeState,
                 onLocationUpdate = viewModel::refreshBuildingLounges,
+                onLocationUnavailable = viewModel::setBuildingLoungeLocationUnavailable,
                 onHeartbeat = viewModel::heartbeatBuildingLounge,
                 onEnter = viewModel::enterBuildingLounge,
                 onLeave = viewModel::leaveBuildingLounge,
                 onCreateSubLounge = viewModel::createBuildingSubLounge,
                 onOpenSubLounge = viewModel::openSubLounge,
                 onLeaveSubLounge = viewModel::leaveSubLounge,
+                onDeleteSubLounge = viewModel::deleteSubLounge,
                 onSendTrack = viewModel::sendDetectedTrackToLounge,
+                onSearchTracks = viewModel::searchLoungeTracks,
+                onSendSearchedTrack = viewModel::sendSearchedTrackToLounge,
+                onDeleteCard = viewModel::deleteLoungeCard,
                 onReactToCard = viewModel::reactToLoungeCard,
                 onVote = viewModel::voteInSubLounge,
                 onRefreshSubLounge = viewModel::refreshSubLounge,
                 modifier = contentModifier
             )
             MainTab.INBOX -> if (state.sessionMode == SessionMode.OFFLINE) {
-                OfflineServerFeatureScreen("인박스와 채팅", onOpenOfflineExchange, contentModifier)
+                OfflineServerFeatureScreen("채팅", onOpenOfflineExchange, contentModifier)
             } else InboxScreen(
-                notifications = state.notifications,
                 chats = state.chats,
                 onOpenChat = onOpenChat,
-                onMarkRead = viewModel::markInboxRead,
                 modifier = contentModifier.safeDrawingPadding()
             )
             MainTab.MY -> MyScreen(

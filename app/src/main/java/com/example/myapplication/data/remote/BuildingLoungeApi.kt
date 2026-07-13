@@ -1,6 +1,7 @@
 package com.example.myapplication.data.remote
 
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
@@ -81,7 +82,16 @@ data class LoungeRecommendationCardDto(
     val message: String?,
     val reactionCount: Int,
     val reactedByMe: Boolean,
+    val canDelete: Boolean = false,
     val createdAt: String
+)
+
+data class LoungeMusicSearchResultDto(
+    val id: String,
+    val title: String,
+    val artistName: String,
+    val artworkUrl: String?,
+    val storeUrl: String?,
 )
 
 data class LoungePollOptionDto(val key: String, val voteCount: Int)
@@ -94,6 +104,7 @@ data class SubLoungeSnapshotDto(
     val style: String?,
     val memberCount: Int,
     val joined: Boolean,
+    val canDelete: Boolean = false,
     val listeningStatuses: List<LoungeListeningStatusDto>,
     val cards: List<LoungeRecommendationCardDto>,
     val poll: LoungePollStateDto,
@@ -204,6 +215,24 @@ interface BuildingLoungeApi {
         @Body request: LoungeReactionRequestDto
     ): LoungeRecommendationCardDto
 
+    @DELETE("api/v1/building-lounges/sub-lounges/cards/{cardId}")
+    suspend fun deleteCard(
+        @Header("Authorization") authorization: String,
+        @Path("cardId") cardId: String,
+    )
+
+    @DELETE("api/v1/building-lounges/sub-lounges/{subLoungeId}")
+    suspend fun deleteSubLounge(
+        @Header("Authorization") authorization: String,
+        @Path("subLoungeId") subLoungeId: String,
+    )
+
+    @GET("api/v1/music/search")
+    suspend fun searchMusic(
+        @Header("Authorization") authorization: String,
+        @Query("query") query: String,
+    ): List<LoungeMusicSearchResultDto>
+
     @PUT("api/v1/building-lounges/sub-lounges/{subLoungeId}/vote")
     suspend fun vote(
         @Header("Authorization") authorization: String,
@@ -269,6 +298,9 @@ class BuildingLoungeRepository(
     suspend fun leaveSubLounge(token: String, subLoungeId: String): Result<Unit> =
         runCatching { api.leaveSubLounge(token.bearer(), subLoungeId) }
 
+    suspend fun deleteSubLounge(token: String, subLoungeId: String): Result<Unit> =
+        runCatching { api.deleteSubLounge(token.bearer(), subLoungeId) }
+
     suspend fun updateListening(token: String, subLoungeId: String, request: UpdateLoungeListeningRequestDto): Result<Unit> =
         runCatching { api.updateListening(token.bearer(), subLoungeId, request) }
 
@@ -277,6 +309,12 @@ class BuildingLoungeRepository(
 
     suspend fun reactToCard(token: String, cardId: String, reactionType: String): Result<LoungeRecommendationCardDto> =
         runCatching { api.reactToCard(token.bearer(), cardId, LoungeReactionRequestDto(reactionType)) }
+
+    suspend fun deleteCard(token: String, cardId: String): Result<Unit> =
+        runCatching { api.deleteCard(token.bearer(), cardId) }
+
+    suspend fun searchMusic(token: String, query: String): Result<List<LoungeMusicSearchResultDto>> =
+        runCatching { api.searchMusic(token.bearer(), query) }
 
     suspend fun vote(token: String, subLoungeId: String, targetKey: String): Result<LoungePollStateDto> =
         runCatching { api.vote(token.bearer(), subLoungeId, LoungeVoteRequestDto(targetKey)) }

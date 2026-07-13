@@ -37,6 +37,7 @@ import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.LyriaAliasGenerateRequest
 import com.example.myapplication.data.remote.LyriaMusicRepository
 import com.example.myapplication.data.remote.LyriaMusicResponse
+import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
 import com.example.myapplication.data.remote.TokenResponse
 import com.example.myapplication.data.local.SecureTokenStore
 import com.example.myapplication.data.local.StoredSession
@@ -49,6 +50,7 @@ import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.offlineexchange.NearbyExchangeManager
 import com.example.myapplication.offlineexchange.OfflineExchangeIdentity
 import com.example.myapplication.data.network.WifiFingerprintProvider
+import com.example.myapplication.data.network.WifiIdentityResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -134,6 +136,8 @@ data class BuildingLoungeUiState(
     val selectedSubLoungeId: String? = null,
     val subLoungeSnapshot: SubLoungeSnapshotDto? = null,
     val detailLoading: Boolean = false,
+    val trackSearchLoading: Boolean = false,
+    val trackSearchResults: List<LoungeMusicSearchResultDto> = emptyList(),
     val realtimeState: ConnectionState = ConnectionState.OFFLINE,
     val message: String? = null
 )
@@ -275,6 +279,22 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         ?.let(RealtimeDestinations::subLounge)
                 ) {
                     val snapshot = _buildingLoungeState.value.subLoungeSnapshot
+                    if (event.type == "SUB_LOUNGE_DELETED") {
+                        val buildingLoungeId = snapshot?.buildingLoungeId
+                        clearSelectedSubLounge()
+                        if (buildingLoungeId != null) {
+                            val token = accessToken ?: return@collect
+                            val rooms = buildingLoungeRepository.subLounges(
+                                token,
+                                buildingLoungeId,
+                            ).getOrDefault(emptyList())
+                            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                                subLounges = rooms,
+                                message = "하위 라운지가 삭제됐어요.",
+                            )
+                        }
+                        return@collect
+                    }
                     val reduced = snapshot?.let { SubLoungeEventReducer.reduce(it, event) }
                     if (reduced != null) {
                         latestSubLoungeSnapshotAt = event.envelope.timestamp
@@ -724,8 +744,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun clearPublicProfile() = repository.clearPublicProfile()
     fun followPublicProfile() = repository.followPublicProfile()
     fun sendChat(roomId: String, content: String) = repository.sendChat(roomId, content)
-    fun selectTrack(track: Track) = repository.selectTrack(track)
-    fun setCurrentMusicPlaying(isPlaying: Boolean) = repository.setCurrentMusicPlaying(isPlaying)
     fun markInboxRead() = repository.markInboxRead()
     fun setDiscoverable(enabled: Boolean) = repository.setDiscoverable(enabled)
     fun setAllowReactions(enabled: Boolean) = repository.setAllowReactions(enabled)
@@ -852,14 +870,24 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             )
             return
         }
-        val wifi = WifiFingerprintProvider.current(getApplication())
-        if (wifi == null) {
-            _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
-                lounges = emptyList(),
-                message = "Wi-Fi에 연결한 뒤 라운지를 다시 찾아주세요."
-            )
-            return
+        val wifi = when (val result = WifiFingerprintProvider.currentResult(getApplication())) {
+            is WifiIdentityResult.Available -> result.identity
+            WifiIdentityResult.NotConnected -> {
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                    lounges = emptyList(),
+                    message = "Wi-Fi에 연결한 뒤 라운지를 다시 찾아주세요."
+                )
+                return
+            }
+            WifiIdentityResult.SsidUnavailable -> {
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                    lounges = emptyList(),
+                    message = "Wi-Fi 이름(SSID)을 확인하지 못했어요. Wi-Fi 연결을 껐다 켠 뒤 다시 시도해 주세요."
+                )
+                return
+            }
         }
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
@@ -886,6 +914,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     )
                 }
         }
+    }
+
+    fun setBuildingLoungeLocationUnavailable() {
+        _buildingLoungeState.value = _buildingLoungeState.value.copy(
+            loading = false,
+            loadFailed = false,
+            lounges = emptyList(),
+            message = "현재 위치를 가져오지 못했어요. 위치 서비스를 확인하고 다시 시도해 주세요."
+        )
     }
 
     fun enterBuildingLounge(loungeId: String) {
@@ -1023,19 +1060,95 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "재생 중인 음악을 찾지 못했어요.")
             return
         }
+        sendTrackToLounge(track.title, track.artist, message)
+    }
+
+    fun deleteSubLounge() {
+        val token = accessToken ?: return
+        val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        val buildingLoungeId = _buildingLoungeState.value.subLoungeSnapshot?.buildingLoungeId ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.deleteSubLounge(token, subLoungeId)
+                .onSuccess {
+                    clearSelectedSubLounge()
+                    val rooms = buildingLoungeRepository.subLounges(token, buildingLoungeId)
+                        .getOrDefault(emptyList())
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        subLounges = rooms,
+                        message = "하위 라운지를 삭제했어요.",
+                    )
+                }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        message = "하위 라운지를 삭제하지 못했어요.",
+                    )
+                }
+        }
+    }
+
+    fun searchLoungeTracks(query: String) {
+        val token = accessToken ?: return
+        val normalized = query.trim()
+        if (normalized.length < 2) {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                trackSearchResults = emptyList(),
+                message = "검색어를 2자 이상 입력해 주세요.",
+            )
+            return
+        }
+        viewModelScope.launch {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(trackSearchLoading = true, message = null)
+            buildingLoungeRepository.searchMusic(token, normalized)
+                .onSuccess { results ->
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        trackSearchLoading = false,
+                        trackSearchResults = results,
+                        message = if (results.isEmpty()) "검색 결과가 없어요." else null,
+                    )
+                }
+                .onFailure {
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        trackSearchLoading = false,
+                        trackSearchResults = emptyList(),
+                        message = "노래를 검색하지 못했어요.",
+                    )
+                }
+        }
+    }
+
+    fun sendSearchedTrackToLounge(track: LoungeMusicSearchResultDto, message: String?) {
+        sendTrackToLounge(track.title, track.artistName, message)
+    }
+
+    private fun sendTrackToLounge(trackTitle: String, artistName: String, message: String?) {
+        val token = accessToken ?: return
+        val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
         viewModelScope.launch {
             buildingLoungeRepository.addCard(
                 token,
                 subLoungeId,
                 CreateLoungeCardRequestDto(
                     clientCardId = UUID.randomUUID().toString(),
-                    trackTitle = track.title,
-                    artistName = track.artist,
+                    trackTitle = trackTitle,
+                    artistName = artistName,
                     message = message,
                 ),
-            ).onSuccess { refreshSelectedSubLounge(silent = true) }
+            ).onSuccess {
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(trackSearchResults = emptyList())
+                refreshSelectedSubLounge(silent = true)
+            }.onFailure {
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 보내지 못했어요.")
+            }
+        }
+    }
+
+    fun deleteLoungeCard(cardId: String) {
+        val token = accessToken ?: return
+        viewModelScope.launch {
+            buildingLoungeRepository.deleteCard(token, cardId)
+                .onSuccess { refreshSelectedSubLounge(silent = true) }
                 .onFailure {
-                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 보내지 못했어요.")
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 삭제하지 못했어요.")
                 }
         }
     }
@@ -1104,6 +1217,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             selectedSubLoungeId = null,
             subLoungeSnapshot = null,
             detailLoading = false,
+            trackSearchLoading = false,
+            trackSearchResults = emptyList(),
         )
         latestSubLoungeSnapshotAt = null
     }

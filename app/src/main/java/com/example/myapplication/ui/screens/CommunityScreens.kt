@@ -36,7 +36,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
 import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
@@ -509,120 +508,124 @@ private fun MusicSearchResult.toProfileArtist(rank: Int) = ProfileArtist(
 
 @Composable
 fun InboxScreen(
-    notifications: List<InboxNotification>,
     chats: List<ChatPreview>,
     onOpenChat: (String) -> Unit,
-    onMarkRead: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
     Column(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp)) {
             ScreenTitle(
-                eyebrow = "PRIVATE QUEUES",
-                title = "인박스",
-                subtitle = "개인 알림과 맞팔 대화만 보여요"
+                eyebrow = "PRIVATE CHAT",
+                title = "채팅",
+                subtitle = "맞팔 사용자와 나눈 대화를 보여요"
             )
         }
-        PrimaryTabRow(selectedTabIndex = selectedTab) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = { Text("알림") },
-                icon = { Icon(Icons.Outlined.Notifications, contentDescription = null) }
-            )
-            Tab(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = { Text("채팅") },
-                icon = { Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null) }
-            )
-        }
-        if (selectedTab == 0) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                item {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                AppPanel(color = SignalGreen.copy(alpha = 0.08f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("개인 Queue", color = MutedMint, modifier = Modifier.weight(1f))
-                        Text(
-                            "모두 읽음",
-                            color = SignalGreen,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { onMarkRead() }
-                                .padding(12.dp)
-                        )
+                        Icon(Icons.Outlined.Lock, contentDescription = null, tint = SignalGreen)
+                        Spacer(Modifier.width(10.dp))
+                        Text("맞팔이 성립된 사용자만 자유 메시지를 보낼 수 있어요")
                     }
                 }
-                items(notifications, key = { it.id }) { notification ->
-                    AppPanel(
-                        color = if (notification.isRead) MossSurface else SignalGreen.copy(alpha = 0.09f)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TrackGlyph(
-                                notification.actorAlias ?: "시스템",
-                                notification.actorColorHex ?: 0xFF2A4937L
+            }
+            items(chats, key = { it.roomId }) { chat ->
+                AppPanel(
+                    modifier = Modifier.clickable(
+                        enabled = chat.relationship == RelationshipStatus.MUTUAL
+                    ) { onOpenChat(chat.roomId) }
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TrackGlyph(chat.peerAlias, chat.peerColorHex)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(chat.peerAlias, style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                chat.lastMessage,
+                                color = MutedMint,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
+                        }
+                        if (chat.unreadCount > 0) {
+                            Surface(shape = CircleShape, color = SignalGreen) {
                                 Text(
-                                    notification.actorAlias ?: "Melody Bubble",
-                                    fontWeight = FontWeight.Bold
+                                    chat.unreadCount.toString(),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    color = Color(0xFF00210B),
+                                    style = MaterialTheme.typography.labelMedium
                                 )
-                                Text(notification.preview, color = MutedMint)
                             }
-                            Text(notification.relativeTime, style = MaterialTheme.typography.labelMedium, color = MutedMint)
                         }
                     }
                 }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+        }
+    }
+}
+
+@Composable
+fun NotificationScreen(
+    notifications: List<InboxNotification>,
+    onBack: () -> Unit,
+    onMarkRead: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxSize()) {
+        BackHeader(onBack = onBack, title = "알림", subtitle = "새로운 활동을 확인하세요")
+        HorizontalDivider(color = MossOutline)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("알림", color = MutedMint, modifier = Modifier.weight(1f))
+                    Text(
+                        "모두 읽음",
+                        color = SignalGreen,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onMarkRead() }
+                            .padding(12.dp),
+                    )
+                }
+            }
+            if (notifications.isEmpty()) {
                 item {
-                    AppPanel(color = SignalGreen.copy(alpha = 0.08f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.Lock, contentDescription = null, tint = SignalGreen)
-                            Spacer(Modifier.width(10.dp))
-                            Text("맞팔이 성립된 사용자만 자유 메시지를 보낼 수 있어요")
-                        }
+                    AppPanel {
+                        Text("아직 새로운 알림이 없어요", color = MutedMint)
                     }
                 }
-                items(chats, key = { it.roomId }) { chat ->
-                    AppPanel(
-                        modifier = Modifier.clickable(
-                            enabled = chat.relationship == RelationshipStatus.MUTUAL
-                        ) { onOpenChat(chat.roomId) }
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TrackGlyph(chat.peerAlias, chat.peerColorHex)
-                            Spacer(Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(chat.peerAlias, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    chat.lastMessage,
-                                    color = MutedMint,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (chat.unreadCount > 0) {
-                                Surface(shape = CircleShape, color = SignalGreen) {
-                                    Text(
-                                        chat.unreadCount.toString(),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        color = Color(0xFF00210B),
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                }
-                            }
+            }
+            items(notifications, key = { it.id }) { notification ->
+                AppPanel(
+                    color = if (notification.isRead) MossSurface else SignalGreen.copy(alpha = 0.09f),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TrackGlyph(
+                            notification.actorAlias ?: "시스템",
+                            notification.actorColorHex ?: 0xFF2A4937L,
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                notification.actorAlias ?: "Melody Bubble",
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(notification.preview, color = MutedMint)
                         }
+                        Text(
+                            notification.relativeTime,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MutedMint,
+                        )
                     }
                 }
             }

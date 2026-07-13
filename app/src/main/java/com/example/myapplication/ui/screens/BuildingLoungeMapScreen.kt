@@ -38,8 +38,11 @@ import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -51,6 +54,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -76,6 +80,7 @@ import com.example.myapplication.BuildConfig
 import com.example.myapplication.R
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
+import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
 import com.example.myapplication.data.remote.SubLoungeSummaryDto
 import com.example.myapplication.ui.BuildingLoungeUiState
 import com.example.myapplication.ui.theme.MossOutline
@@ -85,6 +90,7 @@ import com.example.myapplication.ui.theme.MutedMint
 import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
@@ -96,6 +102,7 @@ import com.google.android.gms.maps.model.MarkerOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -108,19 +115,25 @@ private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap 
 fun BuildingLoungeMapScreen(
     state: BuildingLoungeUiState,
     onLocationUpdate: (Double, Double, Float?) -> Unit,
+    onLocationUnavailable: () -> Unit,
     onHeartbeat: (Double, Double, Float?) -> Unit,
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
     onCreateSubLounge: (String, String?) -> Unit,
     onOpenSubLounge: (String) -> Unit,
     onLeaveSubLounge: () -> Unit,
+    onDeleteSubLounge: () -> Unit,
     onSendTrack: (String?) -> Unit,
+    onSearchTracks: (String) -> Unit,
+    onSendSearchedTrack: (LoungeMusicSearchResultDto, String?) -> Unit,
+    onDeleteCard: (String) -> Unit,
     onReactToCard: (String, String) -> Unit,
     onVote: (String) -> Unit,
     onRefreshSubLounge: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     var hasLocationPermission by remember { mutableStateOf(context.hasLocationPermission()) }
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -142,11 +155,21 @@ fun BuildingLoungeMapScreen(
         }
     }
 
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasLocationPermission = context.hasLocationPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(hasLocationPermission) {
         if (hasLocationPermission) {
-            context.lastKnownLocation()?.let { location ->
+            context.currentLocation()?.let { location ->
                 onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
-            }
+            } ?: onLocationUnavailable()
         }
     }
 
@@ -154,13 +177,13 @@ fun BuildingLoungeMapScreen(
         if (!hasLocationPermission) return@LaunchedEffect
         while (true) {
             delay(if (state.enteredLoungeId == null) 20_000 else 7_500)
-            context.lastKnownLocation()?.let { location ->
+            context.currentLocation()?.let { location ->
                 if (state.enteredLoungeId == null) {
                     onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
                 } else {
                     onHeartbeat(location.latitude, location.longitude, location.accuracyOrNull())
                 }
-            }
+            } ?: onLocationUnavailable()
         }
     }
 
@@ -191,9 +214,9 @@ fun BuildingLoungeMapScreen(
                     onClick = {
                         if (hasLocationPermission) {
                             coroutineScope.launch {
-                                context.lastKnownLocation()?.let { location ->
+                                context.currentLocation()?.let { location ->
                                     onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
-                                }
+                                } ?: onLocationUnavailable()
                             }
                         } else {
                             permissionLauncher.launch(
@@ -227,7 +250,11 @@ fun BuildingLoungeMapScreen(
             state = state,
             onDismiss = onLeaveSubLounge,
             onLeave = onLeaveSubLounge,
+            onDeleteSubLounge = onDeleteSubLounge,
             onSendTrack = onSendTrack,
+            onSearchTracks = onSearchTracks,
+            onSendSearchedTrack = onSendSearchedTrack,
+            onDeleteCard = onDeleteCard,
             onReactToCard = onReactToCard,
             onVote = onVote,
             onRefresh = onRefreshSubLounge,
@@ -258,12 +285,12 @@ private fun BuildingGoogleMap(
                     map.uiSettings.isCompassEnabled = false
                     map.uiSettings.isMapToolbarEnabled = false
                     map.uiSettings.isMyLocationButtonEnabled = false
-                    map.uiSettings.isScrollGesturesEnabled = false
-                    map.uiSettings.isZoomGesturesEnabled = false
+                    map.uiSettings.isScrollGesturesEnabled = true
+                    map.uiSettings.isZoomGesturesEnabled = true
                     map.uiSettings.isRotateGesturesEnabled = false
                     map.uiSettings.isTiltGesturesEnabled = false
-                    map.setMinZoomPreference(16.8f)
-                    map.setMaxZoomPreference(17.4f)
+                    map.setMinZoomPreference(10f)
+                    map.setMaxZoomPreference(19f)
                     @SuppressLint("MissingPermission")
                     if (hasLocationPermission && context.hasLocationPermission()) {
                         map.isMyLocationEnabled = true
@@ -375,7 +402,7 @@ private fun LoungeBottomSheetPanel(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    when {
+                    state.message ?: when {
                         !hasLocationPermission -> "주변 건물을 찾으려면 위치 권한이 필요해요."
                         entered != null -> "사용자가 만든 하위 라운지 ${state.subLounges.size}개"
                         insideLounges.isNotEmpty() -> "눌러서 입장할 건물을 선택하세요."
@@ -608,13 +635,19 @@ private fun SubLoungeDetailSheet(
     state: BuildingLoungeUiState,
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
+    onDeleteSubLounge: () -> Unit,
     onSendTrack: (String?) -> Unit,
+    onSearchTracks: (String) -> Unit,
+    onSendSearchedTrack: (LoungeMusicSearchResultDto, String?) -> Unit,
+    onDeleteCard: (String) -> Unit,
     onReactToCard: (String, String) -> Unit,
     onVote: (String) -> Unit,
     onRefresh: () -> Unit,
 ) {
     val snapshot = state.subLoungeSnapshot
     var cardMessage by remember(state.selectedSubLoungeId) { mutableStateOf("") }
+    var trackQuery by remember(state.selectedSubLoungeId) { mutableStateOf("") }
+    var confirmDeleteVisible by remember(state.selectedSubLoungeId) { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MossSurface,
@@ -732,6 +765,53 @@ private fun SubLoungeDetailSheet(
                 item { SectionLabel("추천 음악 카드") }
                 item {
                     OutlinedTextField(
+                        value = trackQuery,
+                        onValueChange = { trackQuery = it.take(80) },
+                        label = { Text("추천할 노래 검색") },
+                        supportingText = { Text("곡명이나 아티스트를 검색해 추천할 수 있어요.") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        trailingIcon = {
+                            if (state.trackSearchLoading) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = SignalGreen)
+                            } else {
+                                IconButton(
+                                    onClick = { onSearchTracks(trackQuery) },
+                                    enabled = trackQuery.trim().length >= 2,
+                                ) {
+                                    Icon(Icons.Outlined.Search, contentDescription = "노래 검색")
+                                }
+                            }
+                        },
+                    )
+                }
+                items(state.trackSearchResults, key = { "search-${it.id}" }) { track ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MossSurfaceHigh,
+                        border = BorderStroke(1.dp, MossOutline),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = SignalGreen)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(track.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(track.artistName, color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedButton(onClick = {
+                                onSendSearchedTrack(track, cardMessage.ifBlank { null })
+                                cardMessage = ""
+                            }) {
+                                Text("추천")
+                            }
+                        }
+                    }
+                }
+                item {
+                    OutlinedTextField(
                         value = cardMessage,
                         onValueChange = { cardMessage = it.take(120) },
                         label = { Text("추천 한마디 (선택)") },
@@ -764,7 +844,19 @@ private fun SubLoungeDetailSheet(
                             border = BorderStroke(1.dp, MossOutline),
                         ) {
                             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(card.trackTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        card.trackTitle,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (card.canDelete) {
+                                        IconButton(onClick = { onDeleteCard(card.id) }) {
+                                            Icon(Icons.Outlined.DeleteOutline, contentDescription = "추천 삭제")
+                                        }
+                                    }
+                                }
                                 Text("${card.artistName} · ${card.senderAlias}", color = MutedMint)
                                 card.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
                                 OutlinedButton(
@@ -785,6 +877,19 @@ private fun SubLoungeDetailSheet(
             state.message?.let { message ->
                 item { Text(message, color = SignalGreen, style = MaterialTheme.typography.bodyMedium) }
             }
+            if (snapshot?.canDelete == true) {
+                item {
+                    OutlinedButton(
+                        onClick = { confirmDeleteVisible = true },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                    ) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(8.dp))
+                        Text("하위 라운지 삭제", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
             item {
                 OutlinedButton(
                     onClick = onLeave,
@@ -796,6 +901,25 @@ private fun SubLoungeDetailSheet(
                 }
             }
         }
+    }
+
+    if (confirmDeleteVisible) {
+        AlertDialog(
+            onDismissRequest = { confirmDeleteVisible = false },
+            title = { Text("하위 라운지를 삭제할까요?") },
+            text = { Text("추천 음악과 참여 정보가 함께 삭제되며 되돌릴 수 없습니다.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmDeleteVisible = false
+                    onDeleteSubLounge()
+                }) {
+                    Text("삭제", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteVisible = false }) { Text("취소") }
+            },
+        )
     }
 }
 
@@ -911,10 +1035,14 @@ private fun Context.hasLocationPermission(): Boolean =
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 @SuppressLint("MissingPermission")
-private suspend fun Context.lastKnownLocation(): Location? {
+private suspend fun Context.currentLocation(): Location? {
     if (!hasLocationPermission()) return null
     val client = LocationServices.getFusedLocationProviderClient(this)
-    return client.lastLocation.await()
+    val current = withTimeoutOrNull(10_000) {
+        client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+    }
+
+    return current ?: runCatching { client.lastLocation.await() }.getOrNull()
 }
 
 private fun Location.accuracyOrNull(): Float? = if (hasAccuracy()) accuracy else null

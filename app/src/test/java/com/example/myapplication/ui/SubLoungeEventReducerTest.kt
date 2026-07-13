@@ -61,6 +61,22 @@ class SubLoungeEventReducerTest {
     }
 
     @Test
+    fun `card deletion removes matching recommendation`() {
+        val cardJson = """{"id":"card","subLoungeId":"room","clientCardId":"client","senderAlias":"Mina","trackTitle":"Song","artistName":"Artist","reactionCount":0,"reactedByMe":false,"canDelete":true,"createdAt":"2026-07-12T02:00:00Z"}"""
+        val created = SubLoungeEventReducer.reduce(
+            snapshot(),
+            event("RECOMMENDATION_CARD_CREATED", cardJson),
+        )!!
+
+        val deleted = SubLoungeEventReducer.reduce(
+            created,
+            event("RECOMMENDATION_CARD_DELETED", """{"cardId":"card","subLoungeId":"room"}"""),
+        )
+
+        assertTrue(deleted!!.cards.isEmpty())
+    }
+
+    @Test
     fun `poll event preserves personal vote`() {
         val reduced = SubLoungeEventReducer.reduce(
             snapshot(),

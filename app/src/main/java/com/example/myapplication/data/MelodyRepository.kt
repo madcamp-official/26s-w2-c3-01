@@ -145,8 +145,6 @@ interface MelodyRepository {
     fun clearPublicProfile()
     fun followPublicProfile()
     fun sendChat(roomId: String, content: String)
-    fun selectTrack(track: Track)
-    fun setCurrentMusicPlaying(isPlaying: Boolean)
     fun markInboxRead()
     fun setDiscoverable(enabled: Boolean)
     fun setAllowReactions(enabled: Boolean)
@@ -198,6 +196,9 @@ class DemoMelodyRepository(
             isOnboardingComplete = preferences.getBoolean("onboarding-complete", false)
         ).copy(
             profile = restoreProfile(DemoCatalog.initialState(false).profile),
+            currentTrack = initialDetectedPlayback.track
+                ?: DemoCatalog.initialState(false).currentTrack,
+            currentTrackPlaying = initialDetectedPlayback.isPlaying,
             detectedTrack = initialDetectedPlayback.track,
             detectedTrackPlaying = initialDetectedPlayback.isPlaying,
             dataSourceLabel = if (environment.isConfigured) {
@@ -299,6 +300,8 @@ class DemoMelodyRepository(
             presenceSyncCoordinator.detectedPlayback.collect { playback ->
                 _state.update {
                     it.copy(
+                        currentTrack = playback.track ?: it.currentTrack,
+                        currentTrackPlaying = playback.isPlaying,
                         detectedTrack = playback.track,
                         detectedTrackPlaying = playback.isPlaying,
                     )
@@ -810,20 +813,6 @@ class DemoMelodyRepository(
         }
     }
 
-    override fun selectTrack(track: Track) {
-        _state.update {
-            it.copy(
-                currentTrack = track,
-                currentTrackPlaying = true,
-                feedbackMessage = "${track.title}을(를) 현재 음악으로 선택했어요"
-            )
-        }
-    }
-
-    override fun setCurrentMusicPlaying(isPlaying: Boolean) {
-        _state.update { it.copy(currentTrackPlaying = isPlaying) }
-    }
-
     override fun markInboxRead() {
         realtimeInboxStore?.markAllRead()
         _state.update { current ->
@@ -1257,6 +1246,8 @@ class DemoMelodyRepository(
                 notifications = realtimeInboxStore?.load().orEmpty(),
                 chats = emptyList(),
                 chatMessages = emptyMap(),
+                currentTrack = detectedPlayback.track ?: it.currentTrack,
+                currentTrackPlaying = detectedPlayback.isPlaying,
                 following = emptyList(),
                 followers = emptyList(),
                 socialConnectionsLoading = false,
