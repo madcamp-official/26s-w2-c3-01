@@ -94,20 +94,6 @@ object ApiClient {
     fun createBuildingLoungeApi(environment: ApiEnvironment = ApiEnvironment()): BuildingLoungeApi =
         retrofit(environment).create(BuildingLoungeApi::class.java)
 
-    fun createLyriaMusicApi(environment: ApiEnvironment = ApiEnvironment()): LyriaMusicApi {
-        val client = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(3, TimeUnit.MINUTES)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
-
-        return Retrofit.Builder()
-            .baseUrl(environment.apiBaseUrl.trimEnd('/') + "/")
-            .client(authenticatedClient(environment, client.newBuilder()))
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(LyriaMusicApi::class.java)
-    }
 }
 
 private object SessionRuntime {

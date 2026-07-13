@@ -1,7 +1,7 @@
 package com.melodybubble.server.social
 
 import com.melodybubble.server.chat.ChatService
-import com.melodybubble.server.profile.ProfileMediaStorage
+import com.melodybubble.server.profile.AvatarUrlFactory
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -60,7 +60,7 @@ class SocialService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val chat: ChatService,
-    private val media: ProfileMediaStorage,
+    private val avatars: AvatarUrlFactory,
 ) {
     @Transactional
     fun follow(userId: UUID, handle: String): FollowResponse {
@@ -149,7 +149,7 @@ class SocialService(
 
     fun following(userId: UUID): List<SocialConnection> = jdbc.query(
         """
-        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_data_url,u.avatar_object_key,u.bio,
+        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_seed,u.bio,
           exists(select 1 from user_follows back where back.follower_id=u.id and back.followed_id=?),
           mine.created_at
         from user_follows mine join users u on u.id=mine.followed_id
@@ -164,7 +164,7 @@ class SocialService(
 
     fun followers(userId: UUID): List<SocialConnection> = jdbc.query(
         """
-        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_data_url,u.avatar_object_key,u.bio,
+        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_seed,u.bio,
           (mine.id is not null),incoming.created_at
         from user_follows incoming join users u on u.id=incoming.follower_id
         left join user_follows mine on mine.follower_id=? and mine.followed_id=u.id
@@ -323,10 +323,10 @@ class SocialService(
         profileHandle = rs.getString(2),
         displayAlias = rs.getString(3),
         profileColor = rs.getString(4),
-        avatarUrl = media.signedUrl(rs.getString(6)) ?: rs.getString(5),
-        bio = rs.getString(7).orEmpty(),
-        mutual = rs.getBoolean(8),
-        followedAt = rs.getTimestamp(9).toInstant(),
+        avatarUrl = avatars.create(rs.getString(5)),
+        bio = rs.getString(6).orEmpty(),
+        mutual = rs.getBoolean(7),
+        followedAt = rs.getTimestamp(8).toInstant(),
     )
 
     companion object {

@@ -16,7 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
 data class CachedAccount(
     val accountId: String,
     val displayAlias: String,
-    val avatarDataUrl: String?,
+    val avatarUrl: String?,
     val colorHex: Long,
     val melodyAlias: String,
     val musicCard: ExchangeMusicCard,

@@ -1,10 +1,5 @@
 package com.example.myapplication.ui.screens
 
-import android.graphics.BitmapFactory
-import android.util.Base64
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,7 +26,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.Image
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.BluetoothSearching
@@ -93,7 +87,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
@@ -133,10 +126,8 @@ import com.example.myapplication.ui.theme.SignalGreen
 import com.example.myapplication.ui.components.MelodyCard
 import com.example.myapplication.ui.components.MelodyBubbleColors
 import com.example.myapplication.ui.MelodyAliasGenerationState
-import com.example.myapplication.ui.LyriaGenerationState
 import com.example.myapplication.ui.MusicSearchUiState
 import kotlin.math.roundToInt
-import java.io.ByteArrayOutputStream
 
 @Composable
 fun OnboardingScreen(
@@ -882,12 +873,14 @@ fun MyScreen(
     onOpenFollowers: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenBubbleMode: () -> Unit,
-    onProfileUpdate: (String, Long, String, String?, List<String>, List<String>) -> Unit,
+    onProfileUpdate: (String, Long, String, List<String>, List<String>) -> Unit,
+    onRandomizeAvatar: () -> Unit,
     onProfileCurationUpdate: (List<ProfileTrack>, List<ProfileArtist>) -> Unit,
     musicSearchState: MusicSearchUiState,
     onSearchMusic: (String) -> Unit,
     onClearMusicSearch: () -> Unit,
     onPreviewMusic: (MusicSearchResult) -> Unit,
+    onOpenMelodyAlias: () -> Unit,
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
@@ -897,7 +890,6 @@ fun MyScreen(
     var profileSaveStarted by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
     var bio by rememberSaveable(profile.bio) { mutableStateOf(profile.bio) }
-    var avatar by rememberSaveable(profile.avatarDataUrl) { mutableStateOf(profile.avatarDataUrl) }
     var colorHex by rememberSaveable(profile.colorHex) { mutableStateOf(profile.colorHex) }
     var genres by rememberSaveable(profile.genres) { mutableStateOf(profile.genres) }
     var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
@@ -911,19 +903,6 @@ fun MyScreen(
             if (feedbackMessage == "프로필을 변경했어요") editorSection = null
         }
     }
-    val context = LocalContext.current
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) avatar = runCatching {
-            val bitmap = context.contentResolver.openInputStream(uri).use(BitmapFactory::decodeStream)
-            val ratio = minOf(1f, 512f / maxOf(bitmap.width, bitmap.height))
-            val resized = if (ratio < 1f) android.graphics.Bitmap.createScaledBitmap(
-                bitmap, (bitmap.width * ratio).toInt(), (bitmap.height * ratio).toInt(), true,
-            ) else bitmap
-            val bytes = ByteArrayOutputStream().also { resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 82, it) }.toByteArray()
-            "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
-        }.getOrNull()
-    }
-
     if (editorSection != null) ModalBottomSheet(
         onDismissRequest = {
             editorSection = null
@@ -964,20 +943,16 @@ fun MyScreen(
             }
             Spacer(Modifier.height(22.dp))
             if (editorSection == "BASIC") {
-            Box(contentAlignment = Alignment.BottomEnd) {
-                ProfileAvatar(avatar, name, colorHex, 112.dp)
-                Surface(
-                    modifier = Modifier.size(38.dp).clickable {
-                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    shape = CircleShape,
-                    color = SignalGreen,
-                ) { Box(contentAlignment = Alignment.Center) { Text("＋", color = Color(0xFF00210B), fontWeight = FontWeight.Bold) } }
+            ProfileAvatar(profile.avatarUrl, name, colorHex, 112.dp)
+            Text("DiceBear Thumbs 아바타", color = MutedMint, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = onRandomizeAvatar, enabled = !profileSaving) {
+                if (profileSaving) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (profileSaving) "새 아바타 적용 중" else "새 아바타 뽑기")
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text("사진 선택") }
-                if (avatar != null) TextButton(onClick = { avatar = null }) { Text("사진 삭제", color = MaterialTheme.colorScheme.error) }
-            }
+            Spacer(Modifier.height(8.dp))
             OutlinedTextField(name, { name = it.take(40) }, Modifier.fillMaxWidth(), label = { Text("프로필 이름") }, singleLine = true)
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
@@ -1005,7 +980,7 @@ fun MyScreen(
                 onClick = {
                     awaitingProfileSave = true
                     profileSaveStarted = false
-                    onProfileUpdate(name, colorHex, bio, avatar, genres, moods)
+                    onProfileUpdate(name, colorHex, bio, genres, moods)
                 },
                 enabled = name.trim().length >= 2 && !awaitingProfileSave,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -1131,7 +1106,7 @@ fun MyScreen(
         item {
             ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "BASIC" }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ProfileAvatar(profile.avatarDataUrl, profile.accountAlias, profile.colorHex, 82.dp)
+                    ProfileAvatar(profile.avatarUrl, profile.accountAlias, profile.colorHex, 82.dp)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(profile.accountAlias, color = ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -1291,6 +1266,26 @@ fun MyScreen(
                 }
             }
         }
+        item {
+            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp, onClick = onOpenMelodyAlias) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Tune, null, tint = accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("멜로디 별칭", color = ink, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (profile.melodyAliasId.isBlank()) "나만의 음악 정체성을 만들어보세요."
+                            else "${profile.melodyAliasMood} · ${profile.melodyAliasTone} · ${profile.melodyAliasTempo} BPM",
+                            color = muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(Icons.Outlined.ChevronRight, null, tint = muted)
+                }
+            }
+        }
     }
 }
 
@@ -1302,7 +1297,6 @@ fun PublicProfileScreen(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onFollow: () -> Unit,
-    onPlayProfileMusic: (String, Float) -> Unit,
     onPlayNowPlaying: (String, String, String?) -> Unit = { _, _, _ -> },
     onPlayTrackPreview: (ProfileTrack) -> Unit = {},
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
@@ -1899,12 +1893,9 @@ fun SocialConnectionsScreen(
 }
 
 @Composable
-private fun ProfileAvatar(dataUrl: String?, name: String, colorHex: Long, size: androidx.compose.ui.unit.Dp) {
-    val remoteUrl = dataUrl?.takeIf { it.startsWith("https://") }
-    val bitmap = remember(dataUrl) { dataUrl?.substringAfter("base64,", "")?.takeIf(String::isNotBlank)?.let { encoded -> runCatching { BitmapFactory.decodeByteArray(Base64.decode(encoded, Base64.DEFAULT), 0, Base64.decode(encoded, Base64.DEFAULT).size) }.getOrNull() } }
+private fun ProfileAvatar(avatarUrl: String?, name: String, colorHex: Long, size: androidx.compose.ui.unit.Dp) {
     Surface(modifier = Modifier.size(size), shape = CircleShape, color = Color(colorHex)) {
-        if (remoteUrl != null) AsyncImage(remoteUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        else if (bitmap != null) Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        if (avatarUrl != null) AsyncImage(avatarUrl, "$name 프로필 아바타", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Box(contentAlignment = Alignment.Center) { Text(name.trim().take(1).uppercase().ifBlank { "♪" }, style = MaterialTheme.typography.headlineMedium, color = Color.White, fontWeight = FontWeight.Bold) }
     }
 }
@@ -2065,169 +2056,6 @@ private fun LegacyMyScreen(
 
 @Composable
 fun MelodyAliasScreen(
-    onBack: () -> Unit,
-    generationState: LyriaGenerationState,
-    onGenerate: (Map<String, Int>, String, List<String>, Int, Int) -> Unit,
-    onPlayFull: () -> Unit,
-    onPlaySelection: (Float) -> Unit,
-    onSaveProfile: (Float) -> Unit,
-    onReset: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var expanded by rememberSaveable { mutableStateOf<String?>("mood") }
-    var calm by rememberSaveable { mutableFloatStateOf(60f) }
-    var bright by rememberSaveable { mutableFloatStateOf(45f) }
-    var dreamy by rememberSaveable { mutableFloatStateOf(70f) }
-    var dark by rememberSaveable { mutableFloatStateOf(20f) }
-    var genre by rememberSaveable { mutableStateOf("R&B") }
-    var instruments by rememberSaveable { mutableStateOf(setOf("Piano", "Synth")) }
-    var pitch by rememberSaveable { mutableFloatStateOf(50f) }
-    var speed by rememberSaveable { mutableFloatStateOf(50f) }
-    var clipStart by rememberSaveable { mutableFloatStateOf(10f) }
-    val isLoading = generationState is LyriaGenerationState.Loading
-
-    Column(modifier = modifier.fillMaxSize()) {
-        BackHeader(onBack = onBack, title = "멜로디 별칭", subtitle = "나의 바이브를 담은 30초 음악")
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            item {
-                CollapsibleOption("mood", "무드", "감정의 비율을 조절해 주세요", expanded, { expanded = it }) {
-                    MoodAmount("Calm", calm) { calm = it }
-                    MoodAmount("Bright", bright) { bright = it }
-                    MoodAmount("Dreamy", dreamy) { dreamy = it }
-                    MoodAmount("Dark", dark) { dark = it }
-                }
-            }
-            item {
-                CollapsibleOption("genre", "장르", genre, expanded, { expanded = it }) {
-                    val genres = listOf("팝", "힙합", "R&B", "밴드사운드", "전자음악", "어쿠스틱", "재즈", "락", "클래식")
-                    genres.chunked(3).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            row.forEach { item ->
-                                FilterChip(selected = genre == item, onClick = { genre = item }, label = { Text(item) }, modifier = Modifier.weight(1f))
-                            }
-                            repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
-                        }
-                    }
-                }
-            }
-            item {
-                CollapsibleOption("tone", "톤", "중심이 될 악기를 여러 개 고를 수 있어요", expanded, { expanded = it }) {
-                    Text("선택한 악기가 조금 더 부각되며, 곡을 풍성하게 만드는 다른 악기도 함께 들어갈 수 있어요.", color = MutedMint, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(8.dp))
-                    listOf("Piano", "Guitar", "Synth", "Bass", "Drums", "Bell", "Strings").chunked(2).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            row.forEach { tone ->
-                                FilterChip(
-                                    selected = tone in instruments,
-                                    onClick = { instruments = if (tone in instruments) instruments - tone else instruments + tone },
-                                    label = { Text(tone) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-                            if (row.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-            item {
-                CollapsibleOption("pitch", "피치", "${pitch.roundToInt()} · 낮고 묵직함 ↔ 높고 공기감", expanded, { expanded = it }) {
-                    Slider(value = pitch, onValueChange = { pitch = it }, valueRange = 0f..100f)
-                }
-            }
-            item {
-                CollapsibleOption("speed", "스피드", "${speed.roundToInt()} · 느리고 여유로움 ↔ 빠르고 에너지", expanded, { expanded = it }) {
-                    Slider(value = speed, onValueChange = { speed = it }, valueRange = 0f..100f)
-                }
-            }
-            item {
-                Button(
-                    onClick = {
-                        onGenerate(
-                            mapOf("Calm" to calm.roundToInt(), "Bright" to bright.roundToInt(), "Dreamy" to dreamy.roundToInt(), "Dark" to dark.roundToInt()),
-                            genre,
-                            instruments.toList(),
-                            pitch.roundToInt(),
-                            speed.roundToInt()
-                        )
-                    },
-                    enabled = !isLoading && instruments.isNotEmpty(),
-                    modifier = Modifier.fillMaxWidth().height(54.dp)
-                ) { Text(if (isLoading) "음악 생성 중" else "30초 음악 만들기") }
-            }
-            if (isLoading) item { LyriaLoadingPanel() }
-            if (generationState is LyriaGenerationState.Error) item {
-                AppPanel(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .35f)) {
-                    Text("생성에 실패했어요", style = MaterialTheme.typography.titleMedium)
-                    Text(generationState.message, color = MutedMint)
-                }
-            }
-            if (generationState is LyriaGenerationState.Success) {
-                item {
-                    AppPanel(color = SignalGreen.copy(alpha = .09f)) {
-                        Text("30초 음악이 완성됐어요", color = SignalGreen, style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(10.dp))
-                        OutlinedButton(onClick = onPlayFull, modifier = Modifier.fillMaxWidth()) { Text("전체 30초 듣기") }
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { onSaveProfile(clipStart) }, enabled = generationState.song.candidateKey != null, modifier = Modifier.fillMaxWidth()) {
-                            Text("선택한 5초를 Melody ID로 저장")
-                        }
-                    }
-                }
-                item {
-                    AppPanel {
-                        Text("사용할 5초 선택", style = MaterialTheme.typography.titleMedium)
-                        Text("막대를 드래그해 시작 지점을 정하세요.", color = MutedMint)
-                        Spacer(Modifier.height(14.dp))
-                        Text("${"%.1f".format(clipStart)}초 - ${"%.1f".format(clipStart + 5f)}초", color = SignalGreen, fontWeight = FontWeight.Bold)
-                        Slider(value = clipStart, onValueChange = { clipStart = it }, valueRange = 0f..25f, steps = 49)
-                        Row(modifier = Modifier.fillMaxWidth()) { Text("0초", color = MutedMint); Spacer(Modifier.weight(1f)); Text("30초", color = MutedMint) }
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { onPlaySelection(clipStart) }, modifier = Modifier.fillMaxWidth()) { Text("선택한 5초 듣기") }
-                    }
-                }
-                item { OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) { Text("조건을 바꿔 다시 만들기") } }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CollapsibleOption(
-    id: String,
-    title: String,
-    summary: String,
-    expanded: String?,
-    onExpanded: (String?) -> Unit,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    AppPanel {
-        Row(modifier = Modifier.fillMaxWidth().clickable { onExpanded(if (expanded == id) null else id) }, verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) { Text(title, style = MaterialTheme.typography.titleMedium); Text(summary, color = MutedMint, style = MaterialTheme.typography.bodySmall) }
-            Text(if (expanded == id) "−" else "+", style = MaterialTheme.typography.headlineSmall)
-        }
-        if (expanded == id) { Spacer(Modifier.height(14.dp)); content() }
-    }
-}
-
-@Composable
-private fun MoodAmount(label: String, value: Float, onChange: (Float) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) { Text(label, modifier = Modifier.width(72.dp)); Slider(value = value, onValueChange = onChange, valueRange = 0f..100f, modifier = Modifier.weight(1f)); Text(value.roundToInt().toString(), modifier = Modifier.width(32.dp)) }
-}
-
-@Composable
-private fun LyriaLoadingPanel() {
-    AppPanel(color = SignalGreen.copy(alpha = .10f)) {
-        Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(modifier = Modifier.size(30.dp), color = SignalGreen, strokeWidth = 3.dp); Spacer(Modifier.width(14.dp)); Column { Text("나만의 음악을 만드는 중", style = MaterialTheme.typography.titleMedium); Text("Lyria 3가 30초 곡을 작곡하고 있어요.", color = MutedMint) } }
-        Spacer(Modifier.height(14.dp)); LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = SignalGreen)
-    }
-}
-
-@Composable
-private fun LegacyMelodyAliasScreen(
     profile: ProfileSettings,
     candidates: List<MelodyAliasCandidate>,
     onBack: () -> Unit,

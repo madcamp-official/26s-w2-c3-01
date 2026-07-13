@@ -63,7 +63,6 @@ import com.example.myapplication.data.remote.RemotePopularTrack
 import com.example.myapplication.data.remote.ReportSubmitRequest
 import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
-import com.example.myapplication.data.remote.ProfileMusicUpdateRequest
 import com.example.myapplication.data.remote.ProfileCurationUpdateRequest
 import com.example.myapplication.data.remote.ProfilePrivacyUpdateRequest
 import com.example.myapplication.data.remote.PrivacyUpdateRequest
@@ -157,11 +156,10 @@ interface MelodyRepository {
     fun setOfflineExchangeEnabled(enabled: Boolean)
     fun setMusicVisibility(label: String)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
-    fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>)
+    fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>)
+    fun randomizeAvatar()
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings)
-    fun setProfileMusic(candidateKey: String, description: String?, startSeconds: Float)
-    fun deleteProfileMusic()
     fun selectMelodyAlias(candidateId: String)
     fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
     fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String)
@@ -981,19 +979,19 @@ class DemoMelodyRepository(
         syncPresenceSettings()
     }
 
-    override fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>) {
+    override fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>) {
         val token = accessToken ?: return
         val previousProfile = _state.value.profile
         _state.update { current -> current.copy(profileSaving = true, profile = current.profile.copy(
             accountAlias = displayName.trim(), nearbyDisplayAlias = displayName.trim(), colorHex = colorHex,
-            bio = bio.trim(), avatarDataUrl = avatarDataUrl, genres = genres, moods = moods,
+            bio = bio.trim(), genres = genres, moods = moods,
         )) }
         persistProfile(_state.value.profile)
         scope.launch {
             runCatching {
                 profileApi.update("Bearer $token", ProfileUpdateRequest(
                     displayName, "#%06X".format(colorHex and 0xFFFFFF), bio,
-                    avatarDataUrl, genres, moods,
+                    genres, moods,
                 ))
             }.onSuccess {
                 if (isCurrentSession(token)) applyRemoteProfile(it, "프로필을 변경했어요")
@@ -1007,6 +1005,27 @@ class DemoMelodyRepository(
                     persistProfile(previousProfile)
                 }
             }
+        }
+    }
+
+    override fun randomizeAvatar() {
+        val token = accessToken ?: return
+        _state.update { it.copy(profileSaving = true) }
+        scope.launch {
+            runCatching { profileApi.randomizeAvatar("Bearer $token") }
+                .onSuccess {
+                    if (isCurrentSession(token)) applyRemoteProfile(it, "새 아바타를 적용했어요")
+                }
+                .onFailure {
+                    if (isCurrentSession(token)) {
+                        _state.update { state ->
+                            state.copy(
+                                profileSaving = false,
+                                feedbackMessage = requestErrorMessage(it, "아바타를 변경하지 못했어요"),
+                            )
+                        }
+                    }
+                }
         }
     }
 
@@ -1120,31 +1139,6 @@ class DemoMelodyRepository(
             _state.update {
                 it.copy(profileSaving = false, feedbackMessage = "공개 범위를 기기에 보관했어요. 연결되면 다시 시도해요")
             }
-        }
-    }
-
-    override fun setProfileMusic(candidateKey: String, description: String?, startSeconds: Float) {
-        val token = accessToken ?: return
-        scope.launch {
-            runCatching {
-                profileApi.setMusic(
-                    "Bearer $token",
-                    ProfileMusicUpdateRequest(candidateKey, description, startSeconds.coerceIn(0f, 25f)),
-                )
-            }.onSuccess {
-                if (isCurrentSession(token)) applyRemoteProfile(it, "프로필 음악을 설정했어요")
-            }.onFailure {
-                if (isCurrentSession(token)) showRequestError(it, "프로필 음악을 저장하지 못했어요")
-            }
-        }
-    }
-
-    override fun deleteProfileMusic() {
-        val token = accessToken ?: return
-        scope.launch {
-            runCatching { profileApi.deleteMusic("Bearer $token") }
-                .onSuccess { if (isCurrentSession(token)) applyRemoteProfile(it, "프로필 음악을 삭제했어요") }
-                .onFailure { if (isCurrentSession(token)) showRequestError(it, "프로필 음악을 삭제하지 못했어요") }
         }
     }
 
@@ -1354,7 +1348,7 @@ class DemoMelodyRepository(
                 accountAlias = account.displayAlias,
                 nearbyDisplayAlias = account.displayAlias,
                 colorHex = account.colorHex,
-                avatarDataUrl = account.avatarDataUrl,
+                avatarUrl = account.avatarUrl,
                 melodyNotes = account.melodyAlias.split(" · ").filter(String::isNotBlank),
             ),
             nearbyListeners = emptyList(),
@@ -1487,10 +1481,8 @@ class DemoMelodyRepository(
             nearbyDisplayAlias = remote.displayName,
             colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
             bio = remote.bio.orEmpty(),
-            avatarDataUrl = remote.avatarDataUrl,
-            profileMusicUrl = remote.profileMusicUrl,
-            profileMusicDescription = remote.profileMusicDescription,
-            profileMusicStartSeconds = remote.profileMusicStartSeconds,
+            avatarSeed = remote.avatarSeed,
+            avatarUrl = remote.avatarUrl,
             genres = remote.genres.orEmpty(),
             moods = remote.moods.orEmpty(),
             profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
@@ -1541,10 +1533,8 @@ class DemoMelodyRepository(
             .putString("profile-nearby-alias", profile.nearbyDisplayAlias)
             .putLong("profile-color", profile.colorHex)
             .putString("profile-bio", profile.bio)
-            .putString("profile-avatar", profile.avatarDataUrl)
-            .putString("profile-music-url", profile.profileMusicUrl)
-            .putString("profile-music-description", profile.profileMusicDescription)
-            .putFloat("profile-music-start-seconds", profile.profileMusicStartSeconds ?: 0f)
+            .putString("profile-avatar-seed", profile.avatarSeed)
+            .putString("profile-avatar", profile.avatarUrl)
             .putString("profile-genres", profile.genres.joinToString("\u001F"))
             .putString("profile-moods", profile.moods.joinToString("\u001F"))
             .putString("profile-handle", profile.profileHandle)
@@ -1571,10 +1561,8 @@ class DemoMelodyRepository(
             nearbyDisplayAlias = preferences.getString("profile-nearby-alias", fallback.nearbyDisplayAlias) ?: fallback.nearbyDisplayAlias,
             colorHex = preferences.getLong("profile-color", fallback.colorHex),
             bio = preferences.getString("profile-bio", fallback.bio) ?: fallback.bio,
-            avatarDataUrl = preferences.getString("profile-avatar", null),
-            profileMusicUrl = preferences.getString("profile-music-url", null),
-            profileMusicDescription = preferences.getString("profile-music-description", null),
-            profileMusicStartSeconds = preferences.getFloat("profile-music-start-seconds", 0f),
+            avatarSeed = preferences.getString("profile-avatar-seed", fallback.avatarSeed) ?: fallback.avatarSeed,
+            avatarUrl = preferences.getString("profile-avatar", fallback.avatarUrl),
             genres = preferences.getString("profile-genres", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.genres,
             moods = preferences.getString("profile-moods", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.moods,
             profileHandle = preferences.getString("profile-handle", fallback.profileHandle) ?: fallback.profileHandle,
@@ -1743,8 +1731,6 @@ class DemoMelodyRepository(
             runCatching { RelationshipStatus.valueOf(it) }.getOrDefault(RelationshipStatus.NONE)
         } ?: RelationshipStatus.NONE,
         canReact = canReact ?: true,
-        melodyIdUrl = melodyIdUrl,
-        melodyIdStartSeconds = melodyIdStartSeconds,
     )
 
     private fun applyFollowResponse(handle: String, response: RemoteFollowResponse) {
@@ -2311,10 +2297,8 @@ class DemoMelodyRepository(
         displayName = displayName,
         colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
         bio = bio.orEmpty(),
+        avatarSeed = avatarSeed,
         avatarUrl = avatarUrl,
-        profileMusicUrl = profileMusicUrl,
-        profileMusicDescription = profileMusicDescription,
-        profileMusicStartSeconds = profileMusicStartSeconds,
         genres = genres.orEmpty(),
         moods = moods.orEmpty(),
         melodyAlias = melodyAlias?.toDomain(),

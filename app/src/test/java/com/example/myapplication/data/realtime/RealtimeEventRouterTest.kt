@@ -82,9 +82,7 @@ class RealtimeEventRouterTest {
                   "proximity":"WITHIN_5M",
                   "relationship":"NONE",
                   "canReact":true,
-                  "track":null,
-                  "melodyIdUrl":null,
-                  "melodyIdStartSeconds":null
+                  "track":null
                 }]
               }
             }""".trimIndent(),

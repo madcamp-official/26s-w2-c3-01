@@ -34,14 +34,6 @@
       {
         "name": "WEBSOCKET_BROKER_RELAY_ENABLED",
         "value": "false"
-      },
-      {
-        "name": "GEMINI_MUSIC_MODEL",
-        "value": "lyria-3-clip-preview"
-      },
-      {
-        "name": "MEDIA_BUCKET",
-        "value": "melody-bubble-profile-media-507219091593-ap-northeast-2"
       }
     ],
     "secrets": [
@@ -56,10 +48,6 @@
       {
         "name": "OPS_PASSWORD",
         "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:OPS_PASSWORD::"
-      },
-      {
-        "name": "GEMINI_API_KEY",
-        "valueFrom": "arn:aws:secretsmanager:ap-northeast-2:507219091593:secret:melody-bubble/production-1Y4MVb:GEMINI_API_KEY::"
       }
     ]
   },

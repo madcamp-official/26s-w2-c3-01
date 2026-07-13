@@ -36,7 +36,7 @@
 | 라운지 상세 | 서버 하위 라운지 snapshot | 참가·퇴장·청취·카드·리액션·투표 REST | `/topic/sub-lounges/{subLoungeId}` | 별칭·공개 음악·추천 카드·집계 투표 |
 | 인박스 | 서버 리액션 이력·대화방 | `GET /api/v1/nearby/reactions`, `GET /api/v1/notifications`, `GET /api/v1/chat/rooms` | `/user/queue/notifications`, `/user/queue/reactions`, `/user/queue/chat` | 본인에게 전달된 알림·대화 미리보기 |
 | 1:1 채팅 | 서버 대화 | `GET /api/v1/chat/rooms`, `GET`·`POST /api/v1/chat/rooms/{roomId}/messages`, `PUT /api/v1/chat/rooms/{roomId}/read` | `/user/queue/chat`의 생성·메시지·읽음·방 갱신 이벤트 | 맞팔이며 차단되지 않은 대화방의 텍스트와 전송 상태 |
-| 마이·설정 | 캐시된 계정별 프로필 | `GET /api/v1/me`, `PATCH /api/v1/me`, `PUT /api/v1/me/privacy`, `PUT /api/v1/me/melody-alias` | 설정 반영 알림은 개인 Queue 선택 | 본인 프로필·취향·공개 범위·멜로디 별칭·검증된 교환 통계 |
+| 마이·설정 | 캐시된 계정별 프로필 | `GET /api/v1/me`, `PATCH /api/v1/me`, `POST /api/v1/me/avatar/randomize`, `PUT /api/v1/me/privacy`, `PUT /api/v1/me/melody-alias` | 설정 반영 알림은 개인 Queue 선택 | DiceBear 아바타·본인 프로필·취향·공개 범위·멜로디 별칭·검증된 교환 통계 |
 | 현재 음악 선택 | 앱 공용 `PresenceSyncCoordinator`가 MediaSession 감지, 세션 미제공 앱만 알림 문자열 폴백 | `POST /api/v1/nearby/music` | 변경 수신은 `/user/queue/nearby` | 제목·아티스트·source·재생 여부; 앱 계정·원본 알림 전체 제외 |
 | 오프라인 기록 | 계정별 Room `offline_exchange_local`·`sync_outbox` | `POST /api/v1/offline-credentials`, `POST /api/v1/offline-exchanges/batch`, `GET`·`DELETE /api/v1/offline-exchanges/**` | Google Nearby Connections로 1:1 카드·서명 교환; STOMP와 별도 | 양쪽이 승인한 음악 카드, 검증 상태, 동기화 상태 |
 
@@ -137,6 +137,7 @@ GET /api/v1/nearby/snapshot
 ```http
 GET /api/v1/me
 PATCH /api/v1/me
+POST /api/v1/me/avatar/randomize
 PUT /api/v1/me/privacy
 PUT /api/v1/me/profile-curation
 PUT /api/v1/me/profile-privacy
@@ -150,6 +151,8 @@ PUT /api/v1/me/presence-settings
 ```json
 {
   "profileHandle": "listener_a1b2c3d4e5f6",
+  "avatarSeed": "01c352f5-9e0b-4ba8-8377-74d30cf0b89f",
+  "avatarUrl": "https://api.dicebear.com/10.x/thumbs/svg?seed=01c352f5-9e0b-4ba8-8377-74d30cf0b89f",
   "genres": ["INDIE", "RNB"],
   "moods": ["CALM", "NIGHT"],
   "stats": {
@@ -185,6 +188,8 @@ PUT /api/v1/me/presence-settings
   }
 }
 ```
+
+아바타는 서버가 생성한 불투명 `avatarSeed`로 결정되며 파일 업로드를 받지 않습니다. `avatar/randomize`는 seed와 `profileRevision`을 갱신하고 새 DiceBear Thumbs URL을 반환합니다.
 
 공개 프로필은 인증된 요청자와 대상의 차단·팔로우·음악 공개 범위를 적용합니다. `sharedVerifiedExchangeCount`는 양쪽 서명 기록이 일치한 교환만 포함하고, 개별 상대 목록이나 정확한 장소는 공개하지 않습니다.
 

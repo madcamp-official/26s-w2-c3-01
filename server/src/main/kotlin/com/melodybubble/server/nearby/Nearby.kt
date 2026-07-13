@@ -5,7 +5,6 @@ import com.melodybubble.server.realtime.RealtimeEventTypes
 import com.melodybubble.server.realtime.RealtimePublisher
 import com.melodybubble.server.realtime.RealtimeQueues
 import com.melodybubble.server.safety.ActionRateLimiter
-import com.melodybubble.server.profile.ProfileMediaStorage
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -78,8 +77,6 @@ data class NearbyBubble(
     val relationship: String,
     val canReact: Boolean,
     val track: TrackSummary?,
-    val melodyIdUrl: String?,
-    val melodyIdStartSeconds: Float?,
 )
 data class NearbySnapshot(
     val generatedAt: Instant = Instant.now(),
@@ -126,7 +123,6 @@ class NearbyService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val realtime: RealtimePublisher,
-    private val media: ProfileMediaStorage,
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
     @Value("\${app.nearby.max-radius-meters:15}") private val maxRadiusMeters: Int,
 ) {
@@ -172,8 +168,6 @@ class NearbyService(
                 ELSE 'NONE'
               END AS relationship,
               privacy.allow_reactions,
-              CASE WHEN privacy.share_music THEN person.profile_music_object_key END AS melody_id_object_key,
-              CASE WHEN privacy.share_music THEN person.profile_music_start_seconds END AS melody_id_start_seconds,
               ST_DistanceSphere(mine.point, location.point) AS distance_meters
             FROM my_location mine
             JOIN current_locations location
@@ -227,9 +221,6 @@ class NearbyService(
                 track = rs.getString("track_title")?.let {
                     TrackSummary(it, rs.getString("artist_name"))
                 },
-                melodyIdUrl = media.signedUrl(rs.getString("melody_id_object_key")),
-                melodyIdStartSeconds = rs.getFloat("melody_id_start_seconds")
-                    .takeUnless { rs.wasNull() },
             )
         }, *args)
         return NearbySnapshot(radiusMeters = radius, items = items)

@@ -1,6 +1,7 @@
 package com.melodybubble.server.profile
 
 import com.melodybubble.server.nearby.NearbyService
+import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -9,6 +10,7 @@ import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -16,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.security.Principal
 import java.sql.ResultSet
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -101,11 +104,8 @@ data class ProfileResponse(
     val displayName: String,
     val profileColor: String,
     val bio: String,
-    val avatarDataUrl: String?,
-    val profileMusicUrl: String?,
-    val profileMusicDescription: String?,
-    val profileMusicStartSeconds: Float?,
-    val profileMusicUpdatedAt: Instant?,
+    val avatarSeed: String,
+    val avatarUrl: String,
     val genres: List<String>,
     val moods: List<String>,
     val discoverable: Boolean,
@@ -129,10 +129,8 @@ data class PublicProfileResponse(
     val displayName: String,
     val profileColor: String,
     val bio: String,
-    val avatarUrl: String?,
-    val profileMusicUrl: String?,
-    val profileMusicDescription: String?,
-    val profileMusicStartSeconds: Float?,
+    val avatarSeed: String,
+    val avatarUrl: String,
     val genres: List<String>,
     val moods: List<String>,
     val melodyAlias: MelodyAliasProfile?,
@@ -153,7 +151,6 @@ data class ProfileUpdate(
     val displayName: String,
     val profileColor: String,
     val bio: String = "",
-    val avatarDataUrl: String? = null,
     val genres: List<String> = emptyList(),
     val moods: List<String> = emptyList(),
 )
@@ -174,11 +171,6 @@ data class ProfilePrivacyUpdate(
     val exchangeInsightsVisibility: String = "EXCHANGED",
     val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
 )
-data class ProfileMusicUpdate(
-    val candidateKey: String,
-    val description: String? = null,
-    val startSeconds: Float,
-)
 data class MelodyAliasUpdate(
     val id: String,
     val notes: List<String>,
@@ -193,17 +185,11 @@ private data class StoredProfile(
     val displayName: String,
     val profileColor: String,
     val bio: String,
-    val avatarDataUrl: String?,
-    val avatarObjectKey: String?,
-    val profileMusicObjectKey: String?,
-    val profileMusicDescription: String?,
-    val profileMusicStartSeconds: Float?,
-    val profileMusicUpdatedAt: Instant?,
+    val avatarSeed: String,
     val genres: List<String>,
     val moods: List<String>,
     val discoverable: Boolean,
     val shareMusic: Boolean,
-    val musicVisibility: String,
     val offlineExchangeEnabled: Boolean,
     val profileRevision: Long,
     val privacy: ProfilePrivacy,
@@ -213,7 +199,7 @@ private data class StoredProfile(
 @Service
 class ProfileQueryService(
     private val jdbc: JdbcTemplate,
-    private val media: ProfileMediaStorage,
+    private val avatars: AvatarUrlFactory,
 ) {
     fun me(userId: UUID): ProfileResponse {
         val stored = storedByUserId(userId)
@@ -224,11 +210,8 @@ class ProfileQueryService(
             displayName = stored.displayName,
             profileColor = stored.profileColor,
             bio = stored.bio,
-            avatarDataUrl = media.signedUrl(stored.avatarObjectKey) ?: stored.avatarDataUrl,
-            profileMusicUrl = media.signedUrl(stored.profileMusicObjectKey),
-            profileMusicDescription = stored.profileMusicDescription,
-            profileMusicStartSeconds = stored.profileMusicStartSeconds,
-            profileMusicUpdatedAt = stored.profileMusicUpdatedAt,
+            avatarSeed = stored.avatarSeed,
+            avatarUrl = avatars.create(stored.avatarSeed),
             genres = stored.genres,
             moods = stored.moods,
             discoverable = stored.discoverable,
@@ -262,11 +245,6 @@ class ProfileQueryService(
             followsMe -> "FOLLOWS_ME"
             else -> "NONE"
         }
-        val musicVisible = when (target.musicVisibility) {
-            "HIDDEN" -> viewerId == target.userId
-            "MUTUALS" -> viewerId == target.userId || mutual
-            else -> true
-        }
         val sharedExchangeCount = sharedExchangeCount(viewerId, target.userId)
         val currentMusicVisible = canView(
             target.privacy.currentMusicVisibility,
@@ -291,10 +269,8 @@ class ProfileQueryService(
             displayName = target.displayName,
             profileColor = target.profileColor,
             bio = target.bio,
-            avatarUrl = media.signedUrl(target.avatarObjectKey) ?: target.avatarDataUrl,
-            profileMusicUrl = if (musicVisible) media.signedUrl(target.profileMusicObjectKey) else null,
-            profileMusicDescription = if (musicVisible) target.profileMusicDescription else null,
-            profileMusicStartSeconds = if (musicVisible) target.profileMusicStartSeconds else null,
+            avatarSeed = target.avatarSeed,
+            avatarUrl = avatars.create(target.avatarSeed),
             genres = target.genres,
             moods = target.moods,
             melodyAlias = target.melodyAlias,
@@ -382,17 +358,11 @@ class ProfileQueryService(
             displayName = rs.getString("display_name"),
             profileColor = rs.getString("profile_color"),
             bio = rs.getString("bio").orEmpty(),
-            avatarDataUrl = rs.getString("avatar_data_url"),
-            avatarObjectKey = rs.getString("avatar_object_key"),
-            profileMusicObjectKey = rs.getString("profile_music_object_key"),
-            profileMusicDescription = rs.getString("profile_music_description"),
-            profileMusicStartSeconds = (rs.getObject("profile_music_start_seconds") as? Number)?.toFloat(),
-            profileMusicUpdatedAt = rs.getTimestamp("profile_music_updated_at")?.toInstant(),
+            avatarSeed = rs.getString("avatar_seed"),
             genres = splitTags(rs.getString("preferred_genres")),
             moods = splitTags(rs.getString("mood_tags")),
             discoverable = rs.getBoolean("discoverable"),
             shareMusic = rs.getBoolean("share_music"),
-            musicVisibility = rs.getString("music_visibility"),
             offlineExchangeEnabled = rs.getBoolean("offline_exchange_enabled"),
             profileRevision = rs.getLong("profile_revision"),
             privacy = ProfilePrivacy(
@@ -654,12 +624,11 @@ class ProfileQueryService(
     companion object {
         private val PROFILE_HANDLE_REGEX = Regex("[a-z0-9_]{3,32}")
         private val PROFILE_SELECT = """
-            select u.id,u.profile_handle,u.display_name,u.profile_color,u.bio,u.avatar_data_url,
-              u.avatar_object_key,u.preferred_genres,u.mood_tags,u.profile_music_object_key,
-              u.profile_music_description,u.profile_music_start_seconds,u.profile_music_updated_at,u.melody_alias_id,
+            select u.id,u.profile_handle,u.display_name,u.profile_color,u.bio,u.avatar_seed,
+              u.preferred_genres,u.mood_tags,u.melody_alias_id,
               u.melody_alias_notes::text melody_alias_notes,u.melody_alias_tone,u.melody_alias_mood,
               u.melody_alias_tempo,u.profile_revision,coalesce(p.discoverable,true) discoverable,
-              coalesce(p.share_music,true) share_music,coalesce(p.music_visibility,'TITLE_ARTIST') music_visibility,
+              coalesce(p.share_music,true) share_music,
               coalesce(p.offline_exchange_enabled,true) offline_exchange_enabled,
               coalesce(p.current_music_visibility,'EVERYONE') current_music_visibility,
               coalesce(p.listening_insights_enabled,false) listening_insights_enabled,
@@ -676,7 +645,7 @@ class ProfileQueryService(
 class ProfileController(
     private val jdbc: JdbcTemplate,
     private val nearby: NearbyService,
-    private val media: ProfileMediaStorage,
+    private val rateLimiter: ActionRateLimiter,
     private val profiles: ProfileQueryService,
 ) {
     @GetMapping fun me(principal: Principal): ProfileResponse = profiles.me(principal.userId())
@@ -687,23 +656,24 @@ class ProfileController(
         val name = request.displayName.trim().take(40)
         val color = request.profileColor.takeIf { it.matches(Regex("#[0-9A-Fa-f]{6}")) } ?: "#6750A4"
         require(name.length >= 2) { "Display name must contain at least 2 characters" }
-        val previous = jdbc.query(
-            "select avatar_object_key,avatar_mime_type from users where id=?",
-            { rs, _ -> rs.getString(1)?.let { StoredMedia(it, rs.getString(2).orEmpty()) } }, userId,
-        ).firstOrNull { it != null }
-        val avatar = when {
-            request.avatarDataUrl == null -> null
-            request.avatarDataUrl.startsWith("data:image/") -> media.storeAvatar(userId, request.avatarDataUrl)
-            else -> previous
-        }
         jdbc.update(
-            """update users set display_name=?,profile_color=?,bio=?,avatar_data_url=null,
-               avatar_object_key=?,avatar_mime_type=?,preferred_genres=?,mood_tags=?,
+            """update users set display_name=?,profile_color=?,bio=?,preferred_genres=?,mood_tags=?,
                profile_revision=profile_revision+1,updated_at=now() where id=?""",
-            name, color, request.bio.trim().take(160), avatar?.key, avatar?.mimeType,
+            name, color, request.bio.trim().take(160),
             request.genres.cleanTags().joinToString(","), request.moods.cleanTags().joinToString(","), userId,
         )
-        if (previous?.key != avatar?.key) media.delete(previous?.key)
+        return profiles.me(userId)
+    }
+
+    @PostMapping("/avatar/randomize")
+    fun randomizeAvatar(principal: Principal): ProfileResponse {
+        val userId = principal.userId()
+        rateLimiter.enforce(userId, "AVATAR_RANDOMIZE", 10, Duration.ofMinutes(1))
+        jdbc.update(
+            "update users set avatar_seed=?,profile_revision=profile_revision+1,updated_at=now() where id=?",
+            UUID.randomUUID().toString(),
+            userId,
+        )
         return profiles.me(userId)
     }
 
@@ -858,39 +828,6 @@ class ProfileController(
                melody_alias_mood=?,melody_alias_tempo=?,updated_at=now() where id=?""",
             id, notesJson, request.tone.trim().take(40), request.mood.trim().take(40), request.tempo, userId,
         )
-        return profiles.me(userId)
-    }
-
-    @PutMapping("/music")
-    fun setMusic(principal: Principal, @RequestBody request: ProfileMusicUpdate): ProfileResponse {
-        val userId = principal.userId()
-        val previous = jdbc.queryForObject(
-            "select profile_music_object_key from users where id=?",
-            String::class.java, userId,
-        )
-        require(request.startSeconds in 0f..25f) { "Melody ID start must be between 0 and 25 seconds" }
-        val stored = media.promoteCandidate(userId, request.candidateKey)
-        jdbc.update(
-            """update users set profile_music_object_key=?,profile_music_mime_type=?,
-                profile_music_description=?,profile_music_start_seconds=?,
-                profile_music_updated_at=now(),updated_at=now() where id=?""",
-            stored.key, stored.mimeType, request.description?.trim()?.take(500), request.startSeconds, userId,
-        )
-        if (previous != stored.key) media.delete(previous)
-        return profiles.me(userId)
-    }
-
-    @DeleteMapping("/music")
-    fun deleteMusic(principal: Principal): ProfileResponse {
-        val userId = principal.userId()
-        val previous = jdbc.queryForObject("select profile_music_object_key from users where id=?", String::class.java, userId)
-        jdbc.update(
-            """update users set profile_music_object_key=null,profile_music_mime_type=null,
-                profile_music_description=null,profile_music_start_seconds=null,
-                profile_music_updated_at=null,updated_at=now() where id=?""",
-            userId,
-        )
-        media.delete(previous)
         return profiles.me(userId)
     }
 

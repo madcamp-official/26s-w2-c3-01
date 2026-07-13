@@ -56,7 +56,7 @@ class OfflineSessionSecurityTest {
             CachedAccount(
                 accountId = "account-a",
                 displayAlias = "Listener",
-                avatarDataUrl = null,
+                avatarUrl = null,
                 colorHex = 0x6750A4,
                 melodyAlias = "C6",
                 musicCard = ExchangeMusicCard("Listener", "Song", "Artist", "C6"),

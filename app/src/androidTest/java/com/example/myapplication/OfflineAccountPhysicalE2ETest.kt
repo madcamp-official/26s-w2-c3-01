@@ -76,7 +76,7 @@ class OfflineAccountPhysicalE2ETest {
         val account = CachedAccount(
             accountId = accountId,
             displayAlias = credential.displayAlias,
-            avatarDataUrl = null,
+            avatarUrl = null,
             colorHex = if (role == INITIATOR) 0x6750A4 else 0x006C4C,
             melodyAlias = card.melodyAlias,
             musicCard = card,

@@ -74,6 +74,7 @@ import com.example.myapplication.ui.screens.BuildingLoungeMapScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
+import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
@@ -91,6 +92,7 @@ private object Route {
     const val MAIN = "main"
     const val USER_DETAIL = "user-detail"
     const val CHAT = "chat/{roomId}"
+    const val MELODY_ALIAS = "melody-alias"
     const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
@@ -304,6 +306,7 @@ fun MelodyBubbleApp(
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
                     onOpenNotifications = { navController.navigate(Route.NOTIFICATIONS) },
+                    onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenSettings = { navController.navigate(Route.SETTINGS) },
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
                     onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
@@ -449,7 +452,6 @@ fun MelodyBubbleApp(
                         onBack = { navController.popBackStack() },
                         onRetry = { viewModel.loadPublicProfile(profileHandle) },
                         onFollow = viewModel::followPublicProfile,
-                        onPlayProfileMusic = viewModel::playProfileMusicUrl,
                         onPlayNowPlaying = { title, artist, artworkUrl ->
                             val nearbyHandle = state.nearbyListeners
                                 .firstOrNull { it.profileHandle == profileHandle }
@@ -510,7 +512,6 @@ fun MelodyBubbleApp(
                         onBack = { navController.popBackStack() },
                         onRetry = { viewModel.loadExchangeProfile(exchangeId) },
                         onFollow = viewModel::followPublicProfile,
-                        onPlayProfileMusic = viewModel::playProfileMusicUrl,
                         onPlayNowPlaying = { title, artist, artworkUrl ->
                             val nearbyHandle = state.selectedPublicProfile?.profileHandle?.let { handle ->
                                 state.nearbyListeners.firstOrNull { it.profileHandle == handle }?.nearbyHandle
@@ -570,6 +571,24 @@ fun MelodyBubbleApp(
                         modifier = Modifier.statusBarsPadding()
                     )
                 }
+            }
+            composable(Route.MELODY_ALIAS) {
+                val generationState by viewModel.melodyAliasGenerationState.collectAsState()
+                DisposableEffect(Unit) {
+                    onDispose { viewModel.stopMelodyAudio() }
+                }
+                MelodyAliasScreen(
+                    profile = state.profile,
+                    candidates = state.melodyAliasCandidates,
+                    onBack = { navController.popBackStack() },
+                    onPreview = viewModel::previewMelodyAlias,
+                    onPreviewTone = viewModel::previewMelodyTone,
+                    generationState = generationState,
+                    onGenerate = viewModel::generateMelodyAliases,
+                    onResetGeneration = viewModel::resetMelodyAliasGeneration,
+                    onSelect = viewModel::selectGeneratedMelodyAlias,
+                    modifier = Modifier.statusBarsPadding()
+                )
             }
             composable(Route.OFFLINE_EXCHANGE) {
                 DisposableEffect(Unit) {
@@ -668,6 +687,7 @@ private fun MainShell(
     onOpenUser: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenNotifications: () -> Unit,
+    onOpenMelodyAlias: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
@@ -804,12 +824,14 @@ private fun MainShell(
                 onOpenSettings = onOpenSettings,
                 onOpenBubbleMode = onOpenOfflineExchange,
                 onProfileUpdate = viewModel::updateProfile,
+                onRandomizeAvatar = viewModel::randomizeAvatar,
                 onProfileCurationUpdate = viewModel::updateProfileCuration,
                 musicSearchState = musicSearchState,
                 onSearchMusic = viewModel::searchMusic,
                 onClearMusicSearch = viewModel::clearMusicSearch,
                 onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
                 bottomContentPadding = if (previewBarVisible) 62.dp else 0.dp,
+                onOpenMelodyAlias = onOpenMelodyAlias,
                 modifier = contentModifier.statusBarsPadding()
             )
     }

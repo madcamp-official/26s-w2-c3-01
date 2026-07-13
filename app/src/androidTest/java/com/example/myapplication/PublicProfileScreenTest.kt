@@ -41,9 +41,8 @@ class PublicProfileScreenTest {
                         displayName = "Night Listener",
                         colorHex = 0xFF25C76F,
                         bio = "밤에 어울리는 음악을 모아요.",
+                        avatarSeed = "night-listener",
                         avatarUrl = null,
-                        profileMusicUrl = null,
-                        profileMusicDescription = null,
                         genres = listOf("R&B", "Indie"),
                         moods = listOf("Night"),
                         melodyAlias = ProfileMelodyAlias(
@@ -67,7 +66,6 @@ class PublicProfileScreenTest {
                     onBack = {},
                     onRetry = {},
                     onFollow = { followed = true },
-                    onPlayProfileMusic = { _, _ -> },
                 )
             }
         }
@@ -90,9 +88,8 @@ class PublicProfileScreenTest {
                         displayName = "민트",
                         colorHex = 0xFF8B5CF6,
                         bio = "잔잔한 멜로디를 나눠요.",
+                        avatarSeed = "mintwave",
                         avatarUrl = null,
-                        profileMusicUrl = null,
-                        profileMusicDescription = null,
                         genres = listOf("Indie"),
                         moods = listOf("Calm", "Night"),
                         melodyAlias = null,
@@ -128,7 +125,6 @@ class PublicProfileScreenTest {
                     onBack = {},
                     onRetry = {},
                     onFollow = {},
-                    onPlayProfileMusic = { _, _ -> },
                 )
             }
         }

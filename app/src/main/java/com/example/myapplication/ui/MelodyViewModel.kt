@@ -16,7 +16,6 @@ import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.ProfilePrivacySettings
 import com.example.myapplication.core.model.ProfileTrack
 import com.example.myapplication.audio.MelodyAliasPreviewPlayer
-import com.example.myapplication.audio.LyriaClipPlayer
 import com.example.myapplication.audio.MusicPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.MelodyApplication
@@ -34,9 +33,6 @@ import com.example.myapplication.data.remote.SubLoungeSnapshotDto
 import com.example.myapplication.data.remote.MelodyAliasGenerateRequest
 import com.example.myapplication.data.remote.MelodyAliasRepository
 import com.example.myapplication.data.remote.MusicSearchRepository
-import com.example.myapplication.data.remote.LyriaAliasGenerateRequest
-import com.example.myapplication.data.remote.LyriaMusicRepository
-import com.example.myapplication.data.remote.LyriaMusicResponse
 import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
 import com.example.myapplication.data.remote.TokenResponse
 import com.example.myapplication.data.local.SecureTokenStore
@@ -103,13 +99,6 @@ sealed interface MelodyAliasGenerationState {
     data class Error(val message: String) : MelodyAliasGenerationState
 }
 
-sealed interface LyriaGenerationState {
-    data object Idle : LyriaGenerationState
-    data object Loading : LyriaGenerationState
-    data class Success(val song: LyriaMusicResponse) : LyriaGenerationState
-    data class Error(val message: String) : LyriaGenerationState
-}
-
 sealed interface MusicSearchUiState {
     data object Idle : MusicSearchUiState
     data class Loading(val query: String) : MusicSearchUiState
@@ -148,11 +137,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val melodyAliasPreviewPlayer = MelodyAliasPreviewPlayer()
     private val melodyAliasRepository by lazy { MelodyAliasRepository() }
     private val musicSearchRepository by lazy { MusicSearchRepository() }
-    private val lyriaRepository by lazy { LyriaMusicRepository() }
     private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
     private val realtimeClient = (application as MelodyApplication).realtimeClient
     private val presenceCoordinator = PresenceSyncCoordinator.get(application)
-    private val lyriaClipPlayer = LyriaClipPlayer(application)
     private val musicPreviewPlayer = MusicPreviewPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.SignedOut)
@@ -182,7 +169,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     private val _melodyAliasGenerationState = MutableStateFlow<MelodyAliasGenerationState>(MelodyAliasGenerationState.Idle)
-    private val _lyriaGenerationState = MutableStateFlow<LyriaGenerationState>(LyriaGenerationState.Idle)
     private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
     private val _musicSearchState = MutableStateFlow<MusicSearchUiState>(MusicSearchUiState.Idle)
     private var musicSearchJob: Job? = null
@@ -196,7 +182,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     val sessionState = _sessionState.asStateFlow()
     val emailAvailabilityState = _emailAvailabilityState.asStateFlow()
     val melodyAliasGenerationState = _melodyAliasGenerationState.asStateFlow()
-    val lyriaGenerationState = _lyriaGenerationState.asStateFlow()
     val buildingLoungeState = _buildingLoungeState.asStateFlow()
     val musicSearchState = _musicSearchState.asStateFlow()
     val previewPlaybackState = musicPreviewPlayer.state
@@ -264,7 +249,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     ?: return@collect
                 offlineAccountStore.save(existing.copy(
                     displayAlias = state.profile.accountAlias,
-                    avatarDataUrl = state.profile.avatarDataUrl,
+                    avatarUrl = state.profile.avatarUrl,
                     colorHex = state.profile.colorHex,
                     melodyAlias = state.profile.melodyNotes.joinToString(" · "),
                     musicCard = state.toExchangeMusicCard(),
@@ -611,7 +596,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 val cached = CachedAccount(
                     accountId = accountId,
                     displayAlias = credential.displayAlias,
-                    avatarDataUrl = state.profile.avatarDataUrl,
+                    avatarUrl = state.profile.avatarUrl,
                     colorHex = state.profile.colorHex,
                     melodyAlias = state.profile.melodyNotes.joinToString(" · "),
                     musicCard = state.toExchangeMusicCard(),
@@ -701,7 +686,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         clearFollowedNearbyPreview()
         nowPlayingPreviewJob?.cancel()
         musicPreviewPlayer.stop()
-        lyriaClipPlayer.stop()
         melodyAliasPreviewPlayer.stop()
         val nowPlaying = profile?.nowPlaying
             ?.takeIf { !profile.isSelf && it.isPlaying }
@@ -735,8 +719,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         if (current != null) _loginState.value = current.copy(onboardingComplete = true)
         val profile = repository.state.value.profile
         repository.updateProfile(
-            profile.accountAlias, profile.colorHex, profile.bio, profile.avatarDataUrl,
-            genres, moods,
+            profile.accountAlias, profile.colorHex, profile.bio, genres, moods,
         )
         repository.updateProfileCuration(signatureTracks, favoriteArtists)
         clearMusicSearch()
@@ -749,13 +732,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
     fun selectNearby(handle: String?) {
         repository.selectNearby(handle)
-        if (handle == null) return
-        repository.state.value.selectedNearby?.melodyIdUrl?.let { url ->
-            lyriaClipPlayer.loadUrl(url)
-            lyriaClipPlayer.playSelection(
-                repository.state.value.selectedNearby?.melodyIdStartSeconds ?: 0f
-            )
-        }
     }
     fun enterBubbleMode() = repository.enterBubbleMode()
     fun exitBubbleMode() = repository.exitBubbleMode()
@@ -789,8 +765,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun setMusicVisibility(label: String) = repository.setMusicVisibility(label)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String) =
         repository.updatePresenceSettings(radiusMeters, discoverabilityScope, musicVisibility)
-    fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>) =
-        repository.updateProfile(displayName, colorHex, bio, avatarDataUrl, genres, moods)
+    fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>) =
+        repository.updateProfile(displayName, colorHex, bio, genres, moods)
+    fun randomizeAvatar() = repository.randomizeAvatar()
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>) =
         repository.updateProfileCuration(signatureTracks, favoriteArtists)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings) =
@@ -828,57 +805,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun resetMelodyAliasGeneration() {
         _melodyAliasGenerationState.value = MelodyAliasGenerationState.Idle
-    }
-
-    fun generateLyriaSong(
-        moods: Map<String, Int>,
-        genre: String,
-        instruments: List<String>,
-        pitch: Int,
-        speed: Int
-    ) {
-        if (_lyriaGenerationState.value == LyriaGenerationState.Loading) return
-        val token = accessToken
-        if (token.isNullOrBlank()) {
-            _lyriaGenerationState.value = LyriaGenerationState.Error("로그인 후 음악을 만들 수 있어요.")
-            return
-        }
-        viewModelScope.launch {
-            _lyriaGenerationState.value = LyriaGenerationState.Loading
-            lyriaRepository.generate(token, LyriaAliasGenerateRequest(moods, genre, instruments, pitch, speed))
-                .onSuccess { song ->
-                    lyriaClipPlayer.load(song.audioBase64)
-                    _lyriaGenerationState.value = LyriaGenerationState.Success(song)
-                }
-                .onFailure {
-                    _lyriaGenerationState.value = LyriaGenerationState.Error("30초 음악을 만들지 못했어요. 잠시 후 다시 시도해 주세요.")
-                }
-        }
-    }
-
-    fun playLyriaSong() = lyriaClipPlayer.playFull()
-    fun playLyriaSelection(startSeconds: Float) = lyriaClipPlayer.playSelection(startSeconds)
-    fun saveLyriaAsProfileMusic(startSeconds: Float) {
-        val song = (_lyriaGenerationState.value as? LyriaGenerationState.Success)?.song ?: return
-        val candidateKey = song.candidateKey ?: run {
-            _lyriaGenerationState.value = LyriaGenerationState.Error("저장할 음악 정보를 찾지 못했어요.")
-            return
-        }
-        lyriaClipPlayer.stop()
-        repository.setProfileMusic(candidateKey, song.description, startSeconds.coerceIn(0f, 25f))
-    }
-
-    fun playProfileMusic() {
-        val url = repository.state.value.profile.profileMusicUrl ?: return
-        stopNowPlayingPreview()
-        lyriaClipPlayer.loadUrl(url)
-        lyriaClipPlayer.playSelection(repository.state.value.profile.profileMusicStartSeconds ?: 0f)
-    }
-
-    fun playProfileMusicUrl(url: String, startSeconds: Float) {
-        stopNowPlayingPreview()
-        lyriaClipPlayer.loadUrl(url)
-        lyriaClipPlayer.playSelection(startSeconds.coerceIn(0f, 25f))
     }
 
     fun playMusicPreview(
@@ -936,16 +862,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private fun previewFollowKey(title: String, artist: String): String =
         "${title.trim().lowercase()}\u0000${artist.trim().lowercase()}"
 
-    fun deleteProfileMusic() = repository.deleteProfileMusic()
-    fun resetLyriaSong() {
-        lyriaClipPlayer.stop()
-        _lyriaGenerationState.value = LyriaGenerationState.Idle
-    }
-
     fun stopMelodyAudio() {
-        nowPlayingPreviewJob?.cancel()
-        nowPlayingPreviewJob = null
-        lyriaClipPlayer.stop()
+        stopNowPlayingPreview()
         melodyAliasPreviewPlayer.stop()
     }
 
@@ -1351,7 +1269,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         removeAccessTokenListener?.invoke()
         removeAccessTokenListener = null
         melodyAliasPreviewPlayer.release()
-        lyriaClipPlayer.release()
         musicPreviewPlayer.release()
         nearbyExchangeManager.stop()
         runCatching { connectivityManager.unregisterNetworkCallback(connectivityCallback) }

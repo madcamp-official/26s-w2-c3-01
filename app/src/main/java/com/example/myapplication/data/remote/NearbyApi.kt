@@ -20,8 +20,6 @@ data class RemoteNearbyBubble(
     val relationship: String?,
     val canReact: Boolean?,
     val track: RemoteTrack?,
-    val melodyIdUrl: String?,
-    val melodyIdStartSeconds: Float?
 )
 data class RemoteNearbySnapshot(
     val generatedAt: String,
