@@ -17,6 +17,7 @@ import com.example.myapplication.core.model.ProfilePrivacySettings
 import com.example.myapplication.core.model.ProfileTrack
 import com.example.myapplication.audio.MelodyAliasPreviewPlayer
 import com.example.myapplication.audio.LyriaClipPlayer
+import com.example.myapplication.audio.TrackPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.MelodyApplication
 import com.example.myapplication.data.MelodyRepository
@@ -148,6 +149,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val realtimeClient = (application as MelodyApplication).realtimeClient
     private val presenceCoordinator = PresenceSyncCoordinator.get(application)
     private val lyriaClipPlayer = LyriaClipPlayer(application)
+    private val trackPreviewPlayer = TrackPreviewPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.SignedOut)
     private val _emailAvailabilityState = MutableStateFlow<EmailAvailabilityUiState>(EmailAvailabilityUiState.Idle)
@@ -180,6 +182,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
     private val _musicSearchState = MutableStateFlow<MusicSearchUiState>(MusicSearchUiState.Idle)
     private var musicSearchJob: Job? = null
+    private var nowPlayingPreviewJob: Job? = null
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
@@ -645,6 +648,26 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         _musicSearchState.value = MusicSearchUiState.Idle
     }
 
+    fun autoPlayPublicProfileNowPlaying(profile: com.example.myapplication.core.model.PublicProfile?) {
+        nowPlayingPreviewJob?.cancel()
+        trackPreviewPlayer.stop()
+        lyriaClipPlayer.stop()
+        melodyAliasPreviewPlayer.stop()
+        val nowPlaying = profile?.nowPlaying
+            ?.takeIf { !profile.isSelf && it.isPlaying }
+            ?: return
+        nowPlayingPreviewJob = viewModelScope.launch {
+            runCatching {
+                musicSearchRepository.search("${nowPlaying.title} ${nowPlaying.artist}")
+            }.onSuccess { results ->
+                results.matchingPreviewUrl(nowPlaying.title, nowPlaying.artist)
+                    ?.let(trackPreviewPlayer::play)
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+            }
+        }
+    }
+
     fun completeOnboarding(
         genres: List<String>,
         moods: List<String>,
@@ -791,11 +814,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun playProfileMusic() {
         val url = repository.state.value.profile.profileMusicUrl ?: return
+        stopNowPlayingPreview()
         lyriaClipPlayer.loadUrl(url)
         lyriaClipPlayer.playSelection(repository.state.value.profile.profileMusicStartSeconds ?: 0f)
     }
 
     fun playProfileMusicUrl(url: String, startSeconds: Float) {
+        stopNowPlayingPreview()
         lyriaClipPlayer.loadUrl(url)
         lyriaClipPlayer.playSelection(startSeconds.coerceIn(0f, 25f))
     }
@@ -807,8 +832,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopMelodyAudio() {
+        stopNowPlayingPreview()
         lyriaClipPlayer.stop()
         melodyAliasPreviewPlayer.stop()
+    }
+
+    private fun stopNowPlayingPreview() {
+        nowPlayingPreviewJob?.cancel()
+        nowPlayingPreviewJob = null
+        trackPreviewPlayer.stop()
     }
 
     fun refreshBuildingLounges(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
@@ -1111,9 +1143,23 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         removeAccessTokenListener = null
         melodyAliasPreviewPlayer.release()
         lyriaClipPlayer.release()
+        trackPreviewPlayer.release()
         nearbyExchangeManager.stop()
         runCatching { connectivityManager.unregisterNetworkCallback(connectivityCallback) }
         repository.close()
         super.onCleared()
     }
 }
+
+internal fun List<MusicSearchResult>.matchingPreviewUrl(title: String, artist: String): String? {
+    val normalizedTitle = title.normalizedMusicIdentity()
+    val normalizedArtist = artist.normalizedMusicIdentity()
+    return firstOrNull { result ->
+        result.title.normalizedMusicIdentity() == normalizedTitle &&
+            result.artist.normalizedMusicIdentity() == normalizedArtist &&
+            result.previewUrl?.startsWith("https://") == true
+    }?.previewUrl
+}
+
+private fun String.normalizedMusicIdentity(): String =
+    lowercase().filter(Char::isLetterOrDigit)

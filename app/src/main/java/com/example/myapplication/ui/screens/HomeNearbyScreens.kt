@@ -123,7 +123,8 @@ fun HomeScreen(
     onStopSharing: () -> Unit = {},
     onOpenNearby: () -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
-    onSelectTrack: (Track) -> Unit = {}
+    onSelectTrack: (Track) -> Unit = {},
+    onOpenTrack: (Track) -> Unit = {}
 ) {
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
@@ -183,7 +184,8 @@ fun HomeScreen(
         item {
             PopularTrackCarousel(
                 tracks = state.popularTracks,
-                onSelectTrack = onSelectTrack
+                onSelectTrack = onSelectTrack,
+                onOpenTrack = onOpenTrack
             )
         }
     }
@@ -207,6 +209,7 @@ fun NearbyScreen(
     onMusicFilterChange: (NearbyMusicFilter) -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
     onOpenListenerDetail: (NearbyListener) -> Unit = {},
+    onOpenTrack: (Track) -> Unit = {},
     onReact: (NearbyListener, String) -> Unit = { _, _ -> },
     onFollow: (NearbyListener) -> Unit = {}
 ) {
@@ -315,6 +318,7 @@ fun NearbyScreen(
                 SelectedListenerCard(
                     listener = selected,
                     onOpenDetail = { onOpenListenerDetail(selected) },
+                    onOpenTrack = { selected.currentTrack?.let(onOpenTrack) },
                     onReact = { onReact(selected, "이 곡 좋아요") },
                     onFollow = { onFollow(selected) }
                 )
@@ -333,7 +337,6 @@ fun UserDetailScreen(
     modifier: Modifier = Modifier,
     reactionSheetVisible: Boolean = false,
     onBack: () -> Unit = {},
-    onOpenTrack: (Track) -> Unit = {},
     onShowReactionSheet: () -> Unit = {},
     onDismissReactionSheet: () -> Unit = {},
     onReact: (NearbyListener, String) -> Unit = { _, _ -> },
@@ -402,8 +405,7 @@ fun UserDetailScreen(
             }
             item {
                 CurrentTrackCard(
-                    listener = listener,
-                    onOpenTrack = onOpenTrack
+                    listener = listener
                 )
             }
             item {
@@ -930,7 +932,8 @@ private fun ListenerStrip(
 @Composable
 private fun PopularTrackCarousel(
     tracks: List<PopularTrack>,
-    onSelectTrack: (Track) -> Unit
+    onSelectTrack: (Track) -> Unit,
+    onOpenTrack: (Track) -> Unit
 ) {
     if (tracks.isEmpty()) {
         EmptyMusicCard()
@@ -943,7 +946,8 @@ private fun PopularTrackCarousel(
         items(tracks, key = { it.track.id }) { popularTrack ->
             PopularTrackCompactCard(
                 popularTrack = popularTrack,
-                onClick = { onSelectTrack(popularTrack.track) }
+                onClick = { onSelectTrack(popularTrack.track) },
+                onOpenTrack = { onOpenTrack(popularTrack.track) }
             )
         }
     }
@@ -952,7 +956,8 @@ private fun PopularTrackCarousel(
 @Composable
 private fun PopularTrackCompactCard(
     popularTrack: PopularTrack,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onOpenTrack: () -> Unit
 ) {
     Surface(
         modifier = Modifier
@@ -967,18 +972,36 @@ private fun PopularTrackCompactCard(
         border = BorderStroke(1.dp, MelodyBubbleColors.Border)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Surface(
-                modifier = Modifier.size(42.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = MelodyBubbleColors.SurfaceSelected
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Outlined.MusicNote,
-                        contentDescription = null,
-                        modifier = Modifier.size(21.dp),
-                        tint = MelodyBubbleColors.Primary
-                    )
+                Surface(
+                    modifier = Modifier.size(42.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MelodyBubbleColors.SurfaceSelected
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Outlined.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(21.dp),
+                            tint = MelodyBubbleColors.Primary
+                        )
+                    }
+                }
+                if (popularTrack.track.hasExternalMusicLink()) {
+                    IconButton(
+                        onClick = onOpenTrack,
+                        modifier = Modifier.size(42.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.IosShare,
+                            contentDescription = "${popularTrack.track.title} 내 폰으로 듣기",
+                            tint = MelodyBubbleColors.Primary
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -1338,6 +1361,7 @@ private fun ListenerMapBubble(
 private fun SelectedListenerCard(
     listener: NearbyListener,
     onOpenDetail: () -> Unit,
+    onOpenTrack: () -> Unit,
     onReact: () -> Unit,
     onFollow: () -> Unit
 ) {
@@ -1345,7 +1369,7 @@ private fun SelectedListenerCard(
         onClick = onOpenDetail,
         onClickLabel = "${listener.displayAlias} 상세 열기"
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             ListenerAvatar(listener, size = 56.dp, showWave = listener.isPlaying)
             Spacer(Modifier.width(13.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -1386,11 +1410,24 @@ private fun SelectedListenerCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Icon(
-                imageVector = Icons.Outlined.ChevronRight,
-                contentDescription = null,
-                tint = MelodyBubbleColors.TextFaint
-            )
+            if (listener.currentTrack?.hasExternalMusicLink() == true) {
+                IconButton(
+                    onClick = onOpenTrack,
+                    modifier = Modifier.size(42.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.IosShare,
+                        contentDescription = "${listener.currentTrack.title} 내 폰으로 듣기",
+                        tint = MelodyBubbleColors.Primary
+                    )
+                }
+            } else {
+                Icon(
+                    imageVector = Icons.Outlined.ChevronRight,
+                    contentDescription = null,
+                    tint = MelodyBubbleColors.TextFaint
+                )
+            }
         }
         Spacer(Modifier.height(14.dp))
         Row(
@@ -1584,14 +1621,10 @@ private fun ListenerIdentity(listener: NearbyListener) {
 
 @Composable
 private fun CurrentTrackCard(
-    listener: NearbyListener,
-    onOpenTrack: (Track) -> Unit
+    listener: NearbyListener
 ) {
     val track = listener.currentTrack
-    MelodyCard(
-        onClick = track?.let { { onOpenTrack(it) } },
-        onClickLabel = track?.let { "${it.title} 음악 열기" }
-    ) {
+    MelodyCard {
         Text(
             text = "현재 듣는 음악",
             color = MelodyBubbleColors.TextMuted,
@@ -1652,17 +1685,12 @@ private fun CurrentTrackCard(
                         )
                     }
                 }
-                if (track.externalUrl != null) {
-                    Icon(
-                        imageVector = Icons.Outlined.IosShare,
-                        contentDescription = "외부 음악 링크 있음",
-                        tint = MelodyBubbleColors.Primary
-                    )
-                }
             }
         }
     }
 }
+
+private fun Track.hasExternalMusicLink(): Boolean = externalUrl?.startsWith("https://") == true
 
 @Composable
 private fun CommonTasteCard(listener: NearbyListener) {
