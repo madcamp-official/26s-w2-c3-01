@@ -10,6 +10,7 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
@@ -96,7 +97,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
             .mapNotNull { controller ->
                 val state = runCatching { controller.playbackState }.getOrNull() ?: return@mapNotNull null
                 if (state.state !in ACTIVE_PLAYBACK_STATES) return@mapNotNull null
-                controller.mediaText()?.let { DetectedPlayback(state.lastPositionUpdateTime, it) }
+                controller.mediaText(state)?.let { DetectedPlayback(state.lastPositionUpdateTime, it) }
             }
             .maxByOrNull(DetectedPlayback::positionUpdatedAt)
 
@@ -122,7 +123,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         if (newest == null) persistStopped() else persist(newest.text, SOURCE_NOTIFICATION_FALLBACK)
     }
 
-    private fun MediaController.mediaText(): NowPlayingText? {
+    private fun MediaController.mediaText(playbackState: PlaybackState): NowPlayingText? {
         val metadata = runCatching { metadata }.getOrNull() ?: return null
         val title = metadata.getText(MediaMetadata.METADATA_KEY_TITLE).toSafeText(MAX_TITLE_LENGTH)
             ?: metadata.description?.title.toSafeText(MAX_TITLE_LENGTH)
@@ -131,7 +132,24 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
                 ?: metadata.getText(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
                 ?: metadata.description?.subtitle
             ).toSafeText(MAX_TEXT_LENGTH)
-        return if (title == null || artist == null) null else NowPlayingText(title, artist)
+        val album = metadata.getText(MediaMetadata.METADATA_KEY_ALBUM).toSafeText(MAX_TEXT_LENGTH)
+        val artworkUrl = sequenceOf(
+            metadata.getString(MediaMetadata.METADATA_KEY_ART_URI),
+            metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI),
+            metadata.description?.iconUri?.toString(),
+        ).filterNotNull().firstOrNull { it.startsWith("https://") }?.take(MAX_URL_LENGTH)
+        val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION).takeIf { it > 0L }
+        val positionObservedAt = System.currentTimeMillis() -
+            (SystemClock.elapsedRealtime() - playbackState.lastPositionUpdateTime).coerceAtLeast(0L)
+        return if (title == null || artist == null) null else NowPlayingText(
+            title = title,
+            artist = artist,
+            album = album,
+            artworkUrl = artworkUrl,
+            durationMs = durationMs,
+            positionMs = playbackState.position.takeIf { it >= 0L },
+            positionObservedAtEpochMs = positionObservedAt,
+        )
     }
 
     private fun StatusBarNotification.isTransportNotification(): Boolean =
@@ -148,17 +166,26 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
     }
 
     private fun persist(text: NowPlayingText, source: String) {
-        publish(text.title, text.artist, source, isPlaying = true)
+        publish(text, source, isPlaying = true)
     }
 
     private fun persistStopped() {
-        publish(null, null, SOURCE_MEDIA_SESSION, isPlaying = false)
+        publish(null, SOURCE_MEDIA_SESSION, isPlaying = false)
     }
 
-    private fun publish(title: String?, artist: String?, source: String, isPlaying: Boolean) {
+    private fun publish(text: NowPlayingText?, source: String, isPlaying: Boolean) {
         val coordinator = PresenceSyncCoordinator.get(this)
-        if (isPlaying && !title.isNullOrBlank() && !artist.isNullOrBlank()) {
-            coordinator.onPlaybackDetected(title, artist, source)
+        if (isPlaying && text != null) {
+            coordinator.onPlaybackDetected(
+                title = text.title,
+                artist = text.artist,
+                source = source,
+                album = text.album,
+                artworkUrl = text.artworkUrl,
+                durationMs = text.durationMs,
+                positionMs = text.positionMs,
+                positionObservedAtEpochMs = text.positionObservedAtEpochMs,
+            )
         } else {
             coordinator.onPlaybackStopped()
         }
@@ -168,8 +195,8 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         sendBroadcast(
             Intent(ACTION_NOW_PLAYING_CHANGED)
                 .setPackage(packageName)
-                .putExtra(EXTRA_TITLE, title)
-                .putExtra(EXTRA_ARTIST, artist)
+                .putExtra(EXTRA_TITLE, text?.title)
+                .putExtra(EXTRA_ARTIST, text?.artist)
                 .putExtra(EXTRA_SOURCE, source)
                 .putExtra(EXTRA_IS_PLAYING, isPlaying)
         )
@@ -182,7 +209,15 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
             ?.take(maxLength)
             ?.takeIf(String::isNotEmpty)
 
-    private data class NowPlayingText(val title: String, val artist: String)
+    private data class NowPlayingText(
+        val title: String,
+        val artist: String,
+        val album: String? = null,
+        val artworkUrl: String? = null,
+        val durationMs: Long? = null,
+        val positionMs: Long? = null,
+        val positionObservedAtEpochMs: Long? = null,
+    )
     private data class DetectedPlayback(val positionUpdatedAt: Long, val text: NowPlayingText)
     private data class TimestampedFallback(val postTime: Long, val text: NowPlayingText)
 
@@ -209,6 +244,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
 
         private const val MAX_TITLE_LENGTH = 256
         private const val MAX_TEXT_LENGTH = 512
+        private const val MAX_URL_LENGTH = 2_000
         private val ACTIVE_PLAYBACK_STATES = setOf(
             PlaybackState.STATE_PLAYING,
             PlaybackState.STATE_BUFFERING,

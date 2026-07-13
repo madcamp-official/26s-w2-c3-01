@@ -1,20 +1,103 @@
 package com.melodybubble.server.profile
 
 import com.melodybubble.server.nearby.NearbyService
+import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.server.ResponseStatusException
 import java.security.Principal
-import java.util.UUID
+import java.sql.ResultSet
 import java.time.Instant
+import java.util.UUID
+
+data class TasteMetric(val label: String, val count: Int, val ratio: Double)
+data class TasteFingerprint(
+    val genres: List<TasteMetric> = emptyList(),
+    val moods: List<TasteMetric> = emptyList(),
+)
+data class ProfileStats(
+    val followingCount: Int,
+    val followerCount: Int,
+    val verifiedExchangeCount: Int,
+    val uniqueExchangeUserCount: Int,
+    val receivedCardCount: Int,
+)
+data class MelodyAliasProfile(
+    val id: String,
+    val notes: List<String>,
+    val tone: String,
+    val mood: String,
+    val tempo: Int,
+)
+
+data class ProfileTrack(
+    val rank: Int,
+    val provider: String = "MANUAL",
+    val providerTrackId: String? = null,
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val artworkUrl: String? = null,
+    val genreTags: List<String> = emptyList(),
+    val moodTags: List<String> = emptyList(),
+)
+
+data class ProfileArtist(
+    val rank: Int,
+    val provider: String = "MANUAL",
+    val providerArtistId: String? = null,
+    val name: String,
+    val imageUrl: String? = null,
+    val genreTags: List<String> = emptyList(),
+)
+
+data class ProfilePrivacy(
+    val currentMusicVisibility: String = "EVERYONE",
+    val listeningInsightsEnabled: Boolean = false,
+    val listeningInsightsVisibility: String = "PRIVATE",
+    val exchangeInsightsVisibility: String = "EXCHANGED",
+    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
+)
+
+data class NowPlayingProfile(
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val artworkUrl: String? = null,
+    val isPlaying: Boolean,
+    val durationMs: Long? = null,
+    val positionMs: Long? = null,
+    val positionObservedAt: Instant? = null,
+    val observedAt: Instant,
+    val expiresAt: Instant,
+)
+
+data class CommonTasteMetric(
+    val label: String,
+    val type: String,
+    val score: Int,
+    val evidenceCount: Int,
+)
+
+data class CommonTasteSummary(
+    val score: Int,
+    val metrics: List<CommonTasteMetric>,
+    val algorithmVersion: String = "COMMON_TASTE_V1",
+    val sampleSize: Int,
+    val calculatedAt: Instant = Instant.now(),
+)
 
 data class ProfileResponse(
+    val profileHandle: String,
     val displayName: String,
     val profileColor: String,
     val bio: String,
@@ -26,7 +109,44 @@ data class ProfileResponse(
     val moods: List<String>,
     val discoverable: Boolean,
     val shareMusic: Boolean,
+    val offlineExchangeEnabled: Boolean,
+    val melodyAlias: MelodyAliasProfile?,
+    val stats: ProfileStats,
+    val tasteFingerprint: TasteFingerprint,
+    val profileRevision: Long = 0,
+    val signatureTracks: List<ProfileTrack> = emptyList(),
+    val favoriteArtists: List<ProfileArtist> = emptyList(),
+    val privacy: ProfilePrivacy = ProfilePrivacy(),
+    // Kept during the Android contract migration.
+    val offlineExchangeCount: Int = stats.verifiedExchangeCount,
+    val offlineExchangeGenres: List<String> = tasteFingerprint.genres.map(TasteMetric::label),
+    val offlineExchangeMoods: List<String> = tasteFingerprint.moods.map(TasteMetric::label),
 )
+
+data class PublicProfileResponse(
+    val profileHandle: String,
+    val displayName: String,
+    val profileColor: String,
+    val bio: String,
+    val avatarUrl: String?,
+    val profileMusicUrl: String?,
+    val profileMusicDescription: String?,
+    val genres: List<String>,
+    val moods: List<String>,
+    val melodyAlias: MelodyAliasProfile?,
+    val stats: ProfileStats,
+    val tasteFingerprint: TasteFingerprint,
+    val relationship: String,
+    val following: Boolean,
+    val mutual: Boolean,
+    val sharedVerifiedExchangeCount: Int,
+    val signatureTracks: List<ProfileTrack> = emptyList(),
+    val favoriteArtists: List<ProfileArtist> = emptyList(),
+    val nowPlaying: NowPlayingProfile? = null,
+    val commonTaste: CommonTasteSummary? = null,
+    val sectionStates: Map<String, String> = emptyMap(),
+)
+
 data class ProfileUpdate(
     val displayName: String,
     val profileColor: String,
@@ -35,8 +155,511 @@ data class ProfileUpdate(
     val genres: List<String> = emptyList(),
     val moods: List<String> = emptyList(),
 )
-data class PrivacyUpdate(val discoverable: Boolean, val shareMusic: Boolean)
+data class PrivacyUpdate(
+    val discoverable: Boolean,
+    val shareMusic: Boolean,
+    val offlineExchangeEnabled: Boolean = true,
+)
+data class ProfileCurationUpdate(
+    val signatureTracks: List<ProfileTrack> = emptyList(),
+    val favoriteArtists: List<ProfileArtist> = emptyList(),
+    val profileRevision: Long? = null,
+)
+data class ProfilePrivacyUpdate(
+    val currentMusicVisibility: String = "EVERYONE",
+    val listeningInsightsEnabled: Boolean = false,
+    val listeningInsightsVisibility: String = "PRIVATE",
+    val exchangeInsightsVisibility: String = "EXCHANGED",
+    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
+)
 data class ProfileMusicUpdate(val candidateKey: String, val description: String? = null)
+data class MelodyAliasUpdate(
+    val id: String,
+    val notes: List<String>,
+    val tone: String,
+    val mood: String,
+    val tempo: Int,
+)
+
+private data class StoredProfile(
+    val userId: UUID,
+    val profileHandle: String,
+    val displayName: String,
+    val profileColor: String,
+    val bio: String,
+    val avatarDataUrl: String?,
+    val avatarObjectKey: String?,
+    val profileMusicObjectKey: String?,
+    val profileMusicDescription: String?,
+    val profileMusicUpdatedAt: Instant?,
+    val genres: List<String>,
+    val moods: List<String>,
+    val discoverable: Boolean,
+    val shareMusic: Boolean,
+    val musicVisibility: String,
+    val offlineExchangeEnabled: Boolean,
+    val profileRevision: Long,
+    val privacy: ProfilePrivacy,
+    val melodyAlias: MelodyAliasProfile?,
+)
+
+@Service
+class ProfileQueryService(
+    private val jdbc: JdbcTemplate,
+    private val media: ProfileMediaStorage,
+) {
+    fun me(userId: UUID): ProfileResponse {
+        val stored = storedByUserId(userId)
+        val stats = stats(userId)
+        val taste = tasteFingerprint(userId)
+        return ProfileResponse(
+            profileHandle = stored.profileHandle,
+            displayName = stored.displayName,
+            profileColor = stored.profileColor,
+            bio = stored.bio,
+            avatarDataUrl = media.signedUrl(stored.avatarObjectKey) ?: stored.avatarDataUrl,
+            profileMusicUrl = media.signedUrl(stored.profileMusicObjectKey),
+            profileMusicDescription = stored.profileMusicDescription,
+            profileMusicUpdatedAt = stored.profileMusicUpdatedAt,
+            genres = stored.genres,
+            moods = stored.moods,
+            discoverable = stored.discoverable,
+            shareMusic = stored.shareMusic,
+            offlineExchangeEnabled = stored.offlineExchangeEnabled,
+            melodyAlias = stored.melodyAlias,
+            stats = stats,
+            tasteFingerprint = taste,
+            profileRevision = stored.profileRevision,
+            signatureTracks = signatureTracks(userId),
+            favoriteArtists = favoriteArtists(userId),
+            privacy = stored.privacy,
+        )
+    }
+
+    fun publicProfile(viewerId: UUID, profileHandle: String): PublicProfileResponse {
+        if (!profileHandle.matches(PROFILE_HANDLE_REGEX)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+        }
+        val target = storedByHandle(profileHandle)
+        if (blocked(viewerId, target.userId)) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+        }
+        val following = follows(viewerId, target.userId)
+        val followsMe = follows(target.userId, viewerId)
+        val mutual = following && followsMe
+        val relationship = when {
+            viewerId == target.userId -> "SELF"
+            mutual -> "MUTUAL"
+            following -> "FOLLOWING"
+            followsMe -> "FOLLOWS_ME"
+            else -> "NONE"
+        }
+        val musicVisible = when (target.musicVisibility) {
+            "HIDDEN" -> viewerId == target.userId
+            "MUTUALS" -> viewerId == target.userId || mutual
+            else -> true
+        }
+        val sharedExchangeCount = sharedExchangeCount(viewerId, target.userId)
+        val currentMusicVisible = canView(
+            target.privacy.currentMusicVisibility,
+            isSelf = viewerId == target.userId,
+            mutual = mutual,
+            exchanged = sharedExchangeCount > 0,
+        )
+        val exchangeInsightsVisible = canView(
+            target.privacy.exchangeInsightsVisibility,
+            isSelf = viewerId == target.userId,
+            mutual = mutual,
+            exchanged = sharedExchangeCount > 0,
+        )
+        val nowPlaying = if (currentMusicVisible) nowPlaying(target.userId) else null
+        val commonTaste = if (viewerId == target.userId) null else commonTaste(
+            viewerId = viewerId,
+            targetId = target.userId,
+            includeTargetExchangeInsights = exchangeInsightsVisible,
+        )
+        return PublicProfileResponse(
+            profileHandle = target.profileHandle,
+            displayName = target.displayName,
+            profileColor = target.profileColor,
+            bio = target.bio,
+            avatarUrl = media.signedUrl(target.avatarObjectKey) ?: target.avatarDataUrl,
+            profileMusicUrl = if (musicVisible) media.signedUrl(target.profileMusicObjectKey) else null,
+            profileMusicDescription = if (musicVisible) target.profileMusicDescription else null,
+            genres = target.genres,
+            moods = target.moods,
+            melodyAlias = target.melodyAlias,
+            stats = stats(target.userId),
+            tasteFingerprint = if (exchangeInsightsVisible) {
+                tasteFingerprint(target.userId, limit = 3)
+            } else TasteFingerprint(),
+            relationship = relationship,
+            following = following,
+            mutual = mutual,
+            sharedVerifiedExchangeCount = sharedExchangeCount,
+            signatureTracks = signatureTracks(target.userId),
+            favoriteArtists = favoriteArtists(target.userId),
+            nowPlaying = nowPlaying,
+            commonTaste = commonTaste,
+            sectionStates = buildMap {
+                put("NOW_PLAYING", when {
+                    !currentMusicVisible -> "PRIVATE"
+                    nowPlaying == null -> "NO_DATA"
+                    else -> "VISIBLE"
+                })
+                put("COMMON_TASTE", when {
+                    viewerId == target.userId -> "NOT_APPLICABLE"
+                    commonTaste == null -> "INSUFFICIENT_DATA"
+                    else -> "VISIBLE"
+                })
+                put("EXCHANGE_INSIGHTS", if (exchangeInsightsVisible) "VISIBLE" else "PRIVATE")
+                put("BUBBLE_PRESENCE", "NO_DATA")
+            },
+        )
+    }
+
+    fun publicProfileByExchange(viewerId: UUID, exchangeId: UUID): PublicProfileResponse {
+        val peerHandle = jdbc.query(
+            """
+            select peer_user.profile_handle
+            from offline_exchange_events e
+            join offline_credentials peer_credential on peer_credential.id=e.peer_credential_id
+            join users peer_user on peer_user.id=peer_credential.user_id
+            where e.participant_user_id=? and e.exchange_id=? and e.verification_state='VERIFIED'
+            """.trimIndent(),
+            { rs, _ -> rs.getString(1) },
+            viewerId,
+            exchangeId,
+        ).firstOrNull() ?: throw ResponseStatusException(
+            HttpStatus.NOT_FOUND,
+            "확인된 교환 상대 프로필을 찾을 수 없습니다.",
+        )
+        return publicProfile(viewerId, peerHandle)
+    }
+
+    private fun storedByUserId(userId: UUID): StoredProfile = jdbc.query(
+        PROFILE_SELECT + " where u.id=?",
+        ::storedProfile,
+        userId,
+    ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+
+    private fun storedByHandle(profileHandle: String): StoredProfile = jdbc.query(
+        PROFILE_SELECT + " where lower(u.profile_handle)=lower(?)",
+        ::storedProfile,
+        profileHandle,
+    ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+
+    private fun storedProfile(rs: ResultSet, @Suppress("UNUSED_PARAMETER") row: Int): StoredProfile {
+        val notes = runCatching {
+            val json = rs.getString("melody_alias_notes").orEmpty()
+            Regex("\\\"((?:\\\\.|[^\\\"])*)\\\"").findAll(json).map { match ->
+                match.groupValues[1].replace("\\\"", "\"").replace("\\\\", "\\")
+            }.toList()
+        }.getOrDefault(emptyList())
+        val tempo = rs.getObject("melody_alias_tempo") as? Number
+        val aliasId = rs.getString("melody_alias_id")
+        val melodyAlias = if (aliasId != null && notes.isNotEmpty() && tempo != null) {
+            MelodyAliasProfile(
+                aliasId,
+                notes,
+                rs.getString("melody_alias_tone").orEmpty(),
+                rs.getString("melody_alias_mood").orEmpty(),
+                tempo.toInt(),
+            )
+        } else null
+        return StoredProfile(
+            userId = UUID.fromString(rs.getString("id")),
+            profileHandle = rs.getString("profile_handle"),
+            displayName = rs.getString("display_name"),
+            profileColor = rs.getString("profile_color"),
+            bio = rs.getString("bio").orEmpty(),
+            avatarDataUrl = rs.getString("avatar_data_url"),
+            avatarObjectKey = rs.getString("avatar_object_key"),
+            profileMusicObjectKey = rs.getString("profile_music_object_key"),
+            profileMusicDescription = rs.getString("profile_music_description"),
+            profileMusicUpdatedAt = rs.getTimestamp("profile_music_updated_at")?.toInstant(),
+            genres = splitTags(rs.getString("preferred_genres")),
+            moods = splitTags(rs.getString("mood_tags")),
+            discoverable = rs.getBoolean("discoverable"),
+            shareMusic = rs.getBoolean("share_music"),
+            musicVisibility = rs.getString("music_visibility"),
+            offlineExchangeEnabled = rs.getBoolean("offline_exchange_enabled"),
+            profileRevision = rs.getLong("profile_revision"),
+            privacy = ProfilePrivacy(
+                currentMusicVisibility = rs.getString("current_music_visibility"),
+                listeningInsightsEnabled = rs.getBoolean("listening_insights_enabled"),
+                listeningInsightsVisibility = rs.getString("listening_insights_visibility"),
+                exchangeInsightsVisibility = rs.getString("exchange_insights_visibility"),
+                bubblePresenceVisibility = rs.getString("bubble_presence_visibility"),
+            ),
+            melodyAlias = melodyAlias,
+        )
+    }
+
+    private fun stats(userId: UUID): ProfileStats = jdbc.queryForObject(
+        """
+        select
+          (select count(*) from user_follows where follower_id=?),
+          (select count(*) from user_follows where followed_id=?),
+          (select count(*) from offline_exchange_events where participant_user_id=? and verification_state='VERIFIED'),
+          (select count(distinct peer.user_id)
+             from offline_exchange_events e join offline_credentials peer on peer.id=e.peer_credential_id
+            where e.participant_user_id=? and e.verification_state='VERIFIED')
+        """.trimIndent(),
+        { rs, _ -> ProfileStats(rs.getInt(1), rs.getInt(2), rs.getInt(3), rs.getInt(4), rs.getInt(3)) },
+        userId, userId, userId, userId,
+    ) ?: ProfileStats(0, 0, 0, 0, 0)
+
+    private fun tasteFingerprint(userId: UUID, limit: Int = 8): TasteFingerprint = TasteFingerprint(
+        genres = tasteMetrics(userId, "genreTags", limit),
+        moods = tasteMetrics(userId, "moodTags", limit),
+    )
+
+    private fun tasteMetrics(userId: UUID, jsonKey: String, limit: Int): List<TasteMetric> {
+        val rows = jdbc.query(
+            """
+            select tag, count(*)::int
+            from offline_exchange_events e
+            cross join lateral jsonb_array_elements_text(coalesce(e.received_card_json->?, '[]'::jsonb)) tag
+            where e.participant_user_id=? and e.verification_state='VERIFIED'
+            group by tag order by count(*) desc, tag asc limit ?
+            """.trimIndent(),
+            { rs, _ -> rs.getString(1) to rs.getInt(2) },
+            jsonKey, userId, limit,
+        )
+        val total = rows.sumOf { it.second }.coerceAtLeast(1)
+        return rows.map { (label, count) ->
+            TasteMetric(label, count, (count.toDouble() / total).roundRatio())
+        }
+    }
+
+    private fun signatureTracks(userId: UUID): List<ProfileTrack> = jdbc.query(
+        """
+        select rank,provider,provider_track_id,title,artist_name,album_name,artwork_url,genre_tags,mood_tags
+        from profile_signature_tracks where user_id=? order by rank
+        """.trimIndent(),
+        { rs, _ ->
+            ProfileTrack(
+                rank = rs.getInt("rank"),
+                provider = rs.getString("provider"),
+                providerTrackId = rs.getString("provider_track_id"),
+                title = rs.getString("title"),
+                artist = rs.getString("artist_name"),
+                album = rs.getString("album_name"),
+                artworkUrl = rs.getString("artwork_url"),
+                genreTags = splitTags(rs.getString("genre_tags")),
+                moodTags = splitTags(rs.getString("mood_tags")),
+            )
+        },
+        userId,
+    )
+
+    private fun favoriteArtists(userId: UUID): List<ProfileArtist> = jdbc.query(
+        """
+        select rank,provider,provider_artist_id,artist_name,image_url,genre_tags
+        from profile_favorite_artists where user_id=? order by rank
+        """.trimIndent(),
+        { rs, _ ->
+            ProfileArtist(
+                rank = rs.getInt("rank"),
+                provider = rs.getString("provider"),
+                providerArtistId = rs.getString("provider_artist_id"),
+                name = rs.getString("artist_name"),
+                imageUrl = rs.getString("image_url"),
+                genreTags = splitTags(rs.getString("genre_tags")),
+            )
+        },
+        userId,
+    )
+
+    private fun nowPlaying(userId: UUID): NowPlayingProfile? = jdbc.query(
+        """
+        select track_title,artist_name,album_name,album_art_url,is_playing,duration_ms,position_ms,
+          position_observed_at,observed_at,expires_at
+        from music_statuses
+        where user_id=? and is_playing=true and expires_at>now()
+        """.trimIndent(),
+        { rs, _ ->
+            NowPlayingProfile(
+                title = rs.getString("track_title"),
+                artist = rs.getString("artist_name"),
+                album = rs.getString("album_name"),
+                artworkUrl = rs.getString("album_art_url"),
+                isPlaying = rs.getBoolean("is_playing"),
+                durationMs = (rs.getObject("duration_ms") as? Number)?.toLong(),
+                positionMs = (rs.getObject("position_ms") as? Number)?.toLong(),
+                positionObservedAt = rs.getTimestamp("position_observed_at")?.toInstant(),
+                observedAt = rs.getTimestamp("observed_at").toInstant(),
+                expiresAt = rs.getTimestamp("expires_at").toInstant(),
+            )
+        },
+        userId,
+    ).firstOrNull()
+
+    private fun commonTaste(
+        viewerId: UUID,
+        targetId: UUID,
+        includeTargetExchangeInsights: Boolean,
+    ): CommonTasteSummary? {
+        val viewer = tasteEvidence(viewerId, includeExchangeInsights = true)
+        val target = tasteEvidence(targetId, includeExchangeInsights = includeTargetExchangeInsights)
+        if (viewer.evidenceCount < 3 || target.evidenceCount < 3) return null
+
+        val genreScore = weightedJaccard(viewer.genres, target.genres)
+        val moodScore = weightedJaccard(viewer.moods, target.moods)
+        val artistScore = weightedJaccard(viewer.artists, target.artists)
+        val trackScore = weightedJaccard(viewer.tracks, target.tracks)
+        val exchangeScore = (sharedExchangeCount(viewerId, targetId).coerceAtMost(5) * 20).toDouble()
+        val total = (
+            genreScore * 0.30 + moodScore * 0.30 + artistScore * 0.20 +
+                trackScore * 0.10 + exchangeScore * 0.10
+            ).toInt().coerceIn(0, 100)
+
+        val metrics = buildList {
+            addAll(overlapMetrics(viewer.genres, target.genres, "GENRE"))
+            addAll(overlapMetrics(viewer.moods, target.moods, "MOOD"))
+            if (size < 4) addAll(overlapMetrics(viewer.artists, target.artists, "ARTIST"))
+        }.sortedWith(
+            compareByDescending<CommonTasteMetric> { it.score }
+                .thenByDescending { it.evidenceCount }
+                .thenBy { it.label },
+        ).distinctBy { it.type to it.label.lowercase() }.take(4)
+
+        return CommonTasteSummary(
+            score = total,
+            metrics = metrics,
+            sampleSize = viewer.evidenceCount + target.evidenceCount,
+        )
+    }
+
+    private fun tasteEvidence(userId: UUID, includeExchangeInsights: Boolean): TasteEvidence {
+        val profile = storedByUserId(userId)
+        val tracks = signatureTracks(userId)
+        val artists = favoriteArtists(userId)
+        val genres = linkedMapOf<String, Double>()
+        val moods = linkedMapOf<String, Double>()
+        val artistWeights = linkedMapOf<String, Double>()
+        val trackWeights = linkedMapOf<String, Double>()
+
+        profile.genres.forEach { genres.addWeight(it, 2.0) }
+        profile.moods.forEach { moods.addWeight(it, 2.0) }
+        tracks.forEach { track ->
+            track.genreTags.forEach { genres.addWeight(it, 1.5) }
+            track.moodTags.forEach { moods.addWeight(it, 1.5) }
+            artistWeights.addWeight(track.artist, 0.75)
+            trackWeights.addWeight("${track.title} · ${track.artist}", 1.0)
+        }
+        artists.forEach { artist ->
+            artist.genreTags.forEach { genres.addWeight(it, 1.0) }
+            artistWeights.addWeight(artist.name, 1.5)
+        }
+        if (includeExchangeInsights) {
+            tasteMetrics(userId, "genreTags", 24).forEach { genres.addWeight(it.label, it.count.toDouble()) }
+            tasteMetrics(userId, "moodTags", 24).forEach { moods.addWeight(it.label, it.count.toDouble()) }
+        }
+        return TasteEvidence(genres, moods, artistWeights, trackWeights)
+    }
+
+    private fun weightedJaccard(left: Map<String, Double>, right: Map<String, Double>): Double {
+        val keys = left.keys + right.keys
+        if (keys.isEmpty()) return 0.0
+        val denominator = keys.sumOf { maxOf(left[it] ?: 0.0, right[it] ?: 0.0) }
+        if (denominator <= 0.0) return 0.0
+        return keys.sumOf { minOf(left[it] ?: 0.0, right[it] ?: 0.0) } / denominator * 100.0
+    }
+
+    private fun overlapMetrics(
+        left: Map<String, Double>,
+        right: Map<String, Double>,
+        type: String,
+    ): List<CommonTasteMetric> = left.keys.intersect(right.keys).mapNotNull { key ->
+        val leftWeight = left[key] ?: return@mapNotNull null
+        val rightWeight = right[key] ?: return@mapNotNull null
+        val largest = maxOf(leftWeight, rightWeight)
+        if (largest <= 0.0) return@mapNotNull null
+        CommonTasteMetric(
+            label = key,
+            type = type,
+            score = ((minOf(leftWeight, rightWeight) / largest) * 100).toInt().coerceIn(0, 100),
+            evidenceCount = minOf(leftWeight, rightWeight).toInt().coerceAtLeast(1),
+        )
+    }
+
+    private fun MutableMap<String, Double>.addWeight(rawLabel: String, weight: Double) {
+        val label = rawLabel.trim().take(80)
+        if (label.isBlank()) return
+        val existingKey = keys.firstOrNull { it.equals(label, ignoreCase = true) } ?: label
+        this[existingKey] = (this[existingKey] ?: 0.0) + weight
+    }
+
+    private fun canView(scope: String, isSelf: Boolean, mutual: Boolean, exchanged: Boolean): Boolean = when {
+        isSelf -> true
+        scope == "EVERYONE" -> true
+        scope == "MUTUALS" -> mutual
+        scope == "EXCHANGED" -> exchanged
+        else -> false
+    }
+
+    private fun sharedExchangeCount(viewerId: UUID, targetId: UUID): Int = if (viewerId == targetId) 0 else {
+        jdbc.queryForObject(
+            """
+            select count(distinct e.exchange_id)
+            from offline_exchange_events e
+            join offline_credentials peer on peer.id=e.peer_credential_id
+            where e.participant_user_id=? and peer.user_id=? and e.verification_state='VERIFIED'
+            """.trimIndent(),
+            Int::class.java,
+            viewerId,
+            targetId,
+        ) ?: 0
+    }
+
+    private fun follows(from: UUID, to: UUID): Boolean = from != to && jdbc.queryForObject(
+        "select exists(select 1 from user_follows where follower_id=? and followed_id=?)",
+        Boolean::class.java,
+        from,
+        to,
+    ) == true
+
+    private fun blocked(left: UUID, right: UUID): Boolean = left != right && jdbc.queryForObject(
+        """select exists(select 1 from user_blocks where
+           (blocker_id=? and blocked_id=?) or (blocker_id=? and blocked_id=?))""",
+        Boolean::class.java,
+        left, right, right, left,
+    ) == true
+
+    private fun splitTags(value: String?) = value.orEmpty().split(',').map(String::trim).filter(String::isNotBlank)
+    private fun Double.roundRatio() = kotlin.math.round(this * 1000.0) / 1000.0
+
+    private data class TasteEvidence(
+        val genres: Map<String, Double>,
+        val moods: Map<String, Double>,
+        val artists: Map<String, Double>,
+        val tracks: Map<String, Double>,
+    ) {
+        val evidenceCount: Int
+            get() = genres.size + moods.size + artists.size + tracks.size
+    }
+
+    companion object {
+        private val PROFILE_HANDLE_REGEX = Regex("[a-z0-9_]{3,32}")
+        private val PROFILE_SELECT = """
+            select u.id,u.profile_handle,u.display_name,u.profile_color,u.bio,u.avatar_data_url,
+              u.avatar_object_key,u.preferred_genres,u.mood_tags,u.profile_music_object_key,
+              u.profile_music_description,u.profile_music_updated_at,u.melody_alias_id,
+              u.melody_alias_notes::text melody_alias_notes,u.melody_alias_tone,u.melody_alias_mood,
+              u.melody_alias_tempo,u.profile_revision,coalesce(p.discoverable,true) discoverable,
+              coalesce(p.share_music,true) share_music,coalesce(p.music_visibility,'TITLE_ARTIST') music_visibility,
+              coalesce(p.offline_exchange_enabled,true) offline_exchange_enabled,
+              coalesce(p.current_music_visibility,'EVERYONE') current_music_visibility,
+              coalesce(p.listening_insights_enabled,false) listening_insights_enabled,
+              coalesce(p.listening_insights_visibility,'PRIVATE') listening_insights_visibility,
+              coalesce(p.exchange_insights_visibility,'EXCHANGED') exchange_insights_visibility,
+              coalesce(p.bubble_presence_visibility,'PARTICIPANTS_ONLY') bubble_presence_visibility
+            from users u left join user_privacy_settings p on p.user_id=u.id
+        """.trimIndent()
+    }
+}
 
 @RestController
 @RequestMapping("/api/v1/me")
@@ -44,12 +667,13 @@ class ProfileController(
     private val jdbc: JdbcTemplate,
     private val nearby: NearbyService,
     private val media: ProfileMediaStorage,
+    private val profiles: ProfileQueryService,
 ) {
-    @GetMapping fun me(principal: Principal): ProfileResponse = load(UUID.fromString(principal.name))
+    @GetMapping fun me(principal: Principal): ProfileResponse = profiles.me(principal.userId())
 
     @PatchMapping
     fun update(principal: Principal, @RequestBody request: ProfileUpdate): ProfileResponse {
-        val userId = UUID.fromString(principal.name)
+        val userId = principal.userId()
         val name = request.displayName.trim().take(40)
         val color = request.profileColor.takeIf { it.matches(Regex("#[0-9A-Fa-f]{6}")) } ?: "#6750A4"
         require(name.length >= 2) { "Display name must contain at least 2 characters" }
@@ -62,87 +686,227 @@ class ProfileController(
             request.avatarDataUrl.startsWith("data:image/") -> media.storeAvatar(userId, request.avatarDataUrl)
             else -> previous
         }
-        jdbc.update("""update users set display_name=?,profile_color=?,bio=?,avatar_data_url=null,
-            avatar_object_key=?,avatar_mime_type=?,preferred_genres=?,mood_tags=?,updated_at=now() where id=?""",
+        jdbc.update(
+            """update users set display_name=?,profile_color=?,bio=?,avatar_data_url=null,
+               avatar_object_key=?,avatar_mime_type=?,preferred_genres=?,mood_tags=?,
+               profile_revision=profile_revision+1,updated_at=now() where id=?""",
             name, color, request.bio.trim().take(160), avatar?.key, avatar?.mimeType,
-            request.genres.take(8).joinToString(","), request.moods.take(8).joinToString(","), userId)
+            request.genres.cleanTags().joinToString(","), request.moods.cleanTags().joinToString(","), userId,
+        )
         if (previous?.key != avatar?.key) media.delete(previous?.key)
-        return load(userId)
+        return profiles.me(userId)
     }
 
     @PutMapping("/privacy")
     @Transactional
     fun privacy(principal: Principal, @RequestBody request: PrivacyUpdate): ProfileResponse {
-        val userId = UUID.fromString(principal.name)
+        val userId = principal.userId()
         val previousAudience = nearby.musicAudienceSnapshot(userId)
-        jdbc.update("""insert into user_privacy_settings(user_id,discoverable,share_music) values (?,?,?)
-            on conflict(user_id) do update set discoverable=excluded.discoverable,share_music=excluded.share_music,updated_at=now()""",
-            userId, request.discoverable, request.shareMusic)
+        jdbc.update(
+            """insert into user_privacy_settings(user_id,discoverable,share_music,offline_exchange_enabled)
+               values (?,?,?,?) on conflict(user_id) do update set discoverable=excluded.discoverable,
+               share_music=excluded.share_music,offline_exchange_enabled=excluded.offline_exchange_enabled,
+               updated_at=now()""",
+            userId, request.discoverable, request.shareMusic, request.offlineExchangeEnabled,
+        )
         jdbc.update(
             """
             update user_privacy_settings set
-              discoverability_scope=case
-                when ? then case when discoverability_scope='HIDDEN' then 'NEARBY' else discoverability_scope end
-                else 'HIDDEN' end,
-              music_visibility=case
-                when ? then case when music_visibility='HIDDEN' then 'TITLE_ARTIST' else music_visibility end
-                else 'HIDDEN' end,
-              updated_at=now()
-            where user_id=?
+              discoverability_scope=case when ? then case when discoverability_scope='HIDDEN' then 'NEARBY' else discoverability_scope end else 'HIDDEN' end,
+              music_visibility=case when ? then case when music_visibility='HIDDEN' then 'TITLE_ARTIST' else music_visibility end else 'HIDDEN' end,
+              current_music_visibility=case when ? then case when current_music_visibility='PRIVATE' then 'EVERYONE' else current_music_visibility end else 'PRIVATE' end,
+              updated_at=now() where user_id=?
             """.trimIndent(),
-            request.discoverable,
-            request.shareMusic,
-            userId,
+            request.discoverable, request.shareMusic, request.shareMusic, userId,
         )
         nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
-        return load(userId)
+        return profiles.me(userId)
+    }
+
+    @PutMapping("/profile-curation")
+    @Transactional
+    fun curation(principal: Principal, @RequestBody request: ProfileCurationUpdate): ProfileResponse {
+        val userId = principal.userId()
+        require(request.signatureTracks.size <= 3) { "At most 3 signature tracks are allowed" }
+        require(request.favoriteArtists.size <= 3) { "At most 3 favorite artists are allowed" }
+        request.profileRevision?.let { expected ->
+            val actual = jdbc.queryForObject(
+                "select profile_revision from users where id=?",
+                Long::class.java,
+                userId,
+            ) ?: 0L
+            if (expected != actual) throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "다른 기기에서 프로필이 변경되었습니다. 새로고침 후 다시 시도해 주세요.",
+            )
+        }
+
+        val tracks = request.signatureTracks.mapIndexed { index, track ->
+            track.copy(
+                rank = index + 1,
+                provider = track.provider.cleanProvider(),
+                providerTrackId = track.providerTrackId.cleanOptional(160),
+                title = track.title.cleanRequired("Track title", 160),
+                artist = track.artist.cleanRequired("Track artist", 160),
+                album = track.album.cleanOptional(160),
+                artworkUrl = track.artworkUrl.cleanHttpsUrl(),
+                genreTags = track.genreTags.cleanTags(),
+                moodTags = track.moodTags.cleanTags(),
+            )
+        }
+        val artists = request.favoriteArtists.mapIndexed { index, artist ->
+            artist.copy(
+                rank = index + 1,
+                provider = artist.provider.cleanProvider(),
+                providerArtistId = artist.providerArtistId.cleanOptional(160),
+                name = artist.name.cleanRequired("Artist name", 160),
+                imageUrl = artist.imageUrl.cleanHttpsUrl(),
+                genreTags = artist.genreTags.cleanTags(),
+            )
+        }
+
+        jdbc.update("delete from profile_signature_tracks where user_id=?", userId)
+        tracks.forEach { track ->
+            jdbc.update(
+                """
+                insert into profile_signature_tracks(
+                  user_id,rank,provider,provider_track_id,title,artist_name,album_name,artwork_url,genre_tags,mood_tags
+                ) values (?,?,?,?,?,?,?,?,?,?)
+                """.trimIndent(),
+                userId, track.rank, track.provider, track.providerTrackId, track.title, track.artist,
+                track.album, track.artworkUrl, track.genreTags.joinToString(","), track.moodTags.joinToString(","),
+            )
+        }
+        jdbc.update("delete from profile_favorite_artists where user_id=?", userId)
+        artists.forEach { artist ->
+            jdbc.update(
+                """
+                insert into profile_favorite_artists(
+                  user_id,rank,provider,provider_artist_id,artist_name,image_url,genre_tags
+                ) values (?,?,?,?,?,?,?)
+                """.trimIndent(),
+                userId, artist.rank, artist.provider, artist.providerArtistId, artist.name,
+                artist.imageUrl, artist.genreTags.joinToString(","),
+            )
+        }
+        jdbc.update("update users set profile_revision=profile_revision+1,updated_at=now() where id=?", userId)
+        return profiles.me(userId)
+    }
+
+    @PutMapping("/profile-privacy")
+    @Transactional
+    fun profilePrivacy(principal: Principal, @RequestBody request: ProfilePrivacyUpdate): ProfileResponse {
+        val userId = principal.userId()
+        val currentMusic = request.currentMusicVisibility.requireOneOf(
+            "currentMusicVisibility", setOf("EVERYONE", "MUTUALS", "PRIVATE"),
+        )
+        val listening = request.listeningInsightsVisibility.requireOneOf(
+            "listeningInsightsVisibility", setOf("EVERYONE", "MUTUALS", "PRIVATE"),
+        )
+        val exchange = request.exchangeInsightsVisibility.requireOneOf(
+            "exchangeInsightsVisibility", setOf("EVERYONE", "MUTUALS", "EXCHANGED", "PRIVATE"),
+        )
+        val bubble = request.bubblePresenceVisibility.requireOneOf(
+            "bubblePresenceVisibility", setOf("PARTICIPANTS_ONLY", "MUTUALS", "PRIVATE"),
+        )
+        val previousAudience = nearby.musicAudienceSnapshot(userId)
+        jdbc.update(
+            """
+            insert into user_privacy_settings(
+              user_id,current_music_visibility,listening_insights_enabled,listening_insights_visibility,
+              exchange_insights_visibility,bubble_presence_visibility,music_visibility,share_music
+            ) values (?,?,?,?,?,?,?,?)
+            on conflict(user_id) do update set
+              current_music_visibility=excluded.current_music_visibility,
+              listening_insights_enabled=excluded.listening_insights_enabled,
+              listening_insights_visibility=excluded.listening_insights_visibility,
+              exchange_insights_visibility=excluded.exchange_insights_visibility,
+              bubble_presence_visibility=excluded.bubble_presence_visibility,
+              music_visibility=excluded.music_visibility,
+              share_music=excluded.share_music,
+              updated_at=now()
+            """.trimIndent(),
+            userId, currentMusic, request.listeningInsightsEnabled, listening, exchange, bubble,
+            currentMusic.toLegacyMusicVisibility(), currentMusic != "PRIVATE",
+        )
+        nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
+        return profiles.me(userId)
+    }
+
+    @PutMapping("/melody-alias")
+    fun setMelodyAlias(principal: Principal, @RequestBody request: MelodyAliasUpdate): ProfileResponse {
+        val userId = principal.userId()
+        val id = request.id.trim().take(80)
+        val notes = request.notes.map(String::trim).filter(String::isNotBlank).take(16)
+        require(id.isNotBlank() && notes.isNotEmpty()) { "Melody alias id and notes are required" }
+        require(request.tempo in 40..240) { "Melody alias tempo must be between 40 and 240" }
+        val notesJson = notes.joinToString(prefix = "[", postfix = "]") { note ->
+            "\"${note.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        }
+        jdbc.update(
+            """update users set melody_alias_id=?,melody_alias_notes=cast(? as jsonb),melody_alias_tone=?,
+               melody_alias_mood=?,melody_alias_tempo=?,updated_at=now() where id=?""",
+            id, notesJson, request.tone.trim().take(40), request.mood.trim().take(40), request.tempo, userId,
+        )
+        return profiles.me(userId)
     }
 
     @PutMapping("/music")
     fun setMusic(principal: Principal, @RequestBody request: ProfileMusicUpdate): ProfileResponse {
-        val userId = UUID.fromString(principal.name)
-        val previous = jdbc.queryForObject(
-            "select profile_music_object_key from users where id=?",
-            String::class.java, userId,
-        )
+        val userId = principal.userId()
+        val previous = jdbc.queryForObject("select profile_music_object_key from users where id=?", String::class.java, userId)
         val stored = media.promoteCandidate(userId, request.candidateKey)
         jdbc.update(
             """update users set profile_music_object_key=?,profile_music_mime_type=?,
-                profile_music_description=?,profile_music_updated_at=now(),updated_at=now() where id=?""",
+               profile_music_description=?,profile_music_updated_at=now(),updated_at=now() where id=?""",
             stored.key, stored.mimeType, request.description?.trim()?.take(500), userId,
         )
         if (previous != stored.key) media.delete(previous)
-        return load(userId)
+        return profiles.me(userId)
     }
 
     @DeleteMapping("/music")
     fun deleteMusic(principal: Principal): ProfileResponse {
-        val userId = UUID.fromString(principal.name)
-        val previous = jdbc.queryForObject(
-            "select profile_music_object_key from users where id=?",
-            String::class.java, userId,
-        )
+        val userId = principal.userId()
+        val previous = jdbc.queryForObject("select profile_music_object_key from users where id=?", String::class.java, userId)
         jdbc.update(
             """update users set profile_music_object_key=null,profile_music_mime_type=null,
-                profile_music_description=null,profile_music_updated_at=null,updated_at=now() where id=?""",
+               profile_music_description=null,profile_music_updated_at=null,updated_at=now() where id=?""",
             userId,
         )
         media.delete(previous)
-        return load(userId)
+        return profiles.me(userId)
     }
 
-    private fun load(userId: UUID): ProfileResponse = jdbc.query("""select u.display_name,u.profile_color,u.bio,
-        u.avatar_data_url,u.avatar_object_key,u.preferred_genres,u.mood_tags,
-        u.profile_music_object_key,u.profile_music_description,u.profile_music_updated_at,
-        coalesce(p.discoverable,true) discoverable,coalesce(p.share_music,true) share_music
-        from users u left join user_privacy_settings p on p.user_id=u.id where u.id=?""", { rs, _ ->
-        ProfileResponse(
-            rs.getString(1), rs.getString(2), rs.getString(3),
-            media.signedUrl(rs.getString(5)) ?: rs.getString(4),
-            media.signedUrl(rs.getString(8)), rs.getString(9), rs.getTimestamp(10)?.toInstant(),
-            rs.getString(6).orEmpty().split(',').filter(String::isNotBlank),
-            rs.getString(7).orEmpty().split(',').filter(String::isNotBlank),
-            rs.getBoolean(11), rs.getBoolean(12),
-        )
-    }, userId).first()
+    private fun List<String>.cleanTags() = map(String::trim).filter(String::isNotBlank).distinct().take(8)
+    private fun String.cleanProvider() = trim().uppercase().take(32).ifBlank { "MANUAL" }
+    private fun String?.cleanOptional(limit: Int) = this?.trim()?.take(limit)?.ifBlank { null }
+    private fun String.cleanRequired(label: String, limit: Int): String = trim().take(limit).also {
+        require(it.isNotBlank()) { "$label is required" }
+    }
+    private fun String?.cleanHttpsUrl(): String? = cleanOptional(2_000)?.also {
+        require(it.startsWith("https://")) { "Media URL must use HTTPS" }
+    }
+    private fun String.requireOneOf(label: String, allowed: Set<String>): String = trim().uppercase().also {
+        require(it in allowed) { "$label is invalid" }
+    }
+    private fun String.toLegacyMusicVisibility() = when (this) {
+        "MUTUALS" -> "MUTUALS"
+        "PRIVATE" -> "HIDDEN"
+        else -> "TITLE_ARTIST"
+    }
 }
+
+@RestController
+@RequestMapping("/api/v1/profiles")
+class PublicProfileController(private val profiles: ProfileQueryService) {
+    @GetMapping("/exchange/{exchangeId}")
+    fun exchangeProfile(principal: Principal, @PathVariable exchangeId: UUID): PublicProfileResponse =
+        profiles.publicProfileByExchange(principal.userId(), exchangeId)
+
+    @GetMapping("/{profileHandle}")
+    fun profile(principal: Principal, @PathVariable profileHandle: String): PublicProfileResponse =
+        profiles.publicProfile(principal.userId(), profileHandle)
+}
+
+private fun Principal.userId() = UUID.fromString(name)

@@ -338,6 +338,7 @@ fun UserDetailScreen(
     onDismissReactionSheet: () -> Unit = {},
     onReact: (NearbyListener, String) -> Unit = { _, _ -> },
     onFollow: (NearbyListener) -> Unit = {},
+    onOpenProfile: (NearbyListener) -> Unit = {},
     onOpenChat: (NearbyListener) -> Unit = {},
     onBlock: (NearbyListener) -> Unit = {},
     onReport: (NearbyListener) -> Unit = {}
@@ -388,6 +389,16 @@ fun UserDetailScreen(
             }
             item {
                 ListenerIdentity(listener = listener)
+            }
+            if (listener.profileHandle != null) {
+                item {
+                    OutlinedButton(
+                        onClick = { onOpenProfile(listener) },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                    ) {
+                        Text("음악 프로필 전체 보기", fontWeight = FontWeight.Bold)
+                    }
+                }
             }
             item {
                 CurrentTrackCard(

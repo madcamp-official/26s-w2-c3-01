@@ -61,8 +61,20 @@ enum class DeliveryState {
 
 enum class SyncState {
     PENDING,
+    UPLOADING,
     SYNCED,
     FAILED
+}
+
+enum class SessionMode {
+    ONLINE,
+    OFFLINE,
+    SIGNED_OUT,
+}
+
+enum class PresenceMode {
+    NORMAL,
+    BUBBLE,
 }
 
 data class DisplayPosition(
@@ -83,6 +95,7 @@ data class Track(
 
 data class NearbyListener(
     val nearbyHandle: String,
+    val profileHandle: String? = null,
     val displayAlias: String,
     val colorHex: Long,
     val displayPosition: DisplayPosition,
@@ -167,7 +180,137 @@ data class ProfileSettings(
     val allowReactions: Boolean,
     val offlineExchangeEnabled: Boolean,
     val profileMusicUrl: String? = null,
-    val profileMusicDescription: String? = null
+    val profileMusicDescription: String? = null,
+    val profileHandle: String = "",
+    val stats: ProfileStats = ProfileStats(),
+    val tasteFingerprint: TasteFingerprint = TasteFingerprint(),
+    val profileRevision: Long = 0,
+    val signatureTracks: List<ProfileTrack> = emptyList(),
+    val favoriteArtists: List<ProfileArtist> = emptyList(),
+    val privacy: ProfilePrivacySettings = ProfilePrivacySettings(),
+)
+
+data class ProfileTrack(
+    val rank: Int,
+    val provider: String = "MANUAL",
+    val providerTrackId: String? = null,
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val artworkUrl: String? = null,
+    val genreTags: List<String> = emptyList(),
+    val moodTags: List<String> = emptyList(),
+)
+
+data class ProfileArtist(
+    val rank: Int,
+    val provider: String = "MANUAL",
+    val providerArtistId: String? = null,
+    val name: String,
+    val imageUrl: String? = null,
+    val genreTags: List<String> = emptyList(),
+)
+
+data class MusicSearchResult(
+    val id: Long,
+    val artistId: Long?,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val genre: String,
+    val releaseDate: String?,
+    val durationSeconds: Int,
+    val artworkUrl: String?,
+    val previewUrl: String?,
+    val appleMusicUrl: String?,
+)
+
+data class ProfilePrivacySettings(
+    val currentMusicVisibility: String = "EVERYONE",
+    val listeningInsightsEnabled: Boolean = false,
+    val listeningInsightsVisibility: String = "PRIVATE",
+    val exchangeInsightsVisibility: String = "EXCHANGED",
+    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
+)
+
+data class ProfileNowPlaying(
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val artworkUrl: String? = null,
+    val isPlaying: Boolean,
+    val durationMs: Long? = null,
+    val positionMs: Long? = null,
+    val positionObservedAt: String? = null,
+    val observedAt: String,
+    val expiresAt: String,
+)
+
+data class CommonTasteMetric(
+    val label: String,
+    val type: String,
+    val score: Int,
+    val evidenceCount: Int,
+)
+
+data class CommonTasteSummary(
+    val score: Int,
+    val metrics: List<CommonTasteMetric>,
+    val algorithmVersion: String,
+    val sampleSize: Int,
+    val calculatedAt: String,
+)
+
+data class TasteMetric(
+    val label: String,
+    val count: Int,
+    val ratio: Double,
+)
+
+data class TasteFingerprint(
+    val genres: List<TasteMetric> = emptyList(),
+    val moods: List<TasteMetric> = emptyList(),
+)
+
+data class ProfileStats(
+    val followingCount: Int = 0,
+    val followerCount: Int = 0,
+    val verifiedExchangeCount: Int = 0,
+    val uniqueExchangeUserCount: Int = 0,
+    val receivedCardCount: Int = 0,
+)
+
+data class ProfileMelodyAlias(
+    val id: String,
+    val notes: List<String>,
+    val tone: String,
+    val mood: String,
+    val tempo: Int,
+)
+
+data class PublicProfile(
+    val profileHandle: String,
+    val isSelf: Boolean = false,
+    val displayName: String,
+    val colorHex: Long,
+    val bio: String,
+    val avatarUrl: String?,
+    val profileMusicUrl: String?,
+    val profileMusicDescription: String?,
+    val genres: List<String>,
+    val moods: List<String>,
+    val melodyAlias: ProfileMelodyAlias?,
+    val stats: ProfileStats,
+    val tasteFingerprint: TasteFingerprint,
+    val relationship: RelationshipStatus,
+    val following: Boolean,
+    val mutual: Boolean,
+    val sharedVerifiedExchangeCount: Int,
+    val signatureTracks: List<ProfileTrack> = emptyList(),
+    val favoriteArtists: List<ProfileArtist> = emptyList(),
+    val nowPlaying: ProfileNowPlaying? = null,
+    val commonTaste: CommonTasteSummary? = null,
+    val sectionStates: Map<String, String> = emptyMap(),
 )
 
 data class MelodyAliasCandidate(
@@ -185,13 +328,23 @@ data class MelodyAliasCandidate(
 
 data class OfflineExchangeRecord(
     val id: String,
+    val ownerUserId: String,
     val localSessionId: String,
+    val credentialId: String?,
+    val peerCredentialId: String?,
     val peerDisplayAlias: String,
     val trackTitle: String,
     val trackArtist: String,
     val melodyAlias: String,
+    val sentCardJson: String,
+    val receivedCardJson: String,
     val exchangedAt: Long,
-    val syncState: SyncState
+    val syncState: SyncState,
+    val retryCount: Int,
+    val lastError: String?,
+    val payloadHash: String,
+    val protocolVersion: Int,
+    val recordSignature: String,
 )
 
 data class BlockedUser(
@@ -203,6 +356,7 @@ data class BlockedUser(
 
 data class SocialConnection(
     val relationshipId: String?,
+    val profileHandle: String?,
     val displayAlias: String,
     val colorHex: Long,
     val avatarUrl: String?,
@@ -239,10 +393,16 @@ data class MelodyUiState(
     val profile: ProfileSettings,
     val melodyAliasCandidates: List<MelodyAliasCandidate> = emptyList(),
     val offlineExchanges: List<OfflineExchangeRecord> = emptyList(),
+    val verifiedOfflineExchangeCount: Int = 0,
+    val offlineExchangeGenres: List<String> = emptyList(),
+    val offlineExchangeMoods: List<String> = emptyList(),
     val blockedUsers: List<BlockedUser> = emptyList(),
     val following: List<SocialConnection> = emptyList(),
     val followers: List<SocialConnection> = emptyList(),
     val socialConnectionsLoading: Boolean = false,
+    val selectedPublicProfile: PublicProfile? = null,
+    val publicProfileLoading: Boolean = false,
+    val publicProfileError: String? = null,
     val discoveryRadiusMeters: Int = 300,
     val discoverabilityScope: String = "NEARBY",
     val musicVisibility: String = "TITLE_ARTIST",
@@ -251,7 +411,10 @@ data class MelodyUiState(
     val selectedNearbyHandle: String? = null,
     val profileSaving: Boolean = false,
     val feedbackMessage: String? = null,
-    val dataSourceLabel: String = "DEMO LIVE"
+    val dataSourceLabel: String = "DEMO LIVE",
+    val sessionMode: SessionMode = SessionMode.SIGNED_OUT,
+    val presenceMode: PresenceMode = PresenceMode.NORMAL,
+    val activeAccountId: String? = null,
 ) {
     val selectedNearby: NearbyListener?
         get() = nearbyListeners.firstOrNull { it.nearbyHandle == selectedNearbyHandle }

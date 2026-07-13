@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -87,6 +88,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
@@ -98,12 +100,19 @@ import com.example.myapplication.core.model.ChatPreview
 import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.core.model.MelodyAliasCandidate
+import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.ProfileSettings
+import com.example.myapplication.core.model.ProfileArtist
+import com.example.myapplication.core.model.ProfilePrivacySettings
+import com.example.myapplication.core.model.ProfileTrack
+import com.example.myapplication.core.model.PublicProfile
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.SocialConnection
 import com.example.myapplication.core.model.Track
+import com.example.myapplication.offlineexchange.ExchangeConnectionState
+import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.ui.theme.MossOutline
 import com.example.myapplication.ui.theme.MossSurface
 import com.example.myapplication.ui.theme.MossSurfaceHigh
@@ -111,35 +120,49 @@ import com.example.myapplication.ui.theme.MutedMint
 import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
 import com.example.myapplication.ui.components.MelodyCard
+import com.example.myapplication.ui.components.MelodyBubbleColors
 import com.example.myapplication.ui.MelodyAliasGenerationState
 import com.example.myapplication.ui.LyriaGenerationState
+import com.example.myapplication.ui.MusicSearchUiState
 import kotlin.math.roundToInt
 import java.io.ByteArrayOutputStream
 
 @Composable
 fun OnboardingScreen(
-    onComplete: (List<String>, List<String>) -> Unit,
+    musicSearchState: MusicSearchUiState,
+    onSearchMusic: (String) -> Unit,
+    onClearMusicSearch: () -> Unit,
+    onComplete: (List<String>, List<String>, List<ProfileArtist>, List<ProfileTrack>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var page by remember { mutableIntStateOf(0) }
     var acceptedTerms by rememberSaveable { mutableStateOf(false) }
     var genres by rememberSaveable { mutableStateOf(setOf("Indie", "R&B")) }
     var moods by rememberSaveable { mutableStateOf(setOf("Calm", "Night")) }
-    val titles = listOf("약관을 확인해 주세요", "취향의 신호를 골라요", "공개는 내가 시작해요")
+    var favoriteArtists by remember { mutableStateOf<List<ProfileArtist>>(emptyList()) }
+    var signatureTracks by remember { mutableStateOf<List<ProfileTrack>>(emptyList()) }
+    val titles = listOf(
+        "약관을 확인해 주세요",
+        "좋아하는 장르를 골라요",
+        "최애 아티스트를 찾아요",
+        "나를 설명하는 곡을 골라요",
+        "공개는 내가 시작해요",
+    )
     val descriptions = listOf(
         "서비스 이용약관과 개인정보 처리방침에 동의해야 Melody Bubble을 시작할 수 있어요.",
         "좋아하는 장르와 분위기를 선택해 주세요. 추천과 주변 취향 유사도에 사용됩니다.",
+        "이름을 검색해 프로필에 보여줄 아티스트를 최대 3명까지 선택해 주세요.",
+        "검색 결과에서 내 음악 취향을 대표하는 곡을 최대 3곡까지 골라 주세요.",
         "주변 공유는 자동으로 켜지지 않아요. 홈에서 직접 시작하고 언제든 알림에서 중지할 수 있어요."
     )
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 30.dp),
-        verticalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 20.dp, vertical = 20.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            repeat(3) { index ->
+            repeat(5) { index ->
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -149,11 +172,26 @@ fun OnboardingScreen(
                 )
             }
         }
-
-        Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+        if (page > 0) {
+            TextButton(
+                onClick = {
+                    onClearMusicSearch()
+                    page -= 1
+                },
+                modifier = Modifier.padding(top = 6.dp),
+            ) { Text("이전") }
+        } else {
+            Spacer(Modifier.height(42.dp))
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
             Surface(
-                modifier = Modifier.size(92.dp),
-                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier.size(68.dp),
+                shape = RoundedCornerShape(22.dp),
                 color = SignalGreen.copy(alpha = 0.15f),
                 border = androidx.compose.foundation.BorderStroke(1.dp, SignalGreen.copy(alpha = 0.45f))
             ) {
@@ -161,12 +199,14 @@ fun OnboardingScreen(
                     Icon(
                         imageVector = when (page) {
                             0 -> Icons.Outlined.Radio
-                            1 -> Icons.Outlined.MusicNote
+                            1 -> Icons.Outlined.Tune
+                            2 -> Icons.Outlined.PeopleOutline
+                            3 -> Icons.Outlined.MusicNote
                             else -> Icons.Outlined.Shield
                         },
                         contentDescription = null,
                         tint = SignalGreen,
-                        modifier = Modifier.size(42.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                 }
             }
@@ -178,45 +218,146 @@ fun OnboardingScreen(
             Text(text = titles[page], style = MaterialTheme.typography.displaySmall)
             Text(
                 text = descriptions[page],
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             if (page == 0) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = acceptedTerms, onCheckedChange = { acceptedTerms = it })
+                    Checkbox(
+                        checked = acceptedTerms,
+                        onCheckedChange = { acceptedTerms = it },
+                        modifier = Modifier.testTag("onboarding_terms_checkbox"),
+                    )
                     Text("이용약관 및 개인정보 처리방침에 동의합니다")
                 }
             }
             if (page == 1) {
                 Text("선호 장르", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Indie", "R&B", "Pop", "Rock").forEach { label ->
-                        FilterChip(selected = label in genres, onClick = {
-                            genres = if (label in genres) genres - label else genres + label
-                        }, label = { Text(label) })
+                listOf(
+                    listOf("Indie", "R&B", "Pop", "K-Pop"),
+                    listOf("Hip-hop", "Rock", "Jazz", "Electronic"),
+                ).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { label ->
+                            FilterChip(selected = label in genres, onClick = {
+                                genres = if (label in genres) genres - label else genres + label
+                            }, label = { Text(label, maxLines = 1) })
+                        }
                     }
                 }
                 Text("선호 분위기", style = MaterialTheme.typography.titleMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Calm", "Night", "Bright", "Energetic").forEach { label ->
-                        FilterChip(selected = label in moods, onClick = {
-                            moods = if (label in moods) moods - label else moods + label
-                        }, label = { Text(label) })
+                listOf(
+                    listOf("Calm", "Night", "Dreamy"),
+                    listOf("Bright", "Energetic", "Warm"),
+                ).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { label ->
+                            FilterChip(selected = label in moods, onClick = {
+                                moods = if (label in moods) moods - label else moods + label
+                            }, label = { Text(label) })
+                        }
                     }
                 }
             }
             if (page == 2) {
+                SelectedArtistSummary(favoriteArtists) { removed ->
+                    favoriteArtists = favoriteArtists
+                        .filterNot { it.providerArtistId == removed.providerArtistId && it.name == removed.name }
+                        .mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+                }
+                MusicCatalogSearch(
+                    state = musicSearchState,
+                    placeholder = "아티스트 이름 · 예: 아이유",
+                    onSearch = onSearchMusic,
+                )
+                val artistResults = (musicSearchState as? MusicSearchUiState.Success)
+                    ?.results
+                    ?.distinctBy { it.artistId?.toString() ?: it.artist.lowercase() }
+                    .orEmpty()
+                    .take(6)
+                artistResults.forEach { result ->
+                    val selected = favoriteArtists.any {
+                        it.providerArtistId == result.artistId?.toString() ||
+                            it.name.equals(result.artist, ignoreCase = true)
+                    }
+                    MusicCatalogResultRow(
+                        result = result,
+                        title = result.artist,
+                        subtitle = "${result.genre.ifBlank { "Music" }} · ${result.title}",
+                        selected = selected,
+                        enabled = selected || favoriteArtists.size < 3,
+                    ) {
+                        favoriteArtists = if (selected) {
+                            favoriteArtists.filterNot {
+                                it.providerArtistId == result.artistId?.toString() ||
+                                    it.name.equals(result.artist, ignoreCase = true)
+                            }
+                        } else {
+                            favoriteArtists + result.toProfileArtist(favoriteArtists.size + 1)
+                        }.mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+                    }
+                }
+            }
+            if (page == 3) {
+                if (favoriteArtists.isNotEmpty()) {
+                    Text("선택한 아티스트로 바로 검색", color = MutedMint, style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        favoriteArtists.take(3).forEach { artist ->
+                            FilterChip(
+                                selected = false,
+                                onClick = { onSearchMusic(artist.name) },
+                                label = { Text(artist.name, maxLines = 1) },
+                            )
+                        }
+                    }
+                }
+                SelectedTrackSummary(signatureTracks) { removed ->
+                    signatureTracks = signatureTracks
+                        .filterNot { it.providerTrackId == removed.providerTrackId }
+                        .mapIndexed { index, track -> track.copy(rank = index + 1) }
+                }
+                MusicCatalogSearch(
+                    state = musicSearchState,
+                    placeholder = "곡 또는 아티스트 검색",
+                    onSearch = onSearchMusic,
+                )
+                val trackResults = (musicSearchState as? MusicSearchUiState.Success)?.results.orEmpty().take(6)
+                trackResults.forEach { result ->
+                    val selected = signatureTracks.any { it.providerTrackId == result.id.toString() }
+                    MusicCatalogResultRow(
+                        result = result,
+                        title = result.title,
+                        subtitle = "${result.artist} · ${result.album}",
+                        selected = selected,
+                        enabled = selected || signatureTracks.size < 3,
+                    ) {
+                        signatureTracks = if (selected) {
+                            signatureTracks.filterNot { it.providerTrackId == result.id.toString() }
+                        } else {
+                            signatureTracks + result.toProfileTrack(signatureTracks.size + 1)
+                        }.mapIndexed { index, track -> track.copy(rank = index + 1) }
+                    }
+                }
+            }
+            if (page == 4) {
                 AppPanel {
                     InfoLine("표시 범위", "캠퍼스 주변")
                     InfoLine("정확한 거리·방향", "공개 안 함")
-                    InfoLine("프로필", "세션별 임시 별칭")
+                    InfoLine("프로필", "내가 선택한 음악 취향")
                 }
             }
+            Spacer(Modifier.height(12.dp))
         }
 
+        Spacer(Modifier.height(12.dp))
         Button(
             onClick = {
-                if (page < 2) page += 1 else onComplete(genres.toList(), moods.toList())
+                if (page < 4) {
+                    onClearMusicSearch()
+                    page += 1
+                } else {
+                    onComplete(genres.toList(), moods.toList(), favoriteArtists, signatureTracks)
+                }
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -225,13 +366,141 @@ fun OnboardingScreen(
             enabled = when (page) {
                 0 -> acceptedTerms
                 1 -> genres.isNotEmpty() && moods.isNotEmpty()
+                2 -> favoriteArtists.isNotEmpty()
+                3 -> signatureTracks.isNotEmpty()
                 else -> true
             }
         ) {
-            Text(if (page < 2) "계속" else "시작하기")
+            Text(if (page < 4) "계속" else "시작하기")
         }
     }
 }
+
+@Composable
+private fun MusicCatalogSearch(
+    state: MusicSearchUiState,
+    placeholder: String,
+    onSearch: (String) -> Unit,
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it.take(80) },
+            modifier = Modifier.weight(1f).testTag("music_search_input"),
+            placeholder = { Text(placeholder) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) onSearch(query) }),
+        )
+        Spacer(Modifier.width(8.dp))
+        Button(
+            onClick = { onSearch(query) },
+            enabled = query.isNotBlank() && state !is MusicSearchUiState.Loading,
+            modifier = Modifier.height(56.dp).testTag("music_search_button"),
+        ) {
+            if (state is MusicSearchUiState.Loading) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else {
+                Text("검색")
+            }
+        }
+    }
+    when (state) {
+        is MusicSearchUiState.Error -> Text(state.message, color = MaterialTheme.colorScheme.error)
+        is MusicSearchUiState.Success -> Text("${state.results.size}개의 검색 결과", color = MutedMint, style = MaterialTheme.typography.labelMedium)
+        else -> Unit
+    }
+}
+
+@Composable
+private fun MusicCatalogResultRow(
+    result: MusicSearchResult,
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick),
+        color = if (selected) SignalGreen.copy(alpha = 0.16f) else MossSurfaceHigh,
+        shape = RoundedCornerShape(16.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) SignalGreen else MossOutline),
+    ) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            ProfileArtwork(result.artworkUrl, SignalGreen, 48.dp)
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, color = MutedMint, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            }
+            Text(
+                when {
+                    selected -> "선택됨"
+                    enabled -> "선택"
+                    else -> "최대 3개"
+                },
+                color = if (selected || enabled) SignalGreen else MutedMint,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedArtistSummary(
+    artists: List<ProfileArtist>,
+    onRemove: (ProfileArtist) -> Unit,
+) {
+    if (artists.isEmpty()) return
+    Text("선택한 아티스트 ${artists.size}/3", fontWeight = FontWeight.Bold)
+    artists.forEach { artist ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("${artist.rank}. ${artist.name}", Modifier.weight(1f), maxLines = 1)
+            TextButton(onClick = { onRemove(artist) }) { Text("삭제") }
+        }
+    }
+}
+
+@Composable
+private fun SelectedTrackSummary(
+    tracks: List<ProfileTrack>,
+    onRemove: (ProfileTrack) -> Unit,
+) {
+    if (tracks.isEmpty()) return
+    Text("선택한 대표곡 ${tracks.size}/3", fontWeight = FontWeight.Bold)
+    tracks.forEach { track ->
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("${track.rank}. ${track.title}", fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(track.artist, color = MutedMint, style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = { onRemove(track) }) { Text("삭제") }
+        }
+    }
+}
+
+private fun MusicSearchResult.toProfileTrack(rank: Int) = ProfileTrack(
+    rank = rank,
+    provider = "ITUNES",
+    providerTrackId = id.toString(),
+    title = title,
+    artist = artist,
+    album = album.ifBlank { null },
+    artworkUrl = artworkUrl,
+    genreTags = listOfNotNull(genre.takeIf(String::isNotBlank)),
+)
+
+private fun MusicSearchResult.toProfileArtist(rank: Int) = ProfileArtist(
+    rank = rank,
+    provider = "ITUNES",
+    providerArtistId = artistId?.toString(),
+    name = artist,
+    imageUrl = artworkUrl,
+    genreTags = listOfNotNull(genre.takeIf(String::isNotBlank)),
+)
 
 @Composable
 fun InboxScreen(
@@ -473,18 +742,28 @@ fun MyScreen(
     feedbackMessage: String?,
     followingCount: Int,
     followerCount: Int,
+    verifiedOfflineExchangeCount: Int,
+    offlineExchangeGenres: List<String>,
+    offlineExchangeMoods: List<String>,
+    nowPlayingTrack: Track?,
+    nowPlayingActive: Boolean,
     onLoadConnections: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenBubbleMode: () -> Unit,
     onProfileUpdate: (String, Long, String, String?, List<String>, List<String>) -> Unit,
+    onProfileCurationUpdate: (List<ProfileTrack>, List<ProfileArtist>) -> Unit,
+    musicSearchState: MusicSearchUiState,
+    onSearchMusic: (String) -> Unit,
+    onClearMusicSearch: () -> Unit,
     onPlayProfileMusic: () -> Unit,
     onDeleteProfileMusic: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(Unit) { onLoadConnections() }
-    var editing by rememberSaveable { mutableStateOf(false) }
+    var editorSection by rememberSaveable { mutableStateOf<String?>(null) }
     var awaitingProfileSave by rememberSaveable { mutableStateOf(false) }
     var profileSaveStarted by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
@@ -493,12 +772,14 @@ fun MyScreen(
     var colorHex by rememberSaveable(profile.colorHex) { mutableStateOf(profile.colorHex) }
     var genres by rememberSaveable(profile.genres) { mutableStateOf(profile.genres) }
     var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
+    var signatureTracks by remember(profile.signatureTracks) { mutableStateOf(profile.signatureTracks) }
+    var favoriteArtists by remember(profile.favoriteArtists) { mutableStateOf(profile.favoriteArtists) }
     LaunchedEffect(profileSaving, feedbackMessage, awaitingProfileSave) {
         if (awaitingProfileSave && profileSaving) profileSaveStarted = true
         if (awaitingProfileSave && profileSaveStarted && !profileSaving) {
             awaitingProfileSave = false
             profileSaveStarted = false
-            if (feedbackMessage == "프로필을 변경했어요") editing = false
+            if (feedbackMessage == "프로필을 변경했어요") editorSection = null
         }
     }
     val context = LocalContext.current
@@ -514,8 +795,11 @@ fun MyScreen(
         }.getOrNull()
     }
 
-    if (editing) ModalBottomSheet(
-        onDismissRequest = { editing = false },
+    if (editorSection != null) ModalBottomSheet(
+        onDismissRequest = {
+            editorSection = null
+            onClearMusicSearch()
+        },
         containerColor = MossSurface,
         contentColor = PaleMint,
         dragHandle = null,
@@ -526,12 +810,31 @@ fun MyScreen(
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("프로필 편집", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("주변에 보여줄 나의 음악 프로필", color = MutedMint)
+                    Text(
+                        when (editorSection) {
+                            "TRACKS" -> "대표곡 편집"
+                            "ARTISTS" -> "최애 아티스트 편집"
+                            else -> "기본 프로필 편집"
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        when (editorSection) {
+                            "TRACKS" -> "프로필을 설명하는 곡을 최대 3곡까지 골라요"
+                            "ARTISTS" -> "취향을 보여줄 아티스트를 최대 3명까지 골라요"
+                            else -> "이름, 소개, 테마와 취향 태그를 바꿔요"
+                        },
+                        color = MutedMint,
+                    )
                 }
-                TextButton(onClick = { editing = false }) { Text("닫기") }
+                TextButton(onClick = {
+                    editorSection = null
+                    onClearMusicSearch()
+                }) { Text("닫기") }
             }
             Spacer(Modifier.height(22.dp))
+            if (editorSection == "BASIC") {
             Box(contentAlignment = Alignment.BottomEnd) {
                 ProfileAvatar(avatar, name, colorHex, 112.dp)
                 Surface(
@@ -587,65 +890,670 @@ fun MyScreen(
             if (!awaitingProfileSave && feedbackMessage?.contains("저장하지 못해") == true) {
                 Text(feedbackMessage, color = MaterialTheme.colorScheme.error)
             }
-            Spacer(Modifier.height(24.dp))
+            }
+            if (editorSection == "TRACKS") {
+                SelectedTrackSummary(signatureTracks) { removed ->
+                    signatureTracks = signatureTracks
+                        .filterNot { it.providerTrackId == removed.providerTrackId }
+                        .mapIndexed { index, track -> track.copy(rank = index + 1) }
+                }
+                MusicCatalogSearch(
+                    state = musicSearchState,
+                    placeholder = "곡 또는 아티스트 검색",
+                    onSearch = onSearchMusic,
+                )
+                (musicSearchState as? MusicSearchUiState.Success)?.results.orEmpty().take(8).forEach { result ->
+                    val selected = signatureTracks.any { it.providerTrackId == result.id.toString() }
+                    MusicCatalogResultRow(
+                        result = result,
+                        title = result.title,
+                        subtitle = "${result.artist} · ${result.album}",
+                        selected = selected,
+                        enabled = selected || signatureTracks.size < 3,
+                    ) {
+                        signatureTracks = if (selected) {
+                            signatureTracks.filterNot { it.providerTrackId == result.id.toString() }
+                        } else {
+                            signatureTracks + result.toProfileTrack(signatureTracks.size + 1)
+                        }.mapIndexed { index, track -> track.copy(rank = index + 1) }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Button(
+                    onClick = {
+                        onProfileCurationUpdate(signatureTracks, favoriteArtists)
+                        editorSection = null
+                        onClearMusicSearch()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("대표곡 저장", fontWeight = FontWeight.Bold) }
+            }
+            if (editorSection == "ARTISTS") {
+                SelectedArtistSummary(favoriteArtists) { removed ->
+                    favoriteArtists = favoriteArtists
+                        .filterNot { it.providerArtistId == removed.providerArtistId && it.name == removed.name }
+                        .mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+                }
+                MusicCatalogSearch(
+                    state = musicSearchState,
+                    placeholder = "아티스트 이름 · 예: 아이유",
+                    onSearch = onSearchMusic,
+                )
+                (musicSearchState as? MusicSearchUiState.Success)
+                    ?.results
+                    ?.distinctBy { it.artistId?.toString() ?: it.artist.lowercase() }
+                    .orEmpty()
+                    .take(8)
+                    .forEach { result ->
+                        val selected = favoriteArtists.any {
+                            it.providerArtistId == result.artistId?.toString() ||
+                                it.name.equals(result.artist, ignoreCase = true)
+                        }
+                        MusicCatalogResultRow(
+                            result = result,
+                            title = result.artist,
+                            subtitle = "${result.genre.ifBlank { "Music" }} · ${result.title}",
+                            selected = selected,
+                            enabled = selected || favoriteArtists.size < 3,
+                        ) {
+                            favoriteArtists = if (selected) {
+                                favoriteArtists.filterNot {
+                                    it.providerArtistId == result.artistId?.toString() ||
+                                        it.name.equals(result.artist, ignoreCase = true)
+                                }
+                            } else {
+                                favoriteArtists + result.toProfileArtist(favoriteArtists.size + 1)
+                            }.mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+                        }
+                    }
+                Spacer(Modifier.height(18.dp))
+                Button(
+                    onClick = {
+                        onProfileCurationUpdate(signatureTracks, favoriteArtists)
+                        editorSection = null
+                        onClearMusicSearch()
+                    },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                ) { Text("아티스트 저장", fontWeight = FontWeight.Bold) }
+            }
+            Spacer(Modifier.height(28.dp))
         }
     }
 
+    val canvas = MelodyBubbleColors.Background
+    val ink = MelodyBubbleColors.Text
+    val muted = MelodyBubbleColors.TextMuted
+    val accent = MelodyBubbleColors.Primary
+    val outline = MelodyBubbleColors.Border
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 32.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = modifier.fillMaxSize().background(canvas).testTag("my_profile_list"),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 26.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("PROFILE", color = SignalGreen, style = MaterialTheme.typography.labelLarge); Text("내 프로필", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Outlined.Settings, contentDescription = "설정")
+                Text("음악 프로필", color = ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { editorSection = "BASIC" }) { Text("편집", color = accent) }
+                IconButton(onClick = onOpenSettings) { Icon(Icons.Outlined.Settings, contentDescription = "설정", tint = ink) }
+            }
+        }
+        item {
+            ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "BASIC" }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ProfileAvatar(profile.avatarDataUrl, profile.accountAlias, profile.colorHex, 82.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(profile.accountAlias, color = ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        if (profile.profileHandle.isNotBlank()) Text("@${profile.profileHandle}", color = muted)
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            profile.bio.ifBlank { "소개를 추가해 나를 표현해보세요." },
+                            color = muted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            (profile.genres + profile.moods).distinct().take(3).forEach {
+                                LightProfileTag(it.uppercase(), accent, outline)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(15.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    LightProfileCount("팔로잉", followingCount, ink, muted, Modifier.weight(1f).clickable(onClick = onOpenFollowing))
+                    LightProfileCount("팔로워", followerCount, ink, muted, Modifier.weight(1f).clickable(onClick = onOpenFollowers))
+                    LightProfileCount("검증된 교환", verifiedOfflineExchangeCount, ink, muted, Modifier.weight(1f).clickable(onClick = onOpenBubbleMode))
                 }
             }
         }
         item {
-            MelodyCard(modifier = Modifier.fillMaxWidth(), onClick = { editing = true }) {
+            ProfileLightPanel(outline = outline, ink = ink) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ProfileAvatar(profile.avatarDataUrl, profile.accountAlias, profile.colorHex, 88.dp)
-                    Spacer(Modifier.width(18.dp))
+                    Text("지금 듣는 음악", color = ink, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        color = if (nowPlayingActive) MelodyBubbleColors.Primary.copy(alpha = 0.14f) else MelodyBubbleColors.SurfaceSelected,
+                        contentColor = if (nowPlayingActive) accent else muted,
+                        shape = RoundedCornerShape(10.dp),
+                    ) {
+                        Text(
+                            if (nowPlayingActive) "● LIVE" else "대기 중",
+                            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                if (nowPlayingTrack != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ProfileArtwork(null, accent, 52.dp)
+                        Spacer(Modifier.width(11.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(nowPlayingTrack.title, color = ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(nowPlayingTrack.artist, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                } else {
+                    ProfileEmptyRow(
+                        title = "재생 중인 음악이 아직 없어요",
+                        description = "음악 앱에서 재생하면 이곳에 표시돼요.",
+                        accent = accent,
+                        muted = muted,
+                    )
+                }
+            }
+        }
+        item {
+            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 13.dp, onClick = onOpenBubbleMode) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, null, tint = accent)
+                    Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(profile.accountAlias, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text(profile.bio.ifBlank { "소개를 추가해 나를 표현해보세요." }, color = MutedMint, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(9.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { (profile.genres + profile.moods).take(3).forEach { MiniTag(it, true) } }
+                        Text("버블 모드", color = ink, fontWeight = FontWeight.Bold)
+                        Text("가까운 사람과 음악 카드를 직접 교환해요", color = muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Surface(color = accent, contentColor = MelodyBubbleColors.OnPrimary, shape = RoundedCornerShape(16.dp)) {
+                        Text("시작", Modifier.padding(horizontal = 13.dp, vertical = 7.dp), fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
         item {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                ConnectionCount("팔로잉", followingCount, onOpenFollowing, Modifier.weight(1f))
-                ConnectionCount("팔로워", followerCount, onOpenFollowers, Modifier.weight(1f))
+            ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "TRACKS" }) {
+                Text("요즘 나를 설명하는 3곡", color = ink, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(9.dp))
+                if (profile.signatureTracks.isEmpty()) {
+                    ProfileEmptyRow(
+                        title = "아직 고른 곡이 없어요",
+                        description = "프로필을 대표할 노래를 최대 3곡까지 추가해보세요.",
+                        actionLabel = "3곡 고르기",
+                        accent = accent,
+                        muted = muted,
+                    )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        profile.signatureTracks.take(3).forEachIndexed { index, track ->
+                            Column(Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${index + 1}", color = accent, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.width(5.dp))
+                                    ProfileArtwork(track.artworkUrl, accent, 40.dp)
+                                }
+                                Spacer(Modifier.height(5.dp))
+                                Text(track.title, color = ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                                Text(track.artist, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
             }
         }
-        item { SectionLabel("음악 정체성") }
+        item {
+            ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "ARTISTS" }) {
+                Text("최애 아티스트 3명", color = ink, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(9.dp))
+                if (profile.favoriteArtists.isEmpty()) {
+                    ProfileEmptyRow(
+                        title = "좋아하는 아티스트를 알려주세요",
+                        description = "내 취향을 가장 잘 보여주는 아티스트를 추가할 수 있어요.",
+                        actionLabel = "아티스트 추가",
+                        accent = accent,
+                        muted = muted,
+                    )
+                } else {
+                    Row(Modifier.fillMaxWidth()) {
+                        profile.favoriteArtists.take(3).forEach { artist ->
+                            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                ProfileArtwork(artist.imageUrl, accent, 48.dp, circle = true)
+                                Spacer(Modifier.height(4.dp))
+                                Text(artist.name, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val discoveredTaste = (profile.tasteFingerprint.genres + profile.tasteFingerprint.moods).take(4)
+        val measuredTaste = discoveredTaste.filter { it.ratio > 0.0 }
+        val discoveredLabels = (discoveredTaste.map { it.label } + offlineExchangeGenres + offlineExchangeMoods).distinct().take(4)
+        item {
+            ProfileLightPanel(outline = outline, ink = ink) {
+                Text("교환으로 발견한 취향", color = ink, fontWeight = FontWeight.Bold)
+                Text("양쪽에서 확인된 음악 카드만 반영해요", color = muted, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                when {
+                    measuredTaste.isNotEmpty() -> measuredTaste.forEach { metric ->
+                        LightTasteMetric(metric.label, (metric.ratio * 100).roundToInt(), ink, muted, accent)
+                    }
+                    discoveredLabels.isNotEmpty() -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        discoveredLabels.take(3).forEach { label -> LightProfileTag(label, accent, outline) }
+                    }
+                    else -> ProfileEmptyRow(
+                        title = "교환 데이터가 쌓이면 취향이 보여요",
+                        description = "검증된 음악 교환을 바탕으로 장르와 무드를 정리해드려요.",
+                        accent = accent,
+                        muted = muted,
+                    )
+                }
+            }
+        }
         if (profile.profileMusicUrl != null) item {
-            MelodyCard(modifier = Modifier.fillMaxWidth()) {
+            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.MusicNote, null, tint = SignalGreen)
-                    Spacer(Modifier.width(12.dp))
+                    Icon(Icons.Outlined.MusicNote, null, tint = accent)
+                    Spacer(Modifier.width(10.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("나의 30초 프로필 음악", fontWeight = FontWeight.Bold)
-                        Text(profile.profileMusicDescription ?: "나의 바이브를 담은 음악", color = MutedMint, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("30초 프로필 음악", color = ink, fontWeight = FontWeight.Bold)
+                        Text(profile.profileMusicDescription ?: "나의 바이브를 담은 음악", color = muted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
                     }
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onPlayProfileMusic, modifier = Modifier.weight(1f)) { Text("재생") }
-                    TextButton(onClick = onDeleteProfileMusic) { Text("삭제", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = onPlayProfileMusic) { Text("재생", color = accent) }
+                    TextButton(onClick = onDeleteProfileMusic) { Text("삭제", color = MelodyBubbleColors.Danger) }
                 }
             }
         }
-        item { SettingsLink(Icons.Outlined.Tune, "멜로디 별칭", if (profile.profileMusicUrl == null) "30초 프로필 음악 만들기" else "새 음악 만들기", onOpenMelodyAlias) }
+        item {
+            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp, onClick = onOpenMelodyAlias) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Tune, null, tint = accent)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("멜로디 별칭과 30초 음악", color = ink, fontWeight = FontWeight.Bold)
+                        Text(
+                            if (profile.melodyAliasId.isBlank()) "나만의 음악 정체성을 만들어보세요."
+                            else "${profile.melodyAliasMood} · ${profile.melodyAliasTone} · ${profile.melodyAliasTempo} BPM",
+                            color = muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Icon(Icons.Outlined.ChevronRight, null, tint = muted)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PublicProfileScreen(
+    profile: PublicProfile?,
+    loading: Boolean,
+    errorMessage: String?,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onFollow: () -> Unit,
+    onPlayProfileMusic: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onShare: () -> Unit = {},
+    onMore: (() -> Unit)? = null,
+) {
+    val canvas = MelodyBubbleColors.Background
+    val ink = MelodyBubbleColors.Text
+    val muted = MelodyBubbleColors.TextMuted
+    val lavender = MelodyBubbleColors.Primary
+    val outline = MelodyBubbleColors.Border
+    Column(modifier.fillMaxSize().background(canvas)) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로", tint = ink)
+            }
+            Text("음악 프로필", color = ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onShare) { Text("공유", color = lavender) }
+            onMore?.let { action -> TextButton(onClick = action) { Text("더보기", color = muted) } }
+        }
+        when {
+            loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = lavender)
+            }
+            profile == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(errorMessage ?: "프로필을 불러오지 못했어요.", color = muted)
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(onClick = onRetry) { Text("다시 시도") }
+                }
+            }
+            else -> LazyColumn(
+                Modifier.fillMaxSize().testTag("public_profile_list"),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, top = 4.dp, end = 18.dp, bottom = 26.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item {
+                    ProfileLightPanel(outline = outline, ink = ink) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ProfileAvatar(profile.avatarUrl, profile.displayName, profile.colorHex, 82.dp)
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(profile.displayName, color = ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                Text("@${profile.profileHandle}", color = muted, style = MaterialTheme.typography.bodyMedium)
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    profile.bio.ifBlank { "음악으로 자신을 소개하는 사용자" },
+                                    color = muted,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    (profile.genres + profile.moods).distinct().take(3).forEach {
+                                        LightProfileTag(it.uppercase(), lavender, outline)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(14.dp))
+                        if (!profile.isSelf) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (profile.mutual) {
+                                    Surface(
+                                        color = MelodyBubbleColors.SurfaceSelected,
+                                        contentColor = lavender,
+                                        shape = RoundedCornerShape(22.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, MelodyBubbleColors.BorderStrong),
+                                    ) { Text("맞팔 중", Modifier.padding(horizontal = 18.dp, vertical = 10.dp), fontWeight = FontWeight.Bold) }
+                                }
+                                Button(
+                                    onClick = onFollow,
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = lavender, contentColor = MelodyBubbleColors.OnPrimary),
+                                ) {
+                                    Text(when {
+                                        profile.following -> "팔로잉"
+                                        profile.relationship == RelationshipStatus.FOLLOWS_ME -> "맞팔하기"
+                                        else -> "팔로우"
+                                    })
+                                }
+                            }
+                        } else {
+                            Surface(color = MelodyBubbleColors.SurfaceSelected, contentColor = lavender, shape = RoundedCornerShape(22.dp)) {
+                                Text("내 프로필", Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.height(15.dp))
+                        Row(Modifier.fillMaxWidth()) {
+                            LightProfileCount("팔로잉", profile.stats.followingCount, ink, muted, Modifier.weight(1f))
+                            LightProfileCount("팔로워", profile.stats.followerCount, ink, muted, Modifier.weight(1f))
+                            LightProfileCount("검증된 교환", profile.stats.verifiedExchangeCount, ink, muted, Modifier.weight(1f))
+                        }
+                    }
+                }
+                if (profile.sharedVerifiedExchangeCount > 0) item {
+                    ProfileLightPanel(outline = outline, ink = ink, contentPadding = 14.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.PeopleOutline, null, tint = lavender)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("실제로 음악을 교환한 사이", color = ink, fontWeight = FontWeight.Bold)
+                                Text("서로 확인된 교환 ${profile.sharedVerifiedExchangeCount}회", color = muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Icon(Icons.Outlined.ChevronRight, null, tint = muted)
+                        }
+                    }
+                }
+                profile.nowPlaying?.let { nowPlaying ->
+                    item {
+                        ProfileLightPanel(outline = outline, ink = ink) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("지금 듣는 음악", color = ink, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.weight(1f))
+                                Surface(color = MelodyBubbleColors.Danger.copy(alpha = 0.14f), contentColor = MelodyBubbleColors.Danger, shape = RoundedCornerShape(12.dp)) {
+                                    Text("● LIVE", Modifier.padding(horizontal = 9.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                ProfileArtwork(nowPlaying.artworkUrl, lavender, 58.dp)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(nowPlaying.title, color = ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(nowPlaying.artist, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    val progress = if ((nowPlaying.durationMs ?: 0L) > 0L) {
+                                        ((nowPlaying.positionMs ?: 0L).toFloat() / nowPlaying.durationMs!!.toFloat()).coerceIn(0f, 1f)
+                                    } else 0f
+                                    Spacer(Modifier.height(7.dp))
+                                    LinearProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.fillMaxWidth().height(3.dp),
+                                        color = lavender,
+                                        trackColor = MelodyBubbleColors.SurfaceSelected,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                if (profile.signatureTracks.isNotEmpty()) {
+                    item {
+                        ProfileLightPanel(outline = outline, ink = ink) {
+                            Text("요즘 나를 설명하는 3곡", color = ink, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                profile.signatureTracks.take(3).forEachIndexed { index, track ->
+                                    Surface(
+                                        modifier = Modifier.weight(1f),
+                                        color = MelodyBubbleColors.SurfaceRaised,
+                                        contentColor = ink,
+                                        shape = RoundedCornerShape(14.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, outline),
+                                    ) {
+                                        Column(Modifier.padding(8.dp)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Surface(color = lavender, contentColor = MelodyBubbleColors.OnPrimary, shape = CircleShape) {
+                                                    Text("${index + 1}", Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall)
+                                                }
+                                                Spacer(Modifier.width(5.dp))
+                                                ProfileArtwork(track.artworkUrl, lavender, 36.dp)
+                                            }
+                                            Spacer(Modifier.height(7.dp))
+                                            Text(track.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                                            Text(track.artist, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (profile.favoriteArtists.isNotEmpty()) {
+                    item {
+                        ProfileLightPanel(outline = outline, ink = ink) {
+                            Text("최애 아티스트 3명", color = ink, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(10.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                                profile.favoriteArtists.take(3).forEach { artist ->
+                                    Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        ProfileArtwork(artist.imageUrl, lavender, 52.dp, circle = true)
+                                        Spacer(Modifier.height(5.dp))
+                                        Text(artist.name, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                val fallbackTaste = (profile.tasteFingerprint.genres + profile.tasteFingerprint.moods).take(4)
+                if (profile.commonTaste != null || fallbackTaste.isNotEmpty()) item {
+                    ProfileLightPanel(outline = outline, ink = ink) {
+                        Text(if (profile.commonTaste != null) "공통 취향" else "교환으로 발견된 취향", color = ink, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(10.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                val metrics = profile.commonTaste?.metrics.orEmpty()
+                                if (metrics.isNotEmpty()) {
+                                    metrics.forEach { metric ->
+                                        LightTasteMetric(metric.label, metric.score, ink, muted, lavender)
+                                    }
+                                } else {
+                                    fallbackTaste.forEach { metric ->
+                                        LightTasteMetric(metric.label, (metric.ratio * 100).roundToInt(), ink, muted, lavender)
+                                    }
+                                }
+                            }
+                            profile.commonTaste?.let { taste ->
+                                Spacer(Modifier.width(14.dp))
+                                Surface(
+                                    modifier = Modifier.size(82.dp),
+                                    shape = CircleShape,
+                                    color = MelodyBubbleColors.SurfaceSelected,
+                                    contentColor = lavender,
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                        Text("취향 겹침", style = MaterialTheme.typography.labelSmall)
+                                        Text("${taste.score}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                profile.profileMusicUrl?.let { musicUrl ->
+                    item {
+                        ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp, onClick = { onPlayProfileMusic(musicUrl) }) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.MusicNote, null, tint = lavender)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("30초 프로필 음악", color = ink, fontWeight = FontWeight.Bold)
+                                    Text(profile.profileMusicDescription ?: "이 사용자의 음악 정체성", color = muted, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Icon(Icons.Outlined.ChevronRight, null, tint = muted)
+                            }
+                        }
+                    }
+                }
+                item {
+                    ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Shield, null, tint = lavender)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("공개 범위는 항목별로 달라요", color = ink, fontWeight = FontWeight.Bold)
+                                Text("지금 듣는 음악 · 청취 분석 · 교환 기록", color = muted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileLightPanel(
+    outline: Color,
+    ink: Color,
+    contentPadding: androidx.compose.ui.unit.Dp = 16.dp,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val panelModifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+    Surface(
+        modifier = panelModifier,
+        shape = RoundedCornerShape(18.dp),
+        color = MelodyBubbleColors.Surface,
+        contentColor = ink,
+        border = androidx.compose.foundation.BorderStroke(1.dp, outline),
+        shadowElevation = 0.dp,
+    ) { Column(Modifier.padding(contentPadding), content = content) }
+}
+
+@Composable
+private fun ProfileEmptyRow(
+    title: String,
+    description: String,
+    accent: Color,
+    muted: Color,
+    actionLabel: String? = null,
+) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            modifier = Modifier.size(40.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MelodyBubbleColors.SurfaceSelected,
+            contentColor = accent,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.MusicNote, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+        }
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = MelodyBubbleColors.Text, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+            Text(description, color = muted, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        actionLabel?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(it, color = accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun LightProfileTag(label: String, accent: Color, outline: Color) {
+    Surface(color = MelodyBubbleColors.SurfaceSelected, contentColor = accent, border = androidx.compose.foundation.BorderStroke(1.dp, outline), shape = RoundedCornerShape(10.dp)) {
+        Text(label, Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun LightProfileCount(label: String, count: Int, ink: Color, muted: Color, modifier: Modifier = Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(count.toString(), color = ink, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+        Text(label, color = muted, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun ProfileArtwork(url: String?, accent: Color, size: androidx.compose.ui.unit.Dp, circle: Boolean = false) {
+    val shape = if (circle) CircleShape else RoundedCornerShape(10.dp)
+    Surface(modifier = Modifier.size(size), shape = shape, color = MelodyBubbleColors.SurfaceSelected, contentColor = accent) {
+        if (url != null) {
+            AsyncImage(model = url, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        } else {
+            Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.MusicNote, null, tint = accent) }
+        }
+    }
+}
+
+@Composable
+private fun LightTasteMetric(label: String, score: Int, ink: Color, muted: Color, accent: Color) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+        Text("${score.coerceIn(0, 100)}%", color = muted, style = MaterialTheme.typography.labelMedium)
+        Spacer(Modifier.width(8.dp))
+        LinearProgressIndicator(
+            progress = { score.coerceIn(0, 100) / 100f },
+            modifier = Modifier.width(64.dp).height(4.dp),
+            color = accent,
+            trackColor = MelodyBubbleColors.SurfaceSelected,
+        )
     }
 }
 
@@ -653,11 +1561,11 @@ fun MyScreen(
 private fun ConnectionCount(
     label: String,
     count: Int,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier,
         shape = RoundedCornerShape(18.dp),
         color = MossSurfaceHigh,
     ) {
@@ -678,6 +1586,7 @@ fun SettingsScreen(
     onAllowReactionsChange: (Boolean) -> Unit,
     onOfflineExchangeChange: (Boolean) -> Unit,
     onMusicVisibilityChange: (String) -> Unit,
+    onProfilePrivacyChange: (ProfilePrivacySettings) -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenOfflineExchange: () -> Unit,
     onOpenBlockedUsers: () -> Unit,
@@ -687,6 +1596,7 @@ fun SettingsScreen(
 ) {
     var visibilityEditing by rememberSaveable { mutableStateOf(false) }
     var deleteConfirm by rememberSaveable { mutableStateOf(false) }
+    var draftPrivacy by remember(profile.privacy) { mutableStateOf(profile.privacy) }
 
     if (deleteConfirm) AlertDialog(
         onDismissRequest = { deleteConfirm = false },
@@ -700,29 +1610,65 @@ fun SettingsScreen(
         containerColor = MossSurface,
         contentColor = PaleMint,
     ) {
-        Column(Modifier.fillMaxWidth().padding(24.dp)) {
-            Text("음악 공개 범위", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text("주변 사용자에게 현재 음악을 어떻게 보여줄지 선택하세요.", color = MutedMint)
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp)) {
+            Text("프로필 공개 범위", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text("프로필의 각 정보를 누구에게 보여줄지 따로 정해요.", color = MutedMint)
             Spacer(Modifier.height(18.dp))
-            listOf(
-                "제목과 아티스트 공개" to "곡 제목과 아티스트만 보여줘요.",
-                "맞팔에게만 공개" to "서로 팔로우한 사용자에게만 보여줘요.",
-                "비공개" to "취향 유사도만 보여주고 음악은 숨겨요.",
-            ).forEach { (option, description) ->
-                MelodyCard(
-                    Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    onClick = { onMusicVisibilityChange(option); visibilityEditing = false },
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(option, fontWeight = FontWeight.Bold)
-                            Text(description, color = MutedMint)
-                        }
-                        if (profile.musicVisibilityLabel == option) Text("✓", color = SignalGreen)
-                    }
-                }
+            Text("지금 듣는 음악", fontWeight = FontWeight.Bold)
+            PrivacyChoiceRow(
+                selected = draftPrivacy.currentMusicVisibility,
+                options = listOf("EVERYONE" to "전체", "MUTUALS" to "맞팔", "PRIVATE" to "비공개"),
+            ) { draftPrivacy = draftPrivacy.copy(currentMusicVisibility = it) }
+            Spacer(Modifier.height(18.dp))
+            SettingsToggle(
+                Icons.Outlined.MusicNote,
+                "청취 기반 취향 분석",
+                "선택해야만 청취 데이터를 취향 계산에 사용해요",
+                draftPrivacy.listeningInsightsEnabled,
+            ) { draftPrivacy = draftPrivacy.copy(listeningInsightsEnabled = it) }
+            if (draftPrivacy.listeningInsightsEnabled) {
+                PrivacyChoiceRow(
+                    selected = draftPrivacy.listeningInsightsVisibility,
+                    options = listOf("EVERYONE" to "전체", "MUTUALS" to "맞팔", "PRIVATE" to "비공개"),
+                ) { draftPrivacy = draftPrivacy.copy(listeningInsightsVisibility = it) }
             }
+            Spacer(Modifier.height(18.dp))
+            Text("교환으로 발견된 취향", fontWeight = FontWeight.Bold)
+            PrivacyChoiceRow(
+                selected = draftPrivacy.exchangeInsightsVisibility,
+                options = listOf(
+                    "EVERYONE" to "전체",
+                    "MUTUALS" to "맞팔",
+                    "EXCHANGED" to "교환한 사람",
+                    "PRIVATE" to "비공개",
+                ),
+            ) { draftPrivacy = draftPrivacy.copy(exchangeInsightsVisibility = it) }
+            Spacer(Modifier.height(18.dp))
+            Text("버블 모드 참여 상태", fontWeight = FontWeight.Bold)
+            PrivacyChoiceRow(
+                selected = draftPrivacy.bubblePresenceVisibility,
+                options = listOf(
+                    "PARTICIPANTS_ONLY" to "참여자",
+                    "MUTUALS" to "맞팔",
+                    "PRIVATE" to "비공개",
+                ),
+            ) { draftPrivacy = draftPrivacy.copy(bubblePresenceVisibility = it) }
             Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = {
+                    onProfilePrivacyChange(draftPrivacy)
+                    onMusicVisibilityChange(
+                        when (draftPrivacy.currentMusicVisibility) {
+                            "MUTUALS" -> "맞팔에게만 공개"
+                            "PRIVATE" -> "비공개"
+                            else -> "제목과 아티스트 공개"
+                        }
+                    )
+                    visibilityEditing = false
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) { Text("공개 범위 저장", fontWeight = FontWeight.Bold) }
+            Spacer(Modifier.height(28.dp))
         }
     }
 
@@ -743,7 +1689,7 @@ fun SettingsScreen(
             }
         }
         item { SectionLabel("공개 및 연결") }
-        item { SettingsLink(Icons.Outlined.Shield, "음악 공개 범위", profile.musicVisibilityLabel) { visibilityEditing = true } }
+        item { SettingsLink(Icons.Outlined.Shield, "프로필 공개 범위", "현재 음악 · 청취 분석 · 교환 기록") { draftPrivacy = profile.privacy; visibilityEditing = true } }
         item { SettingsToggle(Icons.Outlined.Radio, "주변에서 발견 가능", "정확한 위치와 방향은 항상 숨겨요", profile.discoverable, onDiscoverableChange) }
         item { SettingsToggle(Icons.Outlined.FavoriteBorder, "음악 리액션 받기", "정해진 안전한 리액션만 받아요", profile.allowReactions, onAllowReactionsChange) }
         item { SettingsLink(Icons.Outlined.Block, "차단 사용자 관리", "차단 해제와 목록 확인", onOpenBlockedUsers) }
@@ -758,6 +1704,29 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun PrivacyChoiceRow(
+    selected: String,
+    options: List<Pair<String, String>>,
+    onSelect: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        options.chunked(2).forEach { rowOptions ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                rowOptions.forEach { (value, label) ->
+                    FilterChip(
+                        selected = selected == value,
+                        onClick = { onSelect(value) },
+                        label = { Text(label) },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (rowOptions.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
 fun SocialConnectionsScreen(
     following: List<SocialConnection>,
     followers: List<SocialConnection>,
@@ -765,6 +1734,7 @@ fun SocialConnectionsScreen(
     initialFollowing: Boolean,
     onBack: () -> Unit,
     onUnfollow: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(if (initialFollowing) 0 else 1) }
@@ -811,7 +1781,10 @@ fun SocialConnectionsScreen(
                 )
             }
             items(connections, key = { "${selectedTab}-${it.followedAt}-${it.displayAlias}" }) { connection ->
-                MelodyCard(Modifier.fillMaxWidth()) {
+                MelodyCard(
+                    Modifier.fillMaxWidth(),
+                    onClick = { connection.profileHandle?.let(onOpenProfile) },
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ProfileAvatar(connection.avatarUrl, connection.displayAlias, connection.colorHex, 52.dp)
                         Spacer(Modifier.width(12.dp))
@@ -1380,19 +2353,35 @@ private fun MelodyAliasLoadingPanel() {
 @Composable
 fun OfflineExchangeScreen(
     records: List<OfflineExchangeRecord>,
+    myCard: ExchangeMusicCard,
+    exchangeState: ExchangeConnectionState,
     onBack: () -> Unit,
-    onCreate: (String) -> Unit,
+    onStart: () -> Unit,
+    onConnect: (String) -> Unit,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+    onStop: () -> Unit,
+    onClearResult: () -> Unit,
     onSync: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedPeer by remember { mutableStateOf<String?>(null) }
     Column(modifier = modifier.fillMaxSize()) {
-        BackHeader(onBack = onBack, title = "오프라인 교환", subtitle = "Nearby 흐름을 안전한 데모로 재현")
+        BackHeader(onBack = onBack, title = "버블 모드", subtitle = "인터넷 상태와 관계없이 가까운 사람과 음악 카드를 교환해요")
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                AppPanel {
+                    Text("내보낼 음악 카드", color = SignalGreen, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text("${myCard.trackTitle} · ${myCard.trackArtist}", style = MaterialTheme.typography.titleMedium)
+                    Text(myCard.melodyAlias.ifBlank { "멜로디 별칭 없음" }, color = MutedMint)
+                }
+            }
             item {
                 AppPanel(color = SignalGreen.copy(alpha = 0.08f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1400,40 +2389,69 @@ fun OfflineExchangeScreen(
                         Spacer(Modifier.width(10.dp))
                         Column {
                             Text("근처 기기 찾기", style = MaterialTheme.typography.titleMedium)
-                            Text("실제 API 대신 승인·인증·저장 흐름을 검증해요", color = MutedMint)
+                            Text("Bluetooth와 Wi-Fi를 켜고 상대방도 이 화면을 열어 주세요", color = MutedMint)
                         }
                     }
                     Spacer(Modifier.height(14.dp))
-                    listOf("Clover", "Moon").forEach { peer ->
-                        OutlinedButton(
-                            onClick = { selectedPeer = peer },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                containerColor = if (selectedPeer == peer) SignalGreen.copy(alpha = 0.12f) else Color.Transparent
+                    when (exchangeState) {
+                        ExchangeConnectionState.Idle -> Button(
+                            onClick = onStart,
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                        ) { Text("주변 기기 찾기") }
+                        ExchangeConnectionState.Discovering -> {
+                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = SignalGreen)
+                            Spacer(Modifier.height(10.dp))
+                            Text("교환 가능한 기기를 찾고 있어요…", color = MutedMint)
+                            TextButton(onClick = onStop) { Text("검색 중지") }
+                        }
+                        is ExchangeConnectionState.EndpointFound -> {
+                            Text("${exchangeState.endpointName} 기기를 찾았어요", fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(10.dp))
+                            Button(
+                                onClick = { onConnect(exchangeState.endpointId) },
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                            ) { Text("이 기기와 연결") }
+                        }
+                        is ExchangeConnectionState.AwaitingApproval -> {
+                            Text("상대 기기와 아래 코드가 같은지 확인하세요", color = MutedMint)
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                exchangeState.authenticationDigits,
+                                color = SignalGreen,
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
                             )
-                        ) {
-                            Text(peer, modifier = Modifier.weight(1f))
-                            if (selectedPeer == peer) {
-                                Icon(Icons.Outlined.CheckCircle, contentDescription = "선택됨")
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = onReject, modifier = Modifier.weight(1f)) { Text("취소") }
+                                Button(onClick = onApprove, modifier = Modifier.weight(1f)) { Text("코드 일치") }
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    if (selectedPeer != null) {
-                        Text("양쪽 화면의 인증 코드 · 4812", color = SignalGreen, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(10.dp))
-                        Button(
-                            onClick = {
-                                selectedPeer?.let(onCreate)
-                                selectedPeer = null
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                        ) {
-                            Text("코드 확인 및 카드 교환")
+                        is ExchangeConnectionState.Connecting,
+                        is ExchangeConnectionState.Exchanging -> {
+                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = SignalGreen)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                if (exchangeState is ExchangeConnectionState.Connecting) "상대 기기에 연결하고 있어요…"
+                                else "서명된 음악 카드를 교환하고 있어요…",
+                                color = MutedMint,
+                            )
+                        }
+                        is ExchangeConnectionState.Completed -> {
+                            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = SignalGreen)
+                            Spacer(Modifier.height(8.dp))
+                            Text("${exchangeState.result.peerCard.displayAlias} 님과 교환했어요", fontWeight = FontWeight.Bold)
+                            Text(
+                                "${exchangeState.result.peerCard.trackTitle} · ${exchangeState.result.peerCard.trackArtist}",
+                                color = MutedMint,
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Button(onClick = onClearResult, modifier = Modifier.fillMaxWidth()) { Text("확인") }
+                        }
+                        is ExchangeConnectionState.Error -> {
+                            Text(exchangeState.message, color = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.height(10.dp))
+                            OutlinedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("다시 시도") }
                         }
                     }
                 }
@@ -1443,7 +2461,7 @@ fun OfflineExchangeScreen(
                 item {
                     AppPanel {
                         Text("아직 교환 기록이 없어요", style = MaterialTheme.typography.titleMedium)
-                        Text("위 데모 기기를 선택해 Room 저장 흐름을 확인해 보세요.", color = MutedMint)
+                        Text("가까운 기기와 인증 코드를 확인하면 받은 카드가 여기에 저장돼요.", color = MutedMint)
                     }
                 }
             }
@@ -1457,12 +2475,25 @@ fun OfflineExchangeScreen(
                             Text("${record.trackTitle} · ${record.trackArtist}", color = MutedMint)
                             Text(record.melodyAlias, color = MutedMint, style = MaterialTheme.typography.labelMedium)
                         }
-                        if (record.syncState == SyncState.SYNCED) {
-                            Icon(Icons.Outlined.CloudDone, contentDescription = "동기화됨", tint = SignalGreen)
-                        } else {
-                            IconButton(onClick = { onSync(record.id) }) {
-                                Icon(Icons.Outlined.CloudUpload, contentDescription = "서버 동기화 확인")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (record.syncState == SyncState.SYNCED) {
+                                Icon(Icons.Outlined.CloudDone, contentDescription = "동기화됨", tint = SignalGreen)
+                            } else if (record.syncState == SyncState.UPLOADING) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = SignalGreen)
+                            } else {
+                                IconButton(onClick = { onSync(record.id) }) {
+                                    Icon(Icons.Outlined.CloudUpload, contentDescription = "서버 동기화")
+                                }
                             }
+                            IconButton(onClick = { onDelete(record.id) }) {
+                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "교환 기록 삭제")
+                            }
+                        }
+                    }
+                    if (record.syncState == SyncState.SYNCED) {
+                        Spacer(Modifier.height(10.dp))
+                        TextButton(onClick = { onOpenProfile(record.id) }) {
+                            Text("교환한 사람의 음악 프로필 보기", color = SignalGreen)
                         }
                     }
                 }

@@ -19,16 +19,30 @@ import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NotificationType
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.PopularTrack
+import com.example.myapplication.core.model.PresenceMode
+import com.example.myapplication.core.model.ProfileMelodyAlias
+import com.example.myapplication.core.model.ProfileArtist
+import com.example.myapplication.core.model.ProfileNowPlaying
+import com.example.myapplication.core.model.ProfilePrivacySettings
+import com.example.myapplication.core.model.ProfileStats
+import com.example.myapplication.core.model.ProfileTrack
+import com.example.myapplication.core.model.PublicProfile
+import com.example.myapplication.core.model.CommonTasteMetric
+import com.example.myapplication.core.model.CommonTasteSummary
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.SocialConnection
 import com.example.myapplication.core.model.SyncState
+import com.example.myapplication.core.model.TasteFingerprint
+import com.example.myapplication.core.model.TasteMetric
+import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.local.MelodyDatabase
 import com.example.myapplication.data.local.MelodyAliasCandidateEntity
 import com.example.myapplication.data.local.OfflineExchangeEntity
 import com.example.myapplication.data.local.SyncOutboxEntity
+import com.example.myapplication.data.local.CachedAccount
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
 import com.example.myapplication.data.realtime.RealtimeConnectionState
 import com.example.myapplication.data.realtime.RealtimeEvent
@@ -47,15 +61,31 @@ import com.example.myapplication.data.remote.ReportSubmitRequest
 import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
 import com.example.myapplication.data.remote.ProfileMusicUpdateRequest
+import com.example.myapplication.data.remote.ProfileCurationUpdateRequest
+import com.example.myapplication.data.remote.ProfilePrivacyUpdateRequest
+import com.example.myapplication.data.remote.PrivacyUpdateRequest
+import com.example.myapplication.data.remote.MelodyAliasUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
+import com.example.myapplication.data.remote.RemoteProfileMelodyAlias
+import com.example.myapplication.data.remote.RemoteProfileStats
+import com.example.myapplication.data.remote.RemoteProfileTrack
+import com.example.myapplication.data.remote.RemoteProfileArtist
+import com.example.myapplication.data.remote.RemotePublicProfile
+import com.example.myapplication.data.remote.RemoteTasteFingerprint
 import com.example.myapplication.data.remote.RemoteSocialConnection
+import com.example.myapplication.data.remote.jwtSubject
+import com.example.myapplication.offlineexchange.ExchangeProtocol
+import com.example.myapplication.offlineexchange.OfflineExchangeResult
+import com.example.myapplication.offlineexchange.OfflineExchangeSyncWorker
 import android.Manifest
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import androidx.core.content.ContextCompat
+import androidx.room.withTransaction
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.gson.Gson
 import com.example.myapplication.service.SharingForegroundService
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -76,6 +106,8 @@ import retrofit2.HttpException
 
 private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 15_000L
 private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
+private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
+private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
 
 internal fun reactionTypeForLabel(label: String): String? = when (label.trim()) {
     "이 곡 좋아요", "LIKE" -> "LIKE"
@@ -91,6 +123,8 @@ interface MelodyRepository {
     fun completeOnboarding()
     fun selectTab(tab: MainTab)
     fun selectNearby(handle: String?)
+    fun enterBubbleMode()
+    fun exitBubbleMode()
     fun openChat(roomId: String)
     fun closeChat(roomId: String)
     fun startSharing()
@@ -106,6 +140,10 @@ interface MelodyRepository {
     fun unblock(blockId: String)
     fun loadSocialConnections()
     fun unfollowRelationship(relationshipId: String)
+    fun loadPublicProfile(profileHandle: String)
+    fun loadExchangeProfile(exchangeId: String)
+    fun clearPublicProfile()
+    fun followPublicProfile()
     fun sendChat(roomId: String, content: String)
     fun selectTrack(track: Track)
     fun setCurrentMusicPlaying(isPlaying: Boolean)
@@ -116,14 +154,18 @@ interface MelodyRepository {
     fun setMusicVisibility(label: String)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
     fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>)
+    fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
+    fun updateProfilePrivacy(settings: ProfilePrivacySettings)
     fun setProfileMusic(candidateKey: String, description: String?)
     fun deleteProfileMusic()
     fun selectMelodyAlias(candidateId: String)
     fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
-    fun createDemoExchange(peerAlias: String)
+    fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String)
     fun syncExchange(exchangeId: String)
+    fun deleteExchange(exchangeId: String)
     fun clearFeedback()
     fun authenticate(accessToken: String)
+    fun authenticateOffline(account: CachedAccount)
     fun refreshSession(accessToken: String)
     fun logout()
     fun close()
@@ -139,6 +181,8 @@ class DemoMelodyRepository(
         "melody-bubble-session",
         Context.MODE_PRIVATE
     )
+    private val gson = Gson()
+    @Volatile private var activeOwnerId: String? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val presenceSyncCoordinator = PresenceSyncCoordinator.get(applicationContext)
     private val applicationRealtimeClient =
@@ -167,6 +211,7 @@ class DemoMelodyRepository(
 
     private var sharingJob: Job? = null
     private var chatSyncJob: Job? = null
+    private var exchangeObserveJob: Job? = null
     private val chatRealtimeVersion = AtomicLong(0)
     private val nearbyRealtimeVersion = AtomicLong(0)
     private val popularRealtimeVersion = AtomicLong(0)
@@ -183,6 +228,7 @@ class DemoMelodyRepository(
     @Volatile private var accessToken: String? = null
     private var liveTick = 0
     private var locationReceiverRegistered = false
+    private var exchangeSyncReceiverRegistered = false
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != SharingForegroundService.ACTION_LOCATION_FIX) return
@@ -198,6 +244,16 @@ class DemoMelodyRepository(
             }
         }
     }
+    private val exchangeSyncReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != OfflineExchangeSyncWorker.ACTION_SYNC_COMPLETED) return
+            val token = accessToken ?: return
+            scope.launch {
+                runCatching { profileApi.me("Bearer $token") }
+                    .onSuccess { if (isCurrentSession(token)) applyRemoteProfile(it) }
+            }
+        }
+    }
 
     init {
         ContextCompat.registerReceiver(
@@ -207,6 +263,13 @@ class DemoMelodyRepository(
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         locationReceiverRegistered = true
+        ContextCompat.registerReceiver(
+            applicationContext,
+            exchangeSyncReceiver,
+            IntentFilter(OfflineExchangeSyncWorker.ACTION_SYNC_COMPLETED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
+        exchangeSyncReceiverRegistered = true
         scope.launch {
             realtimeClient.events.collect(::handleRealtimeEvent)
         }
@@ -243,15 +306,6 @@ class DemoMelodyRepository(
             }
         }
         scope.launch {
-            database.offlineExchangeDao().deleteExpired(System.currentTimeMillis())
-            database.offlineExchangeDao().observeAll().collect { entities ->
-                _state.update { current ->
-                    current.copy(offlineExchanges = entities.map { it.toDomain() })
-                }
-            }
-        }
-
-        scope.launch {
             database.melodyAliasCandidateDao().observeAll().collect { entities ->
                 _state.update { current ->
                     current.copy(melodyAliasCandidates = entities.map { it.toDomain() })
@@ -280,6 +334,16 @@ class DemoMelodyRepository(
 
     override fun selectNearby(handle: String?) {
         _state.update { it.copy(selectedNearbyHandle = handle) }
+    }
+
+    override fun enterBubbleMode() {
+        _state.update {
+            it.copy(presenceMode = PresenceMode.BUBBLE, feedbackMessage = "버블 모드를 열었어요")
+        }
+    }
+
+    override fun exitBubbleMode() {
+        _state.update { it.copy(presenceMode = PresenceMode.NORMAL) }
     }
 
     override fun openChat(roomId: String) {
@@ -563,6 +627,100 @@ class DemoMelodyRepository(
         }
     }
 
+    override fun loadPublicProfile(profileHandle: String) {
+        val token = accessToken ?: return
+        if (profileHandle.isBlank()) return
+        _state.update {
+            it.copy(
+                selectedPublicProfile = null,
+                publicProfileLoading = true,
+                publicProfileError = null,
+            )
+        }
+        scope.launch {
+            runCatching { profileApi.publicProfile("Bearer $token", profileHandle) }
+                .onSuccess { remote ->
+                    if (!isCurrentSession(token)) return@onSuccess
+                    _state.update {
+                        it.copy(
+                            selectedPublicProfile = remote.toDomain(),
+                            publicProfileLoading = false,
+                            publicProfileError = null,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    if (!isCurrentSession(token)) return@onFailure
+                    _state.update {
+                        it.copy(
+                            selectedPublicProfile = null,
+                            publicProfileLoading = false,
+                            publicProfileError = if (error is HttpException && error.code() == 404) {
+                                "프로필을 찾을 수 없어요."
+                            } else {
+                                "프로필을 불러오지 못했어요."
+                            },
+                        )
+                    }
+                }
+        }
+    }
+
+    override fun loadExchangeProfile(exchangeId: String) {
+        val token = accessToken ?: return
+        _state.update {
+            it.copy(selectedPublicProfile = null, publicProfileLoading = true, publicProfileError = null)
+        }
+        scope.launch {
+            runCatching { profileApi.exchangeProfile("Bearer $token", exchangeId) }
+                .onSuccess { remote ->
+                    if (!isCurrentSession(token)) return@onSuccess
+                    _state.update {
+                        it.copy(selectedPublicProfile = remote.toDomain(), publicProfileLoading = false)
+                    }
+                }
+                .onFailure { error ->
+                    if (!isCurrentSession(token)) return@onFailure
+                    _state.update {
+                        it.copy(
+                            selectedPublicProfile = null,
+                            publicProfileLoading = false,
+                            publicProfileError = if (error is HttpException && error.code() == 404) {
+                                "양쪽에서 확인된 교환 후 프로필을 볼 수 있어요."
+                            } else "교환 상대 프로필을 불러오지 못했어요.",
+                        )
+                    }
+                }
+        }
+    }
+
+    override fun clearPublicProfile() {
+        _state.update {
+            it.copy(selectedPublicProfile = null, publicProfileLoading = false, publicProfileError = null)
+        }
+    }
+
+    override fun followPublicProfile() {
+        val token = accessToken ?: return
+        val profile = _state.value.selectedPublicProfile ?: return
+        if (profile.profileHandle == _state.value.profile.profileHandle) return
+        scope.launch {
+            runCatching {
+                if (profile.following) {
+                    socialApi.unfollowProfile("Bearer $token", profile.profileHandle)
+                } else {
+                    socialApi.followProfile("Bearer $token", profile.profileHandle)
+                }
+            }.onSuccess {
+                if (!isCurrentSession(token)) return@onSuccess
+                loadPublicProfile(profile.profileHandle)
+                loadSocialConnections()
+            }.onFailure { error ->
+                if (isCurrentSession(token)) showRequestError(error, "팔로우 상태를 변경하지 못했어요")
+            }
+        }
+    }
+
     override fun sendChat(roomId: String, content: String) {
         val chat = _state.value.chats.firstOrNull { it.roomId == roomId }
         val validationError = MelodyReducers.chatValidationError(
@@ -749,6 +907,28 @@ class DemoMelodyRepository(
     override fun setOfflineExchangeEnabled(enabled: Boolean) {
         _state.update { it.copy(profile = it.profile.copy(offlineExchangeEnabled = enabled)) }
         persistProfile(_state.value.profile)
+        val token = accessToken ?: return
+        val state = _state.value
+        scope.launch {
+            runCatching {
+                profileApi.privacy(
+                    "Bearer $token",
+                    PrivacyUpdateRequest(
+                        discoverable = state.discoverabilityScope != "HIDDEN",
+                        shareMusic = state.musicVisibility != "HIDDEN",
+                        offlineExchangeEnabled = enabled,
+                    ),
+                )
+            }.onSuccess { if (isCurrentSession(token)) applyRemoteProfile(it, "교환 설정을 저장했어요") }
+                .onFailure { error ->
+                    if (!isCurrentSession(token)) return@onFailure
+                    _state.update { current ->
+                        current.copy(profile = current.profile.copy(offlineExchangeEnabled = !enabled))
+                    }
+                    persistProfile(_state.value.profile)
+                    showRequestError(error, "교환 설정을 저장하지 못했어요")
+                }
+        }
     }
 
     override fun setMusicVisibility(label: String) {
@@ -818,6 +998,119 @@ class DemoMelodyRepository(
         }
     }
 
+    override fun updateProfileCuration(
+        signatureTracks: List<ProfileTrack>,
+        favoriteArtists: List<ProfileArtist>,
+    ) {
+        val tracks = signatureTracks.take(3).mapIndexed { index, track -> track.copy(rank = index + 1) }
+        val artists = favoriteArtists.take(3).mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+        _state.update { current ->
+            current.copy(
+                profileSaving = true,
+                profile = current.profile.copy(signatureTracks = tracks, favoriteArtists = artists),
+            )
+        }
+        preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_CURATION_DIRTY), true).apply()
+        persistProfile(_state.value.profile)
+        val token = accessToken
+        if (token == null) {
+            _state.update {
+                it.copy(profileSaving = false, feedbackMessage = "음악 프로필을 기기에 저장했어요. 온라인 연결 후 반영돼요")
+            }
+            return
+        }
+        scope.launch { syncPendingCuration(token, successFeedback = "음악 정체성을 저장했어요") }
+    }
+
+    override fun updateProfilePrivacy(settings: ProfilePrivacySettings) {
+        _state.update { current ->
+            val legacyVisibility = when (settings.currentMusicVisibility) {
+                "MUTUALS" -> "MUTUALS"
+                "PRIVATE" -> "HIDDEN"
+                else -> "TITLE_ARTIST"
+            }
+            current.copy(
+                profileSaving = true,
+                musicVisibility = legacyVisibility,
+                profile = current.profile.copy(
+                    privacy = settings,
+                    musicVisibilityLabel = when (legacyVisibility) {
+                        "MUTUALS" -> "맞팔에게만 공개"
+                        "HIDDEN" -> "비공개"
+                        else -> "제목과 아티스트 공개"
+                    },
+                ),
+            )
+        }
+        preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_PRIVACY_DIRTY), true).apply()
+        persistProfile(_state.value.profile)
+        val token = accessToken
+        if (token == null) {
+            _state.update {
+                it.copy(profileSaving = false, feedbackMessage = "공개 범위를 기기에 저장했어요. 온라인 연결 후 반영돼요")
+            }
+            return
+        }
+        scope.launch { syncPendingProfilePrivacy(token, successFeedback = "프로필 공개 범위를 저장했어요") }
+    }
+
+    private suspend fun syncPendingCuration(token: String, successFeedback: String? = null) {
+        if (!preferences.getBoolean(profileScopedKey(KEY_PROFILE_CURATION_DIRTY), false) || !isCurrentSession(token)) return
+        val profile = restoreProfile(_state.value.profile)
+        runCatching {
+            profileApi.updateCuration(
+                "Bearer $token",
+                ProfileCurationUpdateRequest(
+                    signatureTracks = profile.signatureTracks.map { it.toRemote() },
+                    favoriteArtists = profile.favoriteArtists.map { it.toRemote() },
+                    profileRevision = profile.profileRevision,
+                ),
+            )
+        }.onSuccess { remote ->
+            if (!isCurrentSession(token)) return@onSuccess
+            preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_CURATION_DIRTY), false).apply()
+            applyRemoteProfile(remote, successFeedback)
+        }.onFailure { error ->
+            if (!isCurrentSession(token)) return@onFailure
+            _state.update {
+                it.copy(
+                    profileSaving = false,
+                    feedbackMessage = if (error is HttpException && error.code() == 409) {
+                        "다른 기기에서 프로필이 바뀌었어요. 다시 저장해 주세요"
+                    } else {
+                        "음악 프로필을 기기에 보관했어요. 연결되면 다시 시도해요"
+                    },
+                )
+            }
+        }
+    }
+
+    private suspend fun syncPendingProfilePrivacy(token: String, successFeedback: String? = null) {
+        if (!preferences.getBoolean(profileScopedKey(KEY_PROFILE_PRIVACY_DIRTY), false) || !isCurrentSession(token)) return
+        val settings = restoreProfile(_state.value.profile).privacy
+        runCatching {
+            profileApi.updateProfilePrivacy(
+                "Bearer $token",
+                ProfilePrivacyUpdateRequest(
+                    currentMusicVisibility = settings.currentMusicVisibility,
+                    listeningInsightsEnabled = settings.listeningInsightsEnabled,
+                    listeningInsightsVisibility = settings.listeningInsightsVisibility,
+                    exchangeInsightsVisibility = settings.exchangeInsightsVisibility,
+                    bubblePresenceVisibility = settings.bubblePresenceVisibility,
+                ),
+            )
+        }.onSuccess { remote ->
+            if (!isCurrentSession(token)) return@onSuccess
+            preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_PRIVACY_DIRTY), false).apply()
+            applyRemoteProfile(remote, successFeedback)
+        }.onFailure {
+            if (!isCurrentSession(token)) return@onFailure
+            _state.update {
+                it.copy(profileSaving = false, feedbackMessage = "공개 범위를 기기에 보관했어요. 연결되면 다시 시도해요")
+            }
+        }
+    }
+
     override fun setProfileMusic(candidateKey: String, description: String?) {
         val token = accessToken ?: return
         scope.launch {
@@ -855,6 +1148,7 @@ class DemoMelodyRepository(
                 feedbackMessage = "${candidate.name}을(를) 멜로디 별칭으로 설정했어요"
             )
         }
+        syncMelodyAlias(candidate)
     }
 
     override fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate) {
@@ -870,63 +1164,72 @@ class DemoMelodyRepository(
                 feedbackMessage = "${candidate.name}을(를) 멜로디 별칭으로 설정했어요"
             )
         }
+        syncMelodyAlias(candidate)
     }
 
-    override fun createDemoExchange(peerAlias: String) {
-        if (!_state.value.profile.offlineExchangeEnabled) {
-            _state.update { it.copy(feedbackMessage = "마이 화면에서 오프라인 교환을 켜 주세요") }
-            return
-        }
+    override fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String) {
+        val ownerUserId = _state.value.activeAccountId ?: return
         scope.launch(Dispatchers.IO) {
-            val id = UUID.randomUUID().toString()
-            val sessionId = UUID.randomUUID().toString()
-            val requestId = UUID.randomUUID().toString()
-            val now = System.currentTimeMillis()
-            database.offlineExchangeDao().insert(
-                OfflineExchangeEntity(
-                    id = id,
-                    localSessionId = sessionId,
-                    peerDisplayAlias = peerAlias,
-                    trackTitle = _state.value.currentTrack.title,
-                    trackArtist = _state.value.currentTrack.artist,
-                    melodyAlias = _state.value.profile.melodyNotes.joinToString(" · "),
-                    exchangedAt = now,
+            database.withTransaction {
+                database.offlineExchangeDao().insert(OfflineExchangeEntity(
+                    id = result.exchangeId,
+                    ownerUserId = ownerUserId,
+                    localSessionId = UUID.randomUUID().toString(),
+                    credentialId = credentialId,
+                    peerCredentialId = result.peerCredentialId,
+                    peerDisplayAlias = result.peerCard.displayAlias,
+                    trackTitle = result.peerCard.trackTitle,
+                    trackArtist = result.peerCard.trackArtist,
+                    melodyAlias = result.peerCard.melodyAlias,
+                    sentCardJson = ExchangeProtocol.cardJson(result.sentCard),
+                    receivedCardJson = ExchangeProtocol.cardJson(result.peerCard),
+                    exchangedAt = result.exchangedAt,
                     syncState = SyncState.PENDING.name,
-                    expiresAt = now + 7 * 24 * 60 * 60 * 1_000L
-                )
-            )
-            database.syncOutboxDao().insert(
-                SyncOutboxEntity(
-                    id = "outbox-$id",
+                    expiresAt = null,
+                    payloadHash = result.payloadHash,
+                    protocolVersion = result.protocolVersion,
+                    recordSignature = result.recordSignature,
+                ))
+                database.syncOutboxDao().insert(SyncOutboxEntity(
+                    id = "outbox-${result.exchangeId}",
+                    ownerUserId = ownerUserId,
                     kind = "OFFLINE_EXCHANGE",
-                    requestId = requestId,
-                    payloadJson = "{\"exchangeId\":\"$id\"}",
-                    createdAt = now
-                )
-            )
-            _state.update { it.copy(feedbackMessage = "$peerAlias 님의 음악 카드를 저장했어요") }
+                    requestId = result.exchangeId,
+                    payloadJson = "{\"exchangeId\":\"${result.exchangeId}\"}",
+                    createdAt = result.exchangedAt,
+                ))
+            }
+            com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
+            _state.update { it.copy(feedbackMessage = "${result.peerCard.displayAlias} 님의 음악 카드를 저장했어요") }
         }
     }
 
     override fun syncExchange(exchangeId: String) {
+        com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
+        _state.update { it.copy(feedbackMessage = "인터넷 연결 시 교환 기록을 동기화할게요") }
+    }
+
+    override fun deleteExchange(exchangeId: String) {
+        val ownerUserId = _state.value.activeAccountId ?: return
+        val record = _state.value.offlineExchanges.firstOrNull { it.id == exchangeId } ?: return
         scope.launch(Dispatchers.IO) {
-            val record = _state.value.offlineExchanges.firstOrNull { it.id == exchangeId } ?: return@launch
-            delay(500)
-            database.offlineExchangeDao().update(
-                OfflineExchangeEntity(
-                    id = record.id,
-                    localSessionId = record.localSessionId,
-                    peerDisplayAlias = record.peerDisplayAlias,
-                    trackTitle = record.trackTitle,
-                    trackArtist = record.trackArtist,
-                    melodyAlias = record.melodyAlias,
-                    exchangedAt = record.exchangedAt,
-                    syncState = SyncState.SYNCED.name,
-                    expiresAt = record.exchangedAt + 7 * 24 * 60 * 60 * 1_000L
+            if (record.syncState == SyncState.SYNCED || record.syncState == SyncState.UPLOADING) {
+                database.syncOutboxDao().insert(
+                    SyncOutboxEntity(
+                        id = "delete-$exchangeId",
+                        ownerUserId = ownerUserId,
+                        kind = "OFFLINE_EXCHANGE_DELETE",
+                        requestId = exchangeId,
+                        payloadJson = "{\"exchangeId\":\"$exchangeId\"}",
+                        createdAt = System.currentTimeMillis(),
+                    )
                 )
-            )
-            database.syncOutboxDao().delete("outbox-${record.id}")
-            _state.update { it.copy(feedbackMessage = "교환 기록 동기화를 확인했어요") }
+            } else {
+                database.syncOutboxDao().delete(ownerUserId, "outbox-$exchangeId")
+            }
+            database.offlineExchangeDao().delete(ownerUserId, exchangeId)
+            com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
+            _state.update { it.copy(feedbackMessage = "교환 기록을 삭제했어요") }
         }
     }
 
@@ -936,6 +1239,8 @@ class DemoMelodyRepository(
 
     override fun authenticate(accessToken: String) {
         this.accessToken = accessToken
+        val ownerUserId = jwtSubject(accessToken)
+        setActiveOwner(ownerUserId)
         realtimeInboxStore?.activate(accessToken)
         presenceSyncCoordinator.onSessionAvailable(accessToken)
         val detectedPlayback = presenceSyncCoordinator.detectedPlayback.value
@@ -943,6 +1248,7 @@ class DemoMelodyRepository(
         _state.update {
             it.copy(
                 isOnboardingComplete = false,
+                profile = DemoCatalog.initialState(false).profile,
                 nearbyListeners = emptyList(),
                 popularTracks = emptyList(),
                 notifications = realtimeInboxStore?.load().orEmpty(),
@@ -951,15 +1257,26 @@ class DemoMelodyRepository(
                 following = emptyList(),
                 followers = emptyList(),
                 socialConnectionsLoading = false,
+                selectedPublicProfile = null,
+                publicProfileLoading = false,
+                publicProfileError = null,
                 detectedTrack = detectedPlayback.track,
                 detectedTrackPlaying = detectedPlayback.isPlaying,
                 selectedNearbyHandle = null,
                 dataSourceLabel = "SERVER LIVE",
+                sessionMode = SessionMode.ONLINE,
+                presenceMode = PresenceMode.NORMAL,
+                activeAccountId = ownerUserId,
             )
         }
         scope.launch {
             runCatching { profileApi.me("Bearer $accessToken") }
-                .onSuccess { if (isCurrentSession(accessToken)) applyRemoteProfile(it) }
+                .onSuccess { remote ->
+                    if (!isCurrentSession(accessToken)) return@onSuccess
+                    applyRemoteProfile(remote)
+                    syncPendingCuration(accessToken)
+                    syncPendingProfilePrivacy(accessToken)
+                }
         }
         scope.launch {
             runCatching { nearbyApi.presenceSettings("Bearer $accessToken") }
@@ -989,6 +1306,49 @@ class DemoMelodyRepository(
         realtimeClient.connect(accessToken)
         handleRealtimeConnectionState(realtimeClient.connectionState.value)
         startChatSync(accessToken)
+        com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
+    }
+
+    override fun authenticateOffline(account: CachedAccount) {
+        stopSharing()
+        accessToken = null
+        realtimeClient.disconnect()
+        presenceSyncCoordinator.onSessionCleared()
+        setActiveOwner(account.accountId)
+        val current = _state.value
+        val accountProfile = restoreProfile(current.profile)
+        _state.value = current.copy(
+            isOnboardingComplete = true,
+            selectedTab = MainTab.HOME,
+            presenceMode = PresenceMode.NORMAL,
+            connectionState = ConnectionState.OFFLINE,
+            sharingState = SharingState.STOPPED,
+            currentTrack = Track(
+                id = "offline-cached",
+                title = account.musicCard.trackTitle,
+                artist = account.musicCard.trackArtist,
+                genreTags = account.musicCard.genreTags,
+                moodTags = account.musicCard.moodTags,
+            ),
+            profile = accountProfile.copy(
+                accountAlias = account.displayAlias,
+                nearbyDisplayAlias = account.displayAlias,
+                colorHex = account.colorHex,
+                avatarDataUrl = account.avatarDataUrl,
+                melodyNotes = account.melodyAlias.split(" · ").filter(String::isNotBlank),
+            ),
+            nearbyListeners = emptyList(),
+            popularTracks = emptyList(),
+            notifications = emptyList(),
+            chats = emptyList(),
+            chatMessages = emptyMap(),
+            dataSourceLabel = "OFFLINE ACCOUNT",
+            sessionMode = SessionMode.OFFLINE,
+            activeAccountId = account.accountId,
+            selectedPublicProfile = null,
+            publicProfileLoading = false,
+            publicProfileError = null,
+        )
     }
 
     override fun refreshSession(accessToken: String) {
@@ -1022,9 +1382,16 @@ class DemoMelodyRepository(
             following = emptyList(),
             followers = emptyList(),
             socialConnectionsLoading = false,
+            selectedPublicProfile = null,
+            publicProfileLoading = false,
+            publicProfileError = null,
             feedbackMessage = null,
             dataSourceLabel = "SIGNED OUT",
+            sessionMode = SessionMode.SIGNED_OUT,
+            activeAccountId = null,
+            offlineExchanges = emptyList(),
         ) }
+        setActiveOwner(null)
     }
 
     private fun syncPresenceSettings() {
@@ -1057,8 +1424,45 @@ class DemoMelodyRepository(
         }
     }
 
+    private fun syncMelodyAlias(candidate: MelodyAliasCandidate) {
+        persistProfile(_state.value.profile)
+        val token = accessToken ?: return
+        scope.launch {
+            runCatching {
+                profileApi.setMelodyAlias(
+                    "Bearer $token",
+                    MelodyAliasUpdateRequest(
+                        id = candidate.id,
+                        notes = candidate.notes,
+                        tone = candidate.tone,
+                        mood = candidate.mood,
+                        tempo = candidate.tempo,
+                    ),
+                )
+            }.onSuccess {
+                if (isCurrentSession(token)) applyRemoteProfile(it, "멜로디 별칭을 프로필에 저장했어요")
+            }.onFailure { error ->
+                if (isCurrentSession(token)) showRequestError(error, "멜로디 별칭을 저장하지 못했어요")
+            }
+        }
+    }
+
     private fun applyRemoteProfile(remote: RemoteProfile, feedback: String? = null) {
-        _state.update { current -> current.copy(profileSaving = false, profile = current.profile.copy(
+        _state.update { current ->
+            val cachedProfile = restoreProfile(current.profile)
+            val keepPendingCuration = preferences.getBoolean(profileScopedKey(KEY_PROFILE_CURATION_DIRTY), false)
+            val keepPendingPrivacy = preferences.getBoolean(profileScopedKey(KEY_PROFILE_PRIVACY_DIRTY), false)
+            val remoteAlias = remote.melodyAlias
+            val stats = remote.stats?.toDomain() ?: current.profile.stats.copy(
+                verifiedExchangeCount = remote.offlineExchangeCount,
+                receivedCardCount = remote.offlineExchangeCount,
+            )
+            val fingerprint = remote.tasteFingerprint?.toDomain()
+                ?: TasteFingerprint(
+                    remote.offlineExchangeGenres.orEmpty().map { TasteMetric(it, 0, 0.0) },
+                    remote.offlineExchangeMoods.orEmpty().map { TasteMetric(it, 0, 0.0) },
+                )
+            current.copy(profileSaving = false, profile = current.profile.copy(
             accountAlias = remote.displayName,
             nearbyDisplayAlias = remote.displayName,
             colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
@@ -1068,13 +1472,45 @@ class DemoMelodyRepository(
             profileMusicDescription = remote.profileMusicDescription,
             genres = remote.genres.orEmpty(),
             moods = remote.moods.orEmpty(),
+            profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
+            offlineExchangeEnabled = remote.offlineExchangeEnabled ?: current.profile.offlineExchangeEnabled,
+            stats = stats,
+            tasteFingerprint = fingerprint,
+            profileRevision = if (keepPendingCuration) cachedProfile.profileRevision else remote.profileRevision,
+            signatureTracks = if (keepPendingCuration) {
+                cachedProfile.signatureTracks
+            } else remote.signatureTracks.orEmpty().map { it.toDomain() },
+            favoriteArtists = if (keepPendingCuration) {
+                cachedProfile.favoriteArtists
+            } else remote.favoriteArtists.orEmpty().map { it.toDomain() },
+            privacy = if (keepPendingPrivacy) {
+                cachedProfile.privacy
+            } else remote.privacy?.let {
+                ProfilePrivacySettings(
+                    currentMusicVisibility = it.currentMusicVisibility,
+                    listeningInsightsEnabled = it.listeningInsightsEnabled,
+                    listeningInsightsVisibility = it.listeningInsightsVisibility,
+                    exchangeInsightsVisibility = it.exchangeInsightsVisibility,
+                    bubblePresenceVisibility = it.bubblePresenceVisibility,
+                )
+            } ?: current.profile.privacy,
+            melodyNotes = remoteAlias?.notes ?: current.profile.melodyNotes,
+            melodyAliasId = remoteAlias?.id ?: current.profile.melodyAliasId,
+            melodyAliasTone = remoteAlias?.tone ?: current.profile.melodyAliasTone,
+            melodyAliasMood = remoteAlias?.mood ?: current.profile.melodyAliasMood,
+            melodyAliasTempo = remoteAlias?.tempo ?: current.profile.melodyAliasTempo,
             discoverable = current.discoverabilityScope != "HIDDEN",
             musicVisibilityLabel = when (current.musicVisibility) {
                 "MUTUALS" -> "맞팔에게만 공개"
                 "HIDDEN" -> "비공개"
                 else -> "제목과 아티스트 공개"
             },
-        ), feedbackMessage = feedback ?: current.feedbackMessage) }
+        ),
+            verifiedOfflineExchangeCount = stats.verifiedExchangeCount,
+            offlineExchangeGenres = fingerprint.genres.map(TasteMetric::label),
+            offlineExchangeMoods = fingerprint.moods.map(TasteMetric::label),
+            feedbackMessage = feedback ?: current.feedbackMessage,
+        ) }
         persistProfile(_state.value.profile)
     }
 
@@ -1089,10 +1525,20 @@ class DemoMelodyRepository(
             .putString("profile-music-description", profile.profileMusicDescription)
             .putString("profile-genres", profile.genres.joinToString("\u001F"))
             .putString("profile-moods", profile.moods.joinToString("\u001F"))
+            .putString("profile-handle", profile.profileHandle)
+            .putString("profile-melody-notes", profile.melodyNotes.joinToString("\u001F"))
+            .putString("profile-melody-id", profile.melodyAliasId)
+            .putString("profile-melody-tone", profile.melodyAliasTone)
+            .putString("profile-melody-mood", profile.melodyAliasMood)
+            .putInt("profile-melody-tempo", profile.melodyAliasTempo)
             .putString("profile-music-visibility", profile.musicVisibilityLabel)
             .putBoolean("profile-discoverable", profile.discoverable)
             .putBoolean("profile-allow-reactions", profile.allowReactions)
             .putBoolean("profile-offline-exchange", profile.offlineExchangeEnabled)
+            .putLong(profileScopedKey("profile-revision"), profile.profileRevision)
+            .putString(profileScopedKey("profile-signature-tracks"), gson.toJson(profile.signatureTracks))
+            .putString(profileScopedKey("profile-favorite-artists"), gson.toJson(profile.favoriteArtists))
+            .putString(profileScopedKey("profile-section-privacy"), gson.toJson(profile.privacy))
             .apply()
     }
 
@@ -1108,10 +1554,26 @@ class DemoMelodyRepository(
             profileMusicDescription = preferences.getString("profile-music-description", null),
             genres = preferences.getString("profile-genres", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.genres,
             moods = preferences.getString("profile-moods", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.moods,
+            profileHandle = preferences.getString("profile-handle", fallback.profileHandle) ?: fallback.profileHandle,
+            melodyNotes = preferences.getString("profile-melody-notes", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.melodyNotes,
+            melodyAliasId = preferences.getString("profile-melody-id", fallback.melodyAliasId) ?: fallback.melodyAliasId,
+            melodyAliasTone = preferences.getString("profile-melody-tone", fallback.melodyAliasTone) ?: fallback.melodyAliasTone,
+            melodyAliasMood = preferences.getString("profile-melody-mood", fallback.melodyAliasMood) ?: fallback.melodyAliasMood,
+            melodyAliasTempo = preferences.getInt("profile-melody-tempo", fallback.melodyAliasTempo),
             musicVisibilityLabel = preferences.getString("profile-music-visibility", fallback.musicVisibilityLabel) ?: fallback.musicVisibilityLabel,
             discoverable = preferences.getBoolean("profile-discoverable", fallback.discoverable),
             allowReactions = preferences.getBoolean("profile-allow-reactions", fallback.allowReactions),
             offlineExchangeEnabled = preferences.getBoolean("profile-offline-exchange", fallback.offlineExchangeEnabled),
+            profileRevision = preferences.getLong(profileScopedKey("profile-revision"), fallback.profileRevision),
+            signatureTracks = preferences.getString(profileScopedKey("profile-signature-tracks"), null)?.let { json ->
+                runCatching { gson.fromJson(json, Array<ProfileTrack>::class.java).toList() }.getOrNull()
+            } ?: fallback.signatureTracks,
+            favoriteArtists = preferences.getString(profileScopedKey("profile-favorite-artists"), null)?.let { json ->
+                runCatching { gson.fromJson(json, Array<ProfileArtist>::class.java).toList() }.getOrNull()
+            } ?: fallback.favoriteArtists,
+            privacy = preferences.getString(profileScopedKey("profile-section-privacy"), null)?.let { json ->
+                runCatching { gson.fromJson(json, ProfilePrivacySettings::class.java) }.getOrNull()
+            } ?: fallback.privacy,
         )
     }
 
@@ -1243,6 +1705,7 @@ class DemoMelodyRepository(
 
     private fun RemoteNearbyBubble.toDomain() = com.example.myapplication.core.model.NearbyListener(
         nearbyHandle = nearbyHandle,
+        profileHandle = profileHandle,
         displayAlias = displayAlias,
         colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
         displayPosition = com.example.myapplication.core.model.DisplayPosition(displayPosition.x, displayPosition.y),
@@ -1724,12 +2187,118 @@ class DemoMelodyRepository(
 
     private fun RemoteSocialConnection.toDomain() = SocialConnection(
         relationshipId = relationshipId,
+        profileHandle = profileHandle,
         displayAlias = displayAlias,
         colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
         avatarUrl = avatarUrl,
         bio = bio,
         mutual = mutual,
         followedAt = followedAt,
+    )
+
+    private fun RemoteProfileStats.toDomain() = ProfileStats(
+        followingCount = followingCount,
+        followerCount = followerCount,
+        verifiedExchangeCount = verifiedExchangeCount,
+        uniqueExchangeUserCount = uniqueExchangeUserCount,
+        receivedCardCount = receivedCardCount,
+    )
+
+    private fun RemoteTasteFingerprint.toDomain() = TasteFingerprint(
+        genres = genres.orEmpty().map { TasteMetric(it.label, it.count, it.ratio) },
+        moods = moods.orEmpty().map { TasteMetric(it.label, it.count, it.ratio) },
+    )
+
+    private fun RemoteProfileMelodyAlias.toDomain() = ProfileMelodyAlias(id, notes, tone, mood, tempo)
+
+    private fun RemoteProfileTrack.toDomain() = ProfileTrack(
+        rank = rank,
+        provider = provider,
+        providerTrackId = providerTrackId,
+        title = title,
+        artist = artist,
+        album = album,
+        artworkUrl = artworkUrl,
+        genreTags = genreTags.orEmpty(),
+        moodTags = moodTags.orEmpty(),
+    )
+
+    private fun ProfileTrack.toRemote() = RemoteProfileTrack(
+        rank = rank,
+        provider = provider,
+        providerTrackId = providerTrackId,
+        title = title,
+        artist = artist,
+        album = album,
+        artworkUrl = artworkUrl,
+        genreTags = genreTags,
+        moodTags = moodTags,
+    )
+
+    private fun RemoteProfileArtist.toDomain() = ProfileArtist(
+        rank = rank,
+        provider = provider,
+        providerArtistId = providerArtistId,
+        name = name,
+        imageUrl = imageUrl,
+        genreTags = genreTags.orEmpty(),
+    )
+
+    private fun ProfileArtist.toRemote() = RemoteProfileArtist(
+        rank = rank,
+        provider = provider,
+        providerArtistId = providerArtistId,
+        name = name,
+        imageUrl = imageUrl,
+        genreTags = genreTags,
+    )
+
+    private fun RemotePublicProfile.toDomain() = PublicProfile(
+        profileHandle = profileHandle,
+        isSelf = relationship == "SELF",
+        displayName = displayName,
+        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+        bio = bio.orEmpty(),
+        avatarUrl = avatarUrl,
+        profileMusicUrl = profileMusicUrl,
+        profileMusicDescription = profileMusicDescription,
+        genres = genres.orEmpty(),
+        moods = moods.orEmpty(),
+        melodyAlias = melodyAlias?.toDomain(),
+        stats = stats.toDomain(),
+        tasteFingerprint = tasteFingerprint?.toDomain() ?: TasteFingerprint(),
+        relationship = runCatching { RelationshipStatus.valueOf(relationship) }.getOrDefault(RelationshipStatus.NONE),
+        following = following,
+        mutual = mutual,
+        sharedVerifiedExchangeCount = sharedVerifiedExchangeCount,
+        signatureTracks = signatureTracks.orEmpty().map { it.toDomain() },
+        favoriteArtists = favoriteArtists.orEmpty().map { it.toDomain() },
+        nowPlaying = nowPlaying?.let {
+            ProfileNowPlaying(
+                title = it.title,
+                artist = it.artist,
+                album = it.album,
+                artworkUrl = it.artworkUrl,
+                isPlaying = it.isPlaying,
+                durationMs = it.durationMs,
+                positionMs = it.positionMs,
+                positionObservedAt = it.positionObservedAt,
+                observedAt = it.observedAt,
+                expiresAt = it.expiresAt,
+            )
+        },
+        commonTaste = commonTaste?.let { taste ->
+            CommonTasteSummary(
+                score = taste.score,
+                metrics = taste.metrics.orEmpty().map {
+                    CommonTasteMetric(it.label, it.type, it.score, it.evidenceCount)
+                },
+                algorithmVersion = taste.algorithmVersion,
+                sampleSize = taste.sampleSize,
+                calculatedAt = taste.calculatedAt,
+            )
+        },
+        sectionStates = sectionStates.orEmpty(),
     )
 
     private fun RemotePopularTrack.toDomain() = PopularTrack(
@@ -1769,6 +2338,10 @@ class DemoMelodyRepository(
             runCatching { applicationContext.unregisterReceiver(locationReceiver) }
             locationReceiverRegistered = false
         }
+        if (exchangeSyncReceiverRegistered) {
+            runCatching { applicationContext.unregisterReceiver(exchangeSyncReceiver) }
+            exchangeSyncReceiverRegistered = false
+        }
         if (ownsRealtimeClient) realtimeClient.close()
         scope.coroutineContext[Job]?.cancel()
     }
@@ -1794,14 +2367,40 @@ class DemoMelodyRepository(
 
     private fun OfflineExchangeEntity.toDomain() = OfflineExchangeRecord(
         id = id,
+        ownerUserId = ownerUserId,
         localSessionId = localSessionId,
+        credentialId = credentialId,
+        peerCredentialId = peerCredentialId,
         peerDisplayAlias = peerDisplayAlias,
         trackTitle = trackTitle,
         trackArtist = trackArtist,
         melodyAlias = melodyAlias,
+        sentCardJson = sentCardJson,
+        receivedCardJson = receivedCardJson,
         exchangedAt = exchangedAt,
-        syncState = runCatching { SyncState.valueOf(syncState) }.getOrDefault(SyncState.PENDING)
+        syncState = runCatching { SyncState.valueOf(syncState) }.getOrDefault(SyncState.PENDING),
+        retryCount = retryCount,
+        lastError = lastError,
+        payloadHash = payloadHash,
+        protocolVersion = protocolVersion,
+        recordSignature = recordSignature,
     )
+
+    private fun setActiveOwner(ownerUserId: String?) {
+        activeOwnerId = ownerUserId
+        exchangeObserveJob?.cancel()
+        exchangeObserveJob = null
+        if (ownerUserId == null) return
+        exchangeObserveJob = scope.launch {
+            database.offlineExchangeDao().deleteExpired(ownerUserId, System.currentTimeMillis())
+            database.offlineExchangeDao().observeForOwner(ownerUserId).collect { entities ->
+                _state.update { current -> current.copy(offlineExchanges = entities.map { it.toDomain() }) }
+            }
+        }
+    }
+
+    private fun profileScopedKey(base: String): String =
+        activeOwnerId?.let { owner -> "$base::$owner" } ?: base
 
     private fun MelodyAliasCandidateEntity.toDomain() = MelodyAliasCandidate(
         id = id,

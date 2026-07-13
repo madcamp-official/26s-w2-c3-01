@@ -1,0 +1,142 @@
+package com.example.myapplication
+
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
+import com.example.myapplication.core.model.CommonTasteMetric
+import com.example.myapplication.core.model.CommonTasteSummary
+import com.example.myapplication.core.model.ProfileArtist
+import com.example.myapplication.core.model.ProfileMelodyAlias
+import com.example.myapplication.core.model.ProfileNowPlaying
+import com.example.myapplication.core.model.ProfileStats
+import com.example.myapplication.core.model.ProfileTrack
+import com.example.myapplication.core.model.PublicProfile
+import com.example.myapplication.core.model.RelationshipStatus
+import com.example.myapplication.core.model.TasteFingerprint
+import com.example.myapplication.core.model.TasteMetric
+import com.example.myapplication.ui.screens.PublicProfileScreen
+import com.example.myapplication.ui.theme.MelodyBubbleTheme
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+
+class PublicProfileScreenTest {
+    @get:Rule
+    val composeRule = createComposeRule()
+
+    @Test
+    fun verifiedExchangeAndTasteLeadToOptionalFollow() {
+        var followed = false
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                PublicProfileScreen(
+                    profile = PublicProfile(
+                        profileHandle = "listener_night",
+                        displayName = "Night Listener",
+                        colorHex = 0xFF25C76F,
+                        bio = "밤에 어울리는 음악을 모아요.",
+                        avatarUrl = null,
+                        profileMusicUrl = null,
+                        profileMusicDescription = null,
+                        genres = listOf("R&B", "Indie"),
+                        moods = listOf("Night"),
+                        melodyAlias = ProfileMelodyAlias(
+                            id = "night-signal",
+                            notes = listOf("A4", "C5", "E5"),
+                            tone = "전자음",
+                            mood = "몽환",
+                            tempo = 112,
+                        ),
+                        stats = ProfileStats(followerCount = 3, verifiedExchangeCount = 4),
+                        tasteFingerprint = TasteFingerprint(
+                            genres = listOf(TasteMetric("R&B", 3, 0.75)),
+                        ),
+                        relationship = RelationshipStatus.NONE,
+                        following = false,
+                        mutual = false,
+                        sharedVerifiedExchangeCount = 1,
+                    ),
+                    loading = false,
+                    errorMessage = null,
+                    onBack = {},
+                    onRetry = {},
+                    onFollow = { followed = true },
+                    onPlayProfileMusic = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Night Listener").assertIsDisplayed()
+        composeRule.onNodeWithText("실제로 음악을 교환한 사이").assertIsDisplayed()
+        composeRule.onAllNodesWithText("R&B").assertCountEquals(2)
+        composeRule.onNodeWithText("팔로우").performClick()
+
+        composeRule.runOnIdle { assertTrue(followed) }
+    }
+
+    @Test
+    fun curatedLiveProfileRendersCompactSections() {
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                PublicProfileScreen(
+                    profile = PublicProfile(
+                        profileHandle = "mintwave",
+                        displayName = "민트",
+                        colorHex = 0xFF8B5CF6,
+                        bio = "잔잔한 멜로디를 나눠요.",
+                        avatarUrl = null,
+                        profileMusicUrl = null,
+                        profileMusicDescription = null,
+                        genres = listOf("Indie"),
+                        moods = listOf("Calm", "Night"),
+                        melodyAlias = null,
+                        stats = ProfileStats(followingCount = 12, followerCount = 34, verifiedExchangeCount = 5),
+                        tasteFingerprint = TasteFingerprint(),
+                        relationship = RelationshipStatus.MUTUAL,
+                        following = true,
+                        mutual = true,
+                        sharedVerifiedExchangeCount = 2,
+                        signatureTracks = listOf(
+                            ProfileTrack(rank = 1, title = "새벽의 온도", artist = "Clouded Steps"),
+                        ),
+                        favoriteArtists = listOf(ProfileArtist(rank = 1, name = "루엘")),
+                        nowPlaying = ProfileNowPlaying(
+                            title = "햇살이 번지는 계절",
+                            artist = "나른한 오후의 피아노",
+                            isPlaying = true,
+                            durationMs = 240_000,
+                            positionMs = 120_000,
+                            observedAt = "2026-07-13T00:00:00Z",
+                            expiresAt = "2026-07-13T00:01:30Z",
+                        ),
+                        commonTaste = CommonTasteSummary(
+                            score = 87,
+                            metrics = listOf(CommonTasteMetric("잔잔한 멜로디", "MOOD", 89, 3)),
+                            algorithmVersion = "COMMON_TASTE_V1",
+                            sampleSize = 8,
+                            calculatedAt = "2026-07-13T00:00:00Z",
+                        ),
+                    ),
+                    loading = false,
+                    errorMessage = null,
+                    onBack = {},
+                    onRetry = {},
+                    onFollow = {},
+                    onPlayProfileMusic = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("지금 듣는 음악").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("요즘 나를 설명하는 3곡").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("최애 아티스트 3명").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("public_profile_list").performScrollToIndex(5)
+        composeRule.onNodeWithText("87%").assertIsDisplayed()
+    }
+}

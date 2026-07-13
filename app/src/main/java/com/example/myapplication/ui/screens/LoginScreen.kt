@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -53,6 +54,8 @@ fun LoginScreen(
     onCheckEmail: (String) -> Unit,
     onEmailChanged: () -> Unit,
     onGoogleLogin: (String) -> Unit,
+    onStartOffline: () -> Unit,
+    onRetryOnline: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var email by rememberSaveable { mutableStateOf("") }
@@ -68,13 +71,15 @@ fun LoginScreen(
     val loading = state == LoginUiState.Loading
     val normalizedEmail = email.trim().lowercase()
     val validEmail = android.util.Patterns.EMAIL_ADDRESS.matcher(normalizedEmail).matches()
-    val validPassword = password.length in 8..72 && password.any(Char::isLetter) && password.any(Char::isDigit)
+    val showInvalidEmail = email.isNotBlank() && !validEmail
+    val validLoginPassword = password.isNotBlank() && password.length <= 72
+    val validSignupPassword = password.length in 8..72 && password.any(Char::isLetter) && password.any(Char::isDigit)
     val emailAvailable = emailAvailabilityState is EmailAvailabilityUiState.Available &&
         emailAvailabilityState.email == normalizedEmail
     val passwordsMatch = passwordConfirmation.isNotEmpty() && password == passwordConfirmation
-    val canSubmit = validEmail && validPassword && !loading && if (signupMode) {
-        displayName.trim().length >= 2 && emailAvailable && passwordsMatch
-    } else true
+    val canSubmit = validEmail && !loading && if (signupMode) {
+        validSignupPassword && displayName.trim().length >= 2 && emailAvailable && passwordsMatch
+    } else validLoginPassword
 
     fun submit() {
         if (canSubmit) {
@@ -119,6 +124,41 @@ fun LoginScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(32.dp))
+
+        if (state is LoginUiState.OfflineAvailable) {
+            Text(
+                state.message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onStartOffline,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) {
+                Text("오프라인으로 시작 · ${state.account.displayAlias}")
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onRetryOnline,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) {
+                Text("온라인 연결 다시 시도")
+            }
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+            Spacer(Modifier.height(24.dp))
+        }
+
+        if (state is LoginUiState.ReauthenticationRequired) {
+            Text(
+                state.accountAlias?.let { "$it 계정의 인증이 만료됐어요. 다시 로그인해 주세요." }
+                    ?: "계정 인증이 만료됐어요. 다시 로그인해 주세요.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
 
         Button(
             onClick = {
@@ -200,10 +240,14 @@ fun LoginScreen(
             OutlinedTextField(
                 value = email,
                 onValueChange = { email = it; onEmailChanged() },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("login_email"),
                 enabled = !loading,
                 singleLine = true,
+                isError = showInvalidEmail,
                 label = { Text("이메일") },
+                supportingText = if (showInvalidEmail) {
+                    ({ Text("이메일 주소 전체를 입력해 주세요. 예: name@example.com") })
+                } else null,
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Email,
                     imeAction = ImeAction.Next,
@@ -238,7 +282,7 @@ fun LoginScreen(
             OutlinedTextField(
                 value = password,
                 onValueChange = { password = it },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("login_password"),
                 enabled = !loading,
                 singleLine = true,
                 label = { Text("비밀번호") },
@@ -275,7 +319,7 @@ fun LoginScreen(
             OutlinedButton(
                 onClick = ::submit,
                 enabled = canSubmit,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp).testTag("email_login_submit"),
             ) {
                 Text(if (signupMode) "회원가입" else "로그인")
             }

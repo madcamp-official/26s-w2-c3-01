@@ -26,6 +26,10 @@ object ApiClient {
         SessionRuntime.addSessionExpiredListener(listener)
     }
 
+    fun invalidateSession() {
+        SessionRuntime.invalidate()
+    }
+
     private fun retrofit(environment: ApiEnvironment): Retrofit = Retrofit.Builder()
         .baseUrl(environment.apiBaseUrl.trimEnd('/') + "/")
         .addConverterFactory(GsonConverterFactory.create())
@@ -60,6 +64,18 @@ object ApiClient {
         return retrofit(environment).create(AuthApi::class.java)
     }
 
+    fun createMusicSearchApi(): MusicSearchApi = Retrofit.Builder()
+        .baseUrl("https://itunes.apple.com/")
+        .client(
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .build()
+        )
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+        .create(MusicSearchApi::class.java)
+
     fun createNearbyApi(environment: ApiEnvironment = ApiEnvironment()): NearbyApi =
         authenticatedRetrofit(environment).create(NearbyApi::class.java)
 
@@ -71,6 +87,9 @@ object ApiClient {
 
     fun createMelodyAliasApi(environment: ApiEnvironment = ApiEnvironment()): MelodyAliasApi =
         authenticatedRetrofit(environment).create(MelodyAliasApi::class.java)
+
+    fun createOfflineExchangeApi(environment: ApiEnvironment = ApiEnvironment()): OfflineExchangeApi =
+        authenticatedRetrofit(environment).create(OfflineExchangeApi::class.java)
 
     fun createBuildingLoungeApi(environment: ApiEnvironment = ApiEnvironment()): BuildingLoungeApi =
         retrofit(environment).create(BuildingLoungeApi::class.java)
@@ -112,6 +131,10 @@ private object SessionRuntime {
 
     fun addSessionExpiredListener(listener: () -> Unit) {
         sessionExpiredListeners += listener
+    }
+
+    fun invalidate() {
+        store?.let(::expire)
     }
 
     fun refresh(environment: ApiEnvironment, rejectedAccessToken: String?): String? = synchronized(refreshLock) {

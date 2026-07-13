@@ -19,11 +19,20 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 data class DetectedPlaybackState(
     val track: Track? = null,
     val isPlaying: Boolean = false,
     val verifiedInCurrentProcess: Boolean = true,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = null,
+    val positionMs: Long? = null,
+    val positionObservedAtEpochMs: Long? = null,
+    val observedAtEpochMs: Long = System.currentTimeMillis(),
 )
 
 /**
@@ -83,7 +92,16 @@ class PresenceSyncCoordinator private constructor(
         syncSignals.trySend(Unit)
     }
 
-    fun onPlaybackDetected(title: String, artist: String, source: String?) {
+    fun onPlaybackDetected(
+        title: String,
+        artist: String,
+        source: String?,
+        album: String? = null,
+        artworkUrl: String? = null,
+        durationMs: Long? = null,
+        positionMs: Long? = null,
+        positionObservedAtEpochMs: Long? = null,
+    ) {
         val safeTitle = title.toSafeMetadata(MAX_TITLE_LENGTH)
         val safeArtist = artist.toSafeMetadata(MAX_ARTIST_LENGTH)
         if (safeTitle == null || safeArtist == null) {
@@ -97,9 +115,14 @@ class PresenceSyncCoordinator private constructor(
                     id = "detected-${safeTitle.hashCode()}-${safeArtist.hashCode()}",
                     title = safeTitle,
                     artist = safeArtist,
+                    album = album.toSafeMetadata(MAX_ALBUM_LENGTH),
                     platform = safeSource,
                 ),
                 isPlaying = true,
+                artworkUrl = artworkUrl?.takeIf { it.startsWith("https://") }?.take(MAX_URL_LENGTH),
+                durationMs = durationMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
+                positionMs = positionMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
+                positionObservedAtEpochMs = positionObservedAtEpochMs,
             )
         )
     }
@@ -254,7 +277,9 @@ class PresenceSyncCoordinator private constructor(
     }
 
     private fun DetectedPlaybackState.fingerprint(): String =
-        "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.platform.orEmpty()}\u001F$isPlaying\u001F$verifiedInCurrentProcess\u001F${activeSubLoungeId.orEmpty()}"
+        "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.album.orEmpty()}\u001F" +
+            "${track?.platform.orEmpty()}\u001F${durationMs ?: -1}\u001F${positionMs ?: -1}\u001F" +
+            "$isPlaying\u001F$verifiedInCurrentProcess\u001F${activeSubLoungeId.orEmpty()}"
 
     companion object {
         const val PREFERENCES_NAME = "melody_bubble_now_playing_fallback"
@@ -267,7 +292,10 @@ class PresenceSyncCoordinator private constructor(
         private const val DEFAULT_SOURCE_TYPE = "ANDROID_MEDIA_SESSION"
         private const val MAX_TITLE_LENGTH = 160
         private const val MAX_ARTIST_LENGTH = 160
+        private const val MAX_ALBUM_LENGTH = 160
         private const val MAX_SOURCE_LENGTH = 32
+        private const val MAX_URL_LENGTH = 2_000
+        private const val MAX_MEDIA_DURATION_MILLIS = 86_400_000L
         private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
         private const val MAX_RETRY_DELAY_MILLIS = 30_000L
         private const val ACTIVE_PLAYBACK_REFRESH_MILLIS = 60_000L
@@ -287,8 +315,16 @@ internal fun DetectedPlaybackState.toMusicUpdateRequest(): MusicUpdateRequest {
     return MusicUpdateRequest(
         title = detected?.title.orEmpty(),
         artist = detected?.artist.orEmpty(),
+        album = detected?.album,
+        artworkUrl = artworkUrl.takeIf { detected != null },
         sourceType = detected?.platform.toRemoteSourceType(),
         isPlaying = detected != null,
+        durationMs = durationMs.takeIf { detected != null },
+        positionMs = positionMs.takeIf { detected != null },
+        positionObservedAt = positionObservedAtEpochMs?.takeIf { detected != null }
+            ?.toIso8601Utc(),
+        observedAt = observedAtEpochMs.takeIf { detected != null }
+            ?.toIso8601Utc(),
     )
 }
 
@@ -306,3 +342,8 @@ private fun String?.toSafeMetadata(maxLength: Int): String? =
         ?.takeIf(String::isNotEmpty)
 
 private val METADATA_CONTROL_CHARACTERS = Regex("[\\p{Cc}\\p{Cf}]+")
+
+private fun Long.toIso8601Utc(): String = SimpleDateFormat(
+    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+    Locale.US,
+).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(this))

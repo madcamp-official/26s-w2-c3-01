@@ -11,6 +11,7 @@ data class RemoteTrack(val title: String, val artist: String, val albumArtUrl: S
 data class RemotePosition(val x: Float, val y: Float)
 data class RemoteNearbyBubble(
     val nearbyHandle: String,
+    val profileHandle: String? = null,
     val displayAlias: String,
     val profileColor: String,
     val displayPosition: RemotePosition,
@@ -41,8 +42,14 @@ data class LocationUpdateRequest(
 data class MusicUpdateRequest(
     val title: String,
     val artist: String,
+    val album: String? = null,
+    val artworkUrl: String? = null,
     val sourceType: String = "ANDROID_MEDIA_SESSION",
-    val isPlaying: Boolean = true
+    val isPlaying: Boolean = true,
+    val durationMs: Long? = null,
+    val positionMs: Long? = null,
+    val positionObservedAt: String? = null,
+    val observedAt: String? = null,
 )
 data class RemotePresenceSettings(
     val discoverabilityScope: String,
