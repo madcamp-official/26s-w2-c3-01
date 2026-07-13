@@ -321,5 +321,10 @@ class SharingForegroundService : Service() {
                 PackageManager.PERMISSION_GRANTED ||
                 context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
+
+        fun isSharingActive(context: Context): Boolean = context.getSharedPreferences(
+            PREFERENCES_NAME,
+            Context.MODE_PRIVATE,
+        ).getBoolean(KEY_SHARING_ACTIVE, false)
     }
 }
