@@ -106,6 +106,8 @@ data class NearbyListener(
     val commonGenres: List<String>,
     val relationship: RelationshipStatus = RelationshipStatus.NONE,
     val canReact: Boolean = true,
+    val melodyIdUrl: String? = null,
+    val melodyIdStartSeconds: Float? = null,
     val isNew: Boolean = false
 )
 
@@ -181,6 +183,7 @@ data class ProfileSettings(
     val offlineExchangeEnabled: Boolean,
     val profileMusicUrl: String? = null,
     val profileMusicDescription: String? = null,
+    val profileMusicStartSeconds: Float? = null,
     val profileHandle: String = "",
     val stats: ProfileStats = ProfileStats(),
     val tasteFingerprint: TasteFingerprint = TasteFingerprint(),
@@ -297,6 +300,7 @@ data class PublicProfile(
     val avatarUrl: String?,
     val profileMusicUrl: String?,
     val profileMusicDescription: String?,
+    val profileMusicStartSeconds: Float? = null,
     val genres: List<String>,
     val moods: List<String>,
     val melodyAlias: ProfileMelodyAlias?,

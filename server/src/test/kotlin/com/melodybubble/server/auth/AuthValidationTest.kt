@@ -1,6 +1,7 @@
 package com.melodybubble.server.auth
 
 import com.melodybubble.server.realtime.RealtimeSessionPolicy
+import com.melodybubble.server.profile.ProfileMediaStorage
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
@@ -13,6 +14,7 @@ class AuthValidationTest {
         mock(JwtService::class.java),
         mock(GoogleTokenVerifier::class.java),
         mock(RealtimeSessionPolicy::class.java),
+        mock(ProfileMediaStorage::class.java),
     )
 
     @Test

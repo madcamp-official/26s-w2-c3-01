@@ -47,6 +47,7 @@ import com.example.myapplication.offlineexchange.ExchangeCrypto
 import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.offlineexchange.NearbyExchangeManager
 import com.example.myapplication.offlineexchange.OfflineExchangeIdentity
+import com.example.myapplication.data.network.WifiFingerprintProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -667,7 +668,16 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
-    fun selectNearby(handle: String?) = repository.selectNearby(handle)
+    fun selectNearby(handle: String?) {
+        repository.selectNearby(handle)
+        if (handle == null) return
+        repository.state.value.selectedNearby?.melodyIdUrl?.let { url ->
+            lyriaClipPlayer.loadUrl(url)
+            lyriaClipPlayer.playSelection(
+                repository.state.value.selectedNearby?.melodyIdStartSeconds ?: 0f
+            )
+        }
+    }
     fun enterBubbleMode() = repository.enterBubbleMode()
     fun exitBubbleMode() = repository.exitBubbleMode()
     fun openChat(roomId: String) = repository.openChat(roomId)
@@ -769,29 +779,36 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun playLyriaSong() = lyriaClipPlayer.playFull()
     fun playLyriaSelection(startSeconds: Float) = lyriaClipPlayer.playSelection(startSeconds)
-    fun saveLyriaAsProfileMusic() {
+    fun saveLyriaAsProfileMusic(startSeconds: Float) {
         val song = (_lyriaGenerationState.value as? LyriaGenerationState.Success)?.song ?: return
         val candidateKey = song.candidateKey ?: run {
             _lyriaGenerationState.value = LyriaGenerationState.Error("저장할 음악 정보를 찾지 못했어요.")
             return
         }
-        repository.setProfileMusic(candidateKey, song.description)
+        lyriaClipPlayer.stop()
+        repository.setProfileMusic(candidateKey, song.description, startSeconds.coerceIn(0f, 25f))
     }
 
     fun playProfileMusic() {
         val url = repository.state.value.profile.profileMusicUrl ?: return
-        playProfileMusicUrl(url)
+        lyriaClipPlayer.loadUrl(url)
+        lyriaClipPlayer.playSelection(repository.state.value.profile.profileMusicStartSeconds ?: 0f)
     }
 
-    fun playProfileMusicUrl(url: String) {
+    fun playProfileMusicUrl(url: String, startSeconds: Float) {
         lyriaClipPlayer.loadUrl(url)
-        lyriaClipPlayer.playFull()
+        lyriaClipPlayer.playSelection(startSeconds.coerceIn(0f, 25f))
     }
 
     fun deleteProfileMusic() = repository.deleteProfileMusic()
     fun resetLyriaSong() {
         lyriaClipPlayer.stop()
         _lyriaGenerationState.value = LyriaGenerationState.Idle
+    }
+
+    fun stopMelodyAudio() {
+        lyriaClipPlayer.stop()
+        melodyAliasPreviewPlayer.stop()
     }
 
     fun refreshBuildingLounges(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
@@ -803,6 +820,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             )
             return
         }
+        val wifi = WifiFingerprintProvider.current(getApplication())
+        if (wifi == null) {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                lounges = emptyList(),
+                message = "Wi-Fi에 연결한 뒤 라운지를 다시 찾아주세요."
+            )
+            return
+        }
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 loading = true,
@@ -810,7 +836,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
                 message = null
             )
-            buildingLoungeRepository.nearby(token, latitude, longitude)
+            buildingLoungeRepository.nearby(token, latitude, longitude, wifi.fingerprint, wifi.displayName)
                 .onSuccess { lounges ->
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
@@ -833,13 +859,18 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun enterBuildingLounge(loungeId: String) {
         val token = accessToken ?: return
         val location = _buildingLoungeState.value.userLocation ?: return
+        val wifi = WifiFingerprintProvider.current(getApplication()) ?: run {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "Wi-Fi 연결을 확인해 주세요.")
+            return
+        }
         viewModelScope.launch {
             buildingLoungeRepository.enter(
                 token,
                 loungeId,
                 location.latitude,
                 location.longitude,
-                location.accuracyMeters
+                location.accuracyMeters,
+                wifi.fingerprint
             ).onSuccess {
                 val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
                 _buildingLoungeState.value = _buildingLoungeState.value.copy(
@@ -858,8 +889,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun heartbeatBuildingLounge(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
         val token = accessToken ?: return
         val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
+        val wifi = WifiFingerprintProvider.current(getApplication()) ?: run {
+            leaveBuildingLounge()
+            return
+        }
         viewModelScope.launch {
-            buildingLoungeRepository.heartbeat(token, loungeId, latitude, longitude, accuracyMeters)
+            buildingLoungeRepository.heartbeat(token, loungeId, latitude, longitude, accuracyMeters, wifi.fingerprint)
                 .onSuccess { response ->
                     if (response.forcedExit) clearSelectedSubLounge()
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(

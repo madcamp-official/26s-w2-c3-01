@@ -156,7 +156,7 @@ interface MelodyRepository {
     fun updateProfile(displayName: String, colorHex: Long, bio: String, avatarDataUrl: String?, genres: List<String>, moods: List<String>)
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings)
-    fun setProfileMusic(candidateKey: String, description: String?)
+    fun setProfileMusic(candidateKey: String, description: String?, startSeconds: Float)
     fun deleteProfileMusic()
     fun selectMelodyAlias(candidateId: String)
     fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
@@ -1111,11 +1111,14 @@ class DemoMelodyRepository(
         }
     }
 
-    override fun setProfileMusic(candidateKey: String, description: String?) {
+    override fun setProfileMusic(candidateKey: String, description: String?, startSeconds: Float) {
         val token = accessToken ?: return
         scope.launch {
             runCatching {
-                profileApi.setMusic("Bearer $token", ProfileMusicUpdateRequest(candidateKey, description))
+                profileApi.setMusic(
+                    "Bearer $token",
+                    ProfileMusicUpdateRequest(candidateKey, description, startSeconds.coerceIn(0f, 25f)),
+                )
             }.onSuccess {
                 if (isCurrentSession(token)) applyRemoteProfile(it, "프로필 음악을 설정했어요")
             }.onFailure {
@@ -1470,6 +1473,7 @@ class DemoMelodyRepository(
             avatarDataUrl = remote.avatarDataUrl,
             profileMusicUrl = remote.profileMusicUrl,
             profileMusicDescription = remote.profileMusicDescription,
+            profileMusicStartSeconds = remote.profileMusicStartSeconds,
             genres = remote.genres.orEmpty(),
             moods = remote.moods.orEmpty(),
             profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
@@ -1523,6 +1527,7 @@ class DemoMelodyRepository(
             .putString("profile-avatar", profile.avatarDataUrl)
             .putString("profile-music-url", profile.profileMusicUrl)
             .putString("profile-music-description", profile.profileMusicDescription)
+            .putFloat("profile-music-start-seconds", profile.profileMusicStartSeconds ?: 0f)
             .putString("profile-genres", profile.genres.joinToString("\u001F"))
             .putString("profile-moods", profile.moods.joinToString("\u001F"))
             .putString("profile-handle", profile.profileHandle)
@@ -1552,6 +1557,7 @@ class DemoMelodyRepository(
             avatarDataUrl = preferences.getString("profile-avatar", null),
             profileMusicUrl = preferences.getString("profile-music-url", null),
             profileMusicDescription = preferences.getString("profile-music-description", null),
+            profileMusicStartSeconds = preferences.getFloat("profile-music-start-seconds", 0f),
             genres = preferences.getString("profile-genres", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.genres,
             moods = preferences.getString("profile-moods", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.moods,
             profileHandle = preferences.getString("profile-handle", fallback.profileHandle) ?: fallback.profileHandle,
@@ -1718,6 +1724,8 @@ class DemoMelodyRepository(
             runCatching { RelationshipStatus.valueOf(it) }.getOrDefault(RelationshipStatus.NONE)
         } ?: RelationshipStatus.NONE,
         canReact = canReact ?: true,
+        melodyIdUrl = melodyIdUrl,
+        melodyIdStartSeconds = melodyIdStartSeconds,
     )
 
     private fun applyFollowResponse(handle: String, response: RemoteFollowResponse) {
@@ -2262,6 +2270,7 @@ class DemoMelodyRepository(
         avatarUrl = avatarUrl,
         profileMusicUrl = profileMusicUrl,
         profileMusicDescription = profileMusicDescription,
+        profileMusicStartSeconds = profileMusicStartSeconds,
         genres = genres.orEmpty(),
         moods = moods.orEmpty(),
         melodyAlias = melodyAlias?.toDomain(),

@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -87,8 +90,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
@@ -635,6 +640,24 @@ fun ChatScreen(
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
+    var inputFocused by remember { mutableStateOf(false) }
+    val messageListState = rememberLazyListState()
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+
+    LaunchedEffect(messages.size, messages.lastOrNull()?.clientMessageId) {
+        if (messages.isNotEmpty()) {
+            // The first LazyColumn item is the chat notice, so the last message index is size.
+            messageListState.animateScrollToItem(messages.size)
+        }
+    }
+
+    LaunchedEffect(inputFocused, imeBottom, messages.size) {
+        if (inputFocused && messages.isNotEmpty()) {
+            // Keep the newest bubble visible while the keyboard changes the list viewport.
+            messageListState.scrollToItem(messages.size)
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -643,6 +666,7 @@ fun ChatScreen(
         BackHeader(onBack = onBack, title = chat.peerAlias, subtitle = "${currentTrack.title} 재생 중")
         HorizontalDivider(color = MossOutline)
         LazyColumn(
+            state = messageListState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
@@ -675,17 +699,19 @@ fun ChatScreen(
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(message.content)
                             Spacer(Modifier.height(5.dp))
-                            Text(
-                                when (message.deliveryState) {
-                                    DeliveryState.PENDING -> "전송 중"
-                                    DeliveryState.SENT -> "전송됨"
-                                    DeliveryState.READ -> "읽음"
-                                    DeliveryState.FAILED -> "실패 · 다시 시도"
-                                },
-                                color = MutedMint,
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.align(Alignment.End)
-                            )
+                            if (message.isMine) {
+                                Text(
+                                    when (message.deliveryState) {
+                                        DeliveryState.PENDING -> "전송 중"
+                                        DeliveryState.SENT -> "안 읽음"
+                                        DeliveryState.READ -> "읽음"
+                                        DeliveryState.FAILED -> "실패 · 다시 시도"
+                                    },
+                                    color = MutedMint,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.align(Alignment.End)
+                                )
+                            }
                         }
                     }
                 }
@@ -701,7 +727,9 @@ fun ChatScreen(
                 value = input,
                 onValueChange = { if (it.length <= 1_000) input = it },
                 placeholder = { Text("메시지 입력") },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { inputFocused = it.isFocused },
                 shape = RoundedCornerShape(22.dp),
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -1206,7 +1234,7 @@ fun PublicProfileScreen(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onFollow: () -> Unit,
-    onPlayProfileMusic: (String) -> Unit,
+    onPlayProfileMusic: (String, Float) -> Unit,
     modifier: Modifier = Modifier,
     onShare: () -> Unit = {},
     onMore: (() -> Unit)? = null,
@@ -1435,7 +1463,12 @@ fun PublicProfileScreen(
                 }
                 profile.profileMusicUrl?.let { musicUrl ->
                     item {
-                        ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp, onClick = { onPlayProfileMusic(musicUrl) }) {
+                        ProfileLightPanel(
+                            outline = outline,
+                            ink = ink,
+                            contentPadding = 12.dp,
+                            onClick = { onPlayProfileMusic(musicUrl, profile.profileMusicStartSeconds ?: 0f) },
+                        ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Outlined.MusicNote, null, tint = lavender)
                                 Spacer(Modifier.width(10.dp))
@@ -1981,7 +2014,7 @@ fun MelodyAliasScreen(
     onGenerate: (Map<String, Int>, String, List<String>, Int, Int) -> Unit,
     onPlayFull: () -> Unit,
     onPlaySelection: (Float) -> Unit,
-    onSaveProfile: () -> Unit,
+    onSaveProfile: (Float) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2083,8 +2116,8 @@ fun MelodyAliasScreen(
                         Spacer(Modifier.height(10.dp))
                         OutlinedButton(onClick = onPlayFull, modifier = Modifier.fillMaxWidth()) { Text("전체 30초 듣기") }
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = onSaveProfile, enabled = generationState.song.candidateKey != null, modifier = Modifier.fillMaxWidth()) {
-                            Text("프로필 음악으로 설정")
+                        Button(onClick = { onSaveProfile(clipStart) }, enabled = generationState.song.candidateKey != null, modifier = Modifier.fillMaxWidth()) {
+                            Text("선택한 5초를 Melody ID로 저장")
                         }
                     }
                 }

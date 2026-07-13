@@ -93,6 +93,7 @@ data class RemoteProfile(
     val avatarDataUrl: String?,
     val profileMusicUrl: String?,
     val profileMusicDescription: String?,
+    val profileMusicStartSeconds: Float?,
     val genres: List<String>?,
     val moods: List<String>?,
     val discoverable: Boolean,
@@ -118,6 +119,7 @@ data class RemotePublicProfile(
     val avatarUrl: String?,
     val profileMusicUrl: String?,
     val profileMusicDescription: String?,
+    val profileMusicStartSeconds: Float?,
     val genres: List<String>?,
     val moods: List<String>?,
     val melodyAlias: RemoteProfileMelodyAlias?,
@@ -158,7 +160,11 @@ data class ProfilePrivacyUpdateRequest(
     val exchangeInsightsVisibility: String,
     val bubblePresenceVisibility: String,
 )
-data class ProfileMusicUpdateRequest(val candidateKey: String, val description: String?)
+data class ProfileMusicUpdateRequest(
+    val candidateKey: String,
+    val description: String?,
+    val startSeconds: Float,
+)
 data class MelodyAliasUpdateRequest(
     val id: String,
     val notes: List<String>,

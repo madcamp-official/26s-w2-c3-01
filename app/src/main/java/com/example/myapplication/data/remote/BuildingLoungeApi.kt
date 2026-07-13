@@ -26,7 +26,8 @@ data class BuildingLoungeSummaryDto(
 data class EnterBuildingLoungeRequestDto(
     val latitude: Double,
     val longitude: Double,
-    val accuracyMeters: Float? = null
+    val accuracyMeters: Float? = null,
+    val wifiFingerprint: String
 )
 
 data class BuildingLoungeSessionResponseDto(
@@ -37,7 +38,8 @@ data class BuildingLoungeSessionResponseDto(
 data class HeartbeatRequestDto(
     val latitude: Double,
     val longitude: Double,
-    val accuracyMeters: Float? = null
+    val accuracyMeters: Float? = null,
+    val wifiFingerprint: String
 )
 
 data class HeartbeatResponseDto(
@@ -125,7 +127,9 @@ interface BuildingLoungeApi {
     suspend fun nearby(
         @Header("Authorization") authorization: String,
         @Query("latitude") latitude: Double,
-        @Query("longitude") longitude: Double
+        @Query("longitude") longitude: Double,
+        @Query("wifiFingerprint") wifiFingerprint: String,
+        @Query("wifiName") wifiName: String
     ): List<BuildingLoungeSummaryDto>
 
     @POST("api/v1/building-lounges/{loungeId}/enter")
@@ -211,8 +215,14 @@ interface BuildingLoungeApi {
 class BuildingLoungeRepository(
     private val api: BuildingLoungeApi = ApiClient.createBuildingLoungeApi()
 ) {
-    suspend fun nearby(token: String, latitude: Double, longitude: Double): Result<List<BuildingLoungeSummaryDto>> =
-        runCatching { api.nearby(token.bearer(), latitude, longitude) }
+    suspend fun nearby(
+        token: String,
+        latitude: Double,
+        longitude: Double,
+        wifiFingerprint: String,
+        wifiName: String,
+    ): Result<List<BuildingLoungeSummaryDto>> =
+        runCatching { api.nearby(token.bearer(), latitude, longitude, wifiFingerprint, wifiName) }
 
     suspend fun activeSubLounge(token: String): Result<SubLoungeSnapshotDto?> =
         runCatching { api.activeSubLounge(token.bearer()) }
@@ -222,10 +232,11 @@ class BuildingLoungeRepository(
         loungeId: String,
         latitude: Double,
         longitude: Double,
-        accuracyMeters: Float?
+        accuracyMeters: Float?,
+        wifiFingerprint: String
     ): Result<BuildingLoungeSessionResponseDto> =
         runCatching {
-            api.enter(token.bearer(), loungeId, EnterBuildingLoungeRequestDto(latitude, longitude, accuracyMeters))
+            api.enter(token.bearer(), loungeId, EnterBuildingLoungeRequestDto(latitude, longitude, accuracyMeters, wifiFingerprint))
         }
 
     suspend fun heartbeat(
@@ -233,10 +244,11 @@ class BuildingLoungeRepository(
         loungeId: String,
         latitude: Double,
         longitude: Double,
-        accuracyMeters: Float?
+        accuracyMeters: Float?,
+        wifiFingerprint: String
     ): Result<HeartbeatResponseDto> =
         runCatching {
-            api.heartbeat(token.bearer(), loungeId, HeartbeatRequestDto(latitude, longitude, accuracyMeters))
+            api.heartbeat(token.bearer(), loungeId, HeartbeatRequestDto(latitude, longitude, accuracyMeters, wifiFingerprint))
         }
 
     suspend fun leave(token: String, loungeId: String): Result<Unit> =

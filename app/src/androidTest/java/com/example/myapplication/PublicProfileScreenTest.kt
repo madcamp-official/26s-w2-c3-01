@@ -67,7 +67,7 @@ class PublicProfileScreenTest {
                     onBack = {},
                     onRetry = {},
                     onFollow = { followed = true },
-                    onPlayProfileMusic = {},
+                    onPlayProfileMusic = { _, _ -> },
                 )
             }
         }
@@ -128,7 +128,7 @@ class PublicProfileScreenTest {
                     onBack = {},
                     onRetry = {},
                     onFollow = {},
-                    onPlayProfileMusic = {},
+                    onPlayProfileMusic = { _, _ -> },
                 )
             }
         }

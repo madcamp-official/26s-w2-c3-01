@@ -10,6 +10,7 @@ import software.amazon.awssdk.services.s3.model.HeadObjectRequest
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.ServerSideEncryption
 import software.amazon.awssdk.services.s3.model.S3Exception
+import software.amazon.awssdk.services.s3.model.TaggingDirective
 import software.amazon.awssdk.services.s3.presigner.S3Presigner
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
@@ -37,7 +38,7 @@ class ProfileMediaStorage(
         }
         val bytes = Base64.getDecoder().decode(audioBase64)
         require(bytes.size <= 10_000_000) { "Generated audio is too large" }
-        return put("users/$userId/candidates/${UUID.randomUUID()}.${extension(mimeType)}", mimeType, bytes)
+        return put("users/$userId/candidates/${UUID.randomUUID()}.${extension(mimeType)}", mimeType, bytes, true)
     }
 
     fun signedUrl(key: String?): String? {
@@ -61,7 +62,8 @@ class ProfileMediaStorage(
         s3.copyObject(
             CopyObjectRequest.builder().bucket(bucket).key(destination)
                 .copySource("$bucket/$candidateKey").contentType(mimeType)
-                .metadataDirective("REPLACE").serverSideEncryption(ServerSideEncryption.AES256).build(),
+                .metadataDirective("REPLACE").taggingDirective(TaggingDirective.REPLACE)
+                .serverSideEncryption(ServerSideEncryption.AES256).build(),
         )
         delete(candidateKey)
         return StoredMedia(destination, mimeType)
@@ -73,10 +75,12 @@ class ProfileMediaStorage(
             .onFailure { if (it !is S3Exception || it.statusCode() != 404) throw it }
     }
 
-    private fun put(key: String, mimeType: String, bytes: ByteArray): StoredMedia {
+    private fun put(key: String, mimeType: String, bytes: ByteArray, temporary: Boolean = false): StoredMedia {
         check(bucket.isNotBlank()) { "MEDIA_BUCKET is not configured" }
-        val request = PutObjectRequest.builder().bucket(bucket).key(key).contentType(mimeType)
-            .serverSideEncryption(ServerSideEncryption.AES256).build()
+        val builder = PutObjectRequest.builder().bucket(bucket).key(key).contentType(mimeType)
+            .serverSideEncryption(ServerSideEncryption.AES256)
+        if (temporary) builder.tagging("temporary=true")
+        val request = builder.build()
         s3.putObject(request, RequestBody.fromBytes(bytes))
         return StoredMedia(key, mimeType)
     }
