@@ -30,6 +30,7 @@ import com.example.myapplication.data.remote.LyriaMusicRepository
 import com.example.myapplication.data.remote.LyriaMusicResponse
 import com.example.myapplication.data.remote.TokenResponse
 import com.example.myapplication.data.local.SecureTokenStore
+import com.example.myapplication.data.network.WifiFingerprintProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
@@ -408,6 +409,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             )
             return
         }
+        val wifi = WifiFingerprintProvider.current(getApplication())
+        if (wifi == null) {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
+                lounges = emptyList(),
+                message = "Wi-Fi에 연결한 뒤 라운지를 다시 찾아주세요."
+            )
+            return
+        }
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 loading = true,
@@ -415,7 +425,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
                 message = null
             )
-            buildingLoungeRepository.nearby(token, latitude, longitude)
+            buildingLoungeRepository.nearby(token, latitude, longitude, wifi.fingerprint, wifi.displayName)
                 .onSuccess { lounges ->
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
@@ -438,13 +448,18 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun enterBuildingLounge(loungeId: String) {
         val token = accessToken ?: return
         val location = _buildingLoungeState.value.userLocation ?: return
+        val wifi = WifiFingerprintProvider.current(getApplication()) ?: run {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "Wi-Fi 연결을 확인해 주세요.")
+            return
+        }
         viewModelScope.launch {
             buildingLoungeRepository.enter(
                 token,
                 loungeId,
                 location.latitude,
                 location.longitude,
-                location.accuracyMeters
+                location.accuracyMeters,
+                wifi.fingerprint
             ).onSuccess {
                 val subLounges = buildingLoungeRepository.subLounges(token, loungeId).getOrDefault(emptyList())
                 _buildingLoungeState.value = _buildingLoungeState.value.copy(
@@ -463,8 +478,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun heartbeatBuildingLounge(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
         val token = accessToken ?: return
         val loungeId = _buildingLoungeState.value.enteredLoungeId ?: return
+        val wifi = WifiFingerprintProvider.current(getApplication()) ?: run {
+            leaveBuildingLounge()
+            return
+        }
         viewModelScope.launch {
-            buildingLoungeRepository.heartbeat(token, loungeId, latitude, longitude, accuracyMeters)
+            buildingLoungeRepository.heartbeat(token, loungeId, latitude, longitude, accuracyMeters, wifi.fingerprint)
                 .onSuccess { response ->
                     if (response.forcedExit) clearSelectedSubLounge()
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(

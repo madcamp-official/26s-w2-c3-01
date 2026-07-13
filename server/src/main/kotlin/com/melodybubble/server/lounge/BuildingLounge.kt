@@ -47,9 +47,19 @@ data class BuildingLoungeSummary(
     val subLoungeCount: Int,
 )
 
-data class EnterBuildingLoungeRequest(val latitude: Double, val longitude: Double, val accuracyMeters: Float? = null)
+data class EnterBuildingLoungeRequest(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float? = null,
+    val wifiFingerprint: String,
+)
 data class BuildingLoungeSessionResponse(val lounge: BuildingLoungeSummary, val entered: Boolean)
-data class HeartbeatRequest(val latitude: Double, val longitude: Double, val accuracyMeters: Float? = null)
+data class HeartbeatRequest(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float? = null,
+    val wifiFingerprint: String,
+)
 data class HeartbeatResponse(val inside: Boolean, val outsideCount: Int, val forcedExit: Boolean)
 data class CreateSubLoungeRequest(val title: String, val style: String? = null)
 data class SubLoungeSummary(
@@ -94,12 +104,18 @@ class BuildingLoungeService(
         .baseUrl("https://overpass-api.de/api")
         .build()
 
-    fun nearby(userId: UUID, latitude: Double, longitude: Double, limit: Int = 30): List<BuildingLoungeSummary> {
+    @Transactional
+    fun nearby(
+        userId: UUID,
+        latitude: Double,
+        longitude: Double,
+        wifiFingerprint: String,
+        wifiName: String,
+    ): List<BuildingLoungeSummary> {
         validateCoordinate(latitude, longitude)
-        if (!hasFreshBuildingCache(latitude, longitude)) {
-            rateLimiter.enforce(userId, "LOUNGE_DISCOVERY", 6, Duration.ofMinutes(10))
-            cacheRealBuildings(latitude, longitude)
-        }
+        validateWifiFingerprint(wifiFingerprint)
+        rateLimiter.enforce(userId, "LOUNGE_DISCOVERY", 60, Duration.ofMinutes(10))
+        val loungeId = ensureWifiLounge(wifiFingerprint, wifiName, latitude, longitude)
         return jdbc.query(
             """
             SELECT bl.id, b.id AS building_id, b.name, b.address,
@@ -107,27 +123,71 @@ class BuildingLoungeService(
                    b.radius_m, b.category,
                    ST_DistanceSphere(b.point, ST_SetSRID(ST_MakePoint(?, ?), 4326)) AS distance_meters,
                    ST_DWithin(b.point::geography, ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography, b.radius_m) AS inside,
-                   count(DISTINCT s.user_id) FILTER (WHERE s.active = true AND s.expires_at > now()) AS active_members,
+                   count(DISTINCT s.user_id) FILTER (
+                     WHERE s.active = true AND s.expires_at > now() AND s.wifi_fingerprint = ?
+                   ) AS active_members,
                    count(DISTINCT sl.id) FILTER (WHERE sl.active = true) AS sub_lounge_count
             FROM lounge_buildings b
             JOIN building_lounges bl ON bl.building_id = b.id AND bl.active = true
             LEFT JOIN building_lounge_sessions s ON s.building_lounge_id = bl.id
             LEFT JOIN sub_lounges sl ON sl.building_lounge_id = bl.id
-            WHERE b.active = true
-              AND ST_DWithin(b.point::geography, ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography, GREATEST(b.radius_m + 1200, 1600))
+            WHERE bl.id=? AND b.active=true
+              AND ST_DWithin(
+                b.point::geography,
+                ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+                ?
+              )
             GROUP BY bl.id, b.id
-            ORDER BY inside DESC, distance_meters ASC
-            LIMIT ?
             """.trimIndent(),
             { rs, _ -> rs.toBuildingLoungeSummary() },
             longitude,
             latitude,
             longitude,
             latitude,
+            wifiFingerprint,
+            loungeId,
             longitude,
             latitude,
-            limit.coerceIn(1, 50),
+            WIFI_DISCOVERY_METERS,
         )
+    }
+
+    private fun ensureWifiLounge(
+        wifiFingerprint: String,
+        wifiName: String,
+        latitude: Double,
+        longitude: Double,
+    ): UUID {
+        val normalizedName = wifiName.trim().take(80).ifBlank { "Wi-Fi" }
+        val buildingName = "$normalizedName 라운지"
+        val placeId = "wifi-$wifiFingerprint"
+        val buildingId = jdbc.query(
+            """
+            INSERT INTO lounge_buildings(name,address,google_place_id,point,radius_m,category,active)
+            VALUES (?, '같은 Wi-Fi에 연결된 사용자 라운지', ?,
+                    ST_SetSRID(ST_MakePoint(?, ?), 4326), ?, 'WIFI', true)
+            ON CONFLICT(google_place_id) DO UPDATE SET
+              name=excluded.name, address=excluded.address, active=true, updated_at=now()
+            RETURNING id
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString("id")) },
+            buildingName,
+            placeId,
+            longitude,
+            latitude,
+            WIFI_LOUNGE_RADIUS_METERS,
+        ).first()
+        return jdbc.query(
+            """
+            INSERT INTO building_lounges(building_id,title,active)
+            VALUES (?, ?, true)
+            ON CONFLICT(building_id) DO UPDATE SET title=excluded.title, active=true
+            RETURNING id
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString("id")) },
+            buildingId,
+            buildingName,
+        ).first()
     }
 
     private fun hasFreshBuildingCache(latitude: Double, longitude: Double): Boolean =
@@ -149,17 +209,21 @@ class BuildingLoungeService(
             latitude,
         ) == true
 
+    @Transactional
     fun enter(userId: UUID, loungeId: UUID, request: EnterBuildingLoungeRequest): BuildingLoungeSessionResponse {
+        validateWifiFingerprint(request.wifiFingerprint)
+        requireCompatibleWifi(loungeId, request.wifiFingerprint)
         val lounge = requireInside(loungeId, request.latitude, request.longitude)
         jdbc.update(
             """
             INSERT INTO building_lounge_sessions(
-              user_id, building_lounge_id, last_point, accuracy_meters, outside_count, active, expires_at
+              user_id, building_lounge_id, last_point, accuracy_meters, wifi_fingerprint, outside_count, active, expires_at
             )
-            VALUES (?, ?, ST_SetSRID(ST_MakePoint(?, ?), 4326), ?, 0, true, now() + interval '90 seconds')
+            VALUES (?, ?, ST_SetSRID(ST_MakePoint(?, ?), 4326), ?, ?, 0, true, now() + interval '90 seconds')
             ON CONFLICT(user_id, building_lounge_id) DO UPDATE SET
               last_point = excluded.last_point,
               accuracy_meters = excluded.accuracy_meters,
+              wifi_fingerprint = excluded.wifi_fingerprint,
               outside_count = 0,
               active = true,
               last_seen_at = now(),
@@ -170,6 +234,7 @@ class BuildingLoungeService(
             request.longitude,
             request.latitude,
             request.accuracyMeters,
+            request.wifiFingerprint,
         )
         return BuildingLoungeSessionResponse(lounge = lounge, entered = true)
     }
@@ -279,6 +344,11 @@ class BuildingLoungeService(
     }
 
     fun heartbeat(userId: UUID, loungeId: UUID, request: HeartbeatRequest): HeartbeatResponse {
+        validateWifiFingerprint(request.wifiFingerprint)
+        if (!sessionUsesWifi(userId, loungeId, request.wifiFingerprint)) {
+            leave(userId, loungeId)
+            return HeartbeatResponse(inside = false, outsideCount = 3, forcedExit = true)
+        }
         val lounge = loungeAt(loungeId, request.latitude, request.longitude)
             ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "Building lounge not found")
         val nextOutsideCount = if (lounge.inside) 0 else currentOutsideCount(userId, loungeId) + 1
@@ -479,6 +549,39 @@ class BuildingLoungeService(
         return lounge
     }
 
+    private fun requireCompatibleWifi(loungeId: UUID, wifiFingerprint: String) {
+        val incompatible = jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM building_lounge_sessions
+              WHERE building_lounge_id=? AND active=true AND expires_at>now()
+                AND wifi_fingerprint IS DISTINCT FROM ?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            loungeId,
+            wifiFingerprint,
+        ) == true
+        if (incompatible) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "Connect to the lounge Wi-Fi first")
+        }
+    }
+
+    private fun sessionUsesWifi(userId: UUID, loungeId: UUID, wifiFingerprint: String): Boolean =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM building_lounge_sessions
+              WHERE user_id=? AND building_lounge_id=? AND active=true AND expires_at>now()
+                AND wifi_fingerprint=?
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            userId,
+            loungeId,
+            wifiFingerprint,
+        ) == true
+
     private fun loungeAt(loungeId: UUID, latitude: Double, longitude: Double): BuildingLoungeSummary? {
         validateCoordinate(latitude, longitude)
         return jdbc.query(
@@ -555,6 +658,12 @@ class BuildingLoungeService(
         }
     }
 
+    private fun validateWifiFingerprint(wifiFingerprint: String) {
+        if (!WIFI_FINGERPRINT.matches(wifiFingerprint)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid Wi-Fi fingerprint")
+        }
+    }
+
     private fun buildAddress(tags: JsonNode): String {
         val parts = listOf("addr:city", "addr:district", "addr:street", "addr:housenumber")
             .mapNotNull { key -> tags.path(key).asText(null)?.takeIf { it.isNotBlank() } }
@@ -594,6 +703,12 @@ class BuildingLoungeService(
         activeMembers = getInt("active_members"),
         subLoungeCount = getInt("sub_lounge_count"),
     )
+
+    companion object {
+        private val WIFI_FINGERPRINT = Regex("[0-9a-f]{64}")
+        private const val WIFI_LOUNGE_RADIUS_METERS = 150
+        private const val WIFI_DISCOVERY_METERS = 1_500
+    }
 }
 
 @RestController
@@ -607,7 +722,11 @@ class BuildingLoungeController(
         principal: Principal,
         @RequestParam latitude: Double,
         @RequestParam longitude: Double,
-    ): List<BuildingLoungeSummary> = service.nearby(UUID.fromString(principal.name), latitude, longitude)
+        @RequestParam wifiFingerprint: String,
+        @RequestParam wifiName: String,
+    ): List<BuildingLoungeSummary> = service.nearby(
+        UUID.fromString(principal.name), latitude, longitude, wifiFingerprint, wifiName
+    )
 
     @PostMapping("/{loungeId}/enter")
     fun enter(
