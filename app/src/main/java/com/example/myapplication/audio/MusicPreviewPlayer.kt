@@ -8,6 +8,7 @@ import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.example.myapplication.core.model.PreviewPlaybackState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,8 +25,8 @@ class MusicPreviewPlayer(context: Context) {
         when (change) {
             AudioManager.AUDIOFOCUS_LOSS -> stop()
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> player?.pause()
-            AudioManager.AUDIOFOCUS_GAIN -> player?.let { if (!it.isPlaying) it.start() }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> pause()
+            AudioManager.AUDIOFOCUS_GAIN -> resume()
         }
     }
     private val focusRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -35,6 +36,8 @@ class MusicPreviewPlayer(context: Context) {
             .build()
     } else null
     private var player: MediaPlayer? = null
+    private var remainingPreviewMillis = PREVIEW_LIMIT_MS
+    private var playbackStartedAtMillis = 0L
     private val _state = MutableStateFlow(PreviewPlaybackState())
     val state = _state.asStateFlow()
 
@@ -61,7 +64,8 @@ class MusicPreviewPlayer(context: Context) {
             setOnPreparedListener {
                 it.start()
                 _state.value = PreviewPlaybackState(title, artist, artworkUrl, isPlaying = true)
-                handler.postDelayed(::stop, PREVIEW_LIMIT_MS)
+                remainingPreviewMillis = PREVIEW_LIMIT_MS
+                schedulePreviewEnd()
             }
             setOnCompletionListener { stop() }
             setOnErrorListener { _, _, _ ->
@@ -72,10 +76,39 @@ class MusicPreviewPlayer(context: Context) {
         }
     }
 
+    fun togglePauseResume() {
+        if (_state.value.isPlaying) pause() else if (_state.value.isPaused) resume()
+    }
+
+    private fun pause() {
+        val activePlayer = player ?: return
+        if (!activePlayer.isPlaying) return
+        activePlayer.pause()
+        remainingPreviewMillis = (remainingPreviewMillis -
+            (SystemClock.elapsedRealtime() - playbackStartedAtMillis)).coerceAtLeast(0L)
+        handler.removeCallbacksAndMessages(null)
+        _state.value = _state.value.copy(isPlaying = false, isPaused = true)
+    }
+
+    private fun resume() {
+        val activePlayer = player ?: return
+        if (!_state.value.isPaused || remainingPreviewMillis <= 0L) return
+        activePlayer.start()
+        _state.value = _state.value.copy(isPlaying = true, isPaused = false)
+        schedulePreviewEnd()
+    }
+
+    private fun schedulePreviewEnd() {
+        playbackStartedAtMillis = SystemClock.elapsedRealtime()
+        handler.postDelayed(::stop, remainingPreviewMillis)
+    }
+
     fun stop(errorMessage: String? = null) {
         handler.removeCallbacksAndMessages(null)
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
+        remainingPreviewMillis = PREVIEW_LIMIT_MS
+        playbackStartedAtMillis = 0L
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             focusRequest?.let(audioManager::abandonAudioFocusRequest)
         } else {

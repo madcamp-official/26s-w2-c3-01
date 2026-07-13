@@ -48,9 +48,12 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
@@ -72,6 +75,9 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -107,6 +113,7 @@ import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.ProfileSettings
+import com.example.myapplication.core.model.PreviewPlaybackState
 import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.ProfilePrivacySettings
 import com.example.myapplication.core.model.ProfileTrack
@@ -571,11 +578,14 @@ fun InboxScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationScreen(
     notifications: List<InboxNotification>,
     onBack: () -> Unit,
-    onMarkRead: () -> Unit,
+    onClearAll: () -> Unit,
+    onDelete: (String) -> Unit,
+    onOpenProfile: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
@@ -590,11 +600,11 @@ fun NotificationScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("알림", color = MutedMint, modifier = Modifier.weight(1f))
                     Text(
-                        "모두 읽음",
+                        "모두 지우기",
                         color = SignalGreen,
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .clickable { onMarkRead() }
+                            .clickable(enabled = notifications.isNotEmpty()) { onClearAll() }
                             .padding(12.dp),
                     )
                 }
@@ -607,19 +617,47 @@ fun NotificationScreen(
                 }
             }
             items(notifications, key = { it.id }) { notification ->
-                AppPanel(
-                    color = if (notification.isRead) MossSurface else SignalGreen.copy(alpha = 0.09f),
+                val swipeState = rememberSwipeToDismissBoxState(
+                    confirmValueChange = { value ->
+                        if (value == SwipeToDismissBoxValue.EndToStart) {
+                            onDelete(notification.id)
+                            true
+                        } else {
+                            value == SwipeToDismissBoxValue.Settled
+                        }
+                    },
+                )
+                SwipeToDismissBox(
+                    state = swipeState,
+                    enableDismissFromStartToEnd = false,
+                    backgroundContent = {
+                        Spacer(Modifier.fillMaxSize())
+                    },
                 ) {
+                    AppPanel(
+                        color = if (notification.isRead) MossSurface else MossSurfaceHigh,
+                    ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TrackGlyph(
-                            notification.actorAlias ?: "시스템",
-                            notification.actorColorHex ?: 0xFF2A4937L,
-                        )
+                        Box(
+                            modifier = Modifier.clickable(
+                                enabled = notification.actorProfileHandle != null,
+                                onClick = { notification.actorProfileHandle?.let(onOpenProfile) },
+                            ),
+                        ) {
+                            TrackGlyph(
+                                notification.actorAlias ?: "시스템",
+                                notification.actorColorHex ?: 0xFF2A4937L,
+                            )
+                        }
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 notification.actorAlias ?: "Melody Bubble",
                                 fontWeight = FontWeight.Bold,
+                                modifier = Modifier.clickable(
+                                    enabled = notification.actorProfileHandle != null,
+                                    onClick = { notification.actorProfileHandle?.let(onOpenProfile) },
+                                ),
                             )
                             Text(notification.preview, color = MutedMint)
                         }
@@ -630,6 +668,7 @@ fun NotificationScreen(
                         )
                     }
                 }
+                }
             }
         }
     }
@@ -639,7 +678,10 @@ fun NotificationScreen(
 fun ChatScreen(
     chat: ChatPreview,
     messages: List<ChatMessage>,
-    currentTrack: Track,
+    currentTrack: Track?,
+    previewPlaybackState: PreviewPlaybackState = PreviewPlaybackState(),
+    onTogglePreview: () -> Unit = {},
+    onStopPreview: () -> Unit = {},
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -668,7 +710,28 @@ fun ChatScreen(
             .fillMaxSize()
             .imePadding()
     ) {
-        BackHeader(onBack = onBack, title = chat.peerAlias, subtitle = "${currentTrack.title} 재생 중")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로")
+            }
+            Column(Modifier.weight(1f)) {
+                Text(chat.peerAlias, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                currentTrack?.let { track ->
+                    Text("${track.title} 재생 중", color = MutedMint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (previewPlaybackState.isPlaying || previewPlaybackState.isPaused || previewPlaybackState.isLoading) {
+                Spacer(Modifier.width(8.dp))
+                ChatPreviewPlayer(
+                    state = previewPlaybackState,
+                    onToggle = onTogglePreview,
+                    onStop = onStopPreview,
+                )
+            }
+        }
         HorizontalDivider(color = MossOutline)
         LazyColumn(
             state = messageListState,
@@ -767,6 +830,40 @@ fun ChatScreen(
     }
 }
 
+@Composable
+private fun ChatPreviewPlayer(
+    state: PreviewPlaybackState,
+    onToggle: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.width(174.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = MossSurfaceHigh,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MossOutline),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(state.title.ifBlank { "미리듣기 준비 중" }, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                Text(state.artist, color = MutedMint, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+            }
+            IconButton(onClick = onToggle, enabled = !state.isLoading, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    if (state.isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                    contentDescription = if (state.isPaused) "계속 재생" else "일시정지",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            IconButton(onClick = onStop, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Outlined.Stop, contentDescription = "정지", modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MyScreen(
@@ -791,9 +888,7 @@ fun MyScreen(
     onSearchMusic: (String) -> Unit,
     onClearMusicSearch: () -> Unit,
     onPreviewMusic: (MusicSearchResult) -> Unit,
-    onPlayProfileMusic: () -> Unit,
-    onDeleteProfileMusic: () -> Unit,
-    onOpenMelodyAlias: () -> Unit,
+    bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     LaunchedEffect(Unit) { onLoadConnections() }
@@ -1022,7 +1117,7 @@ fun MyScreen(
     val outline = MelodyBubbleColors.Border
     LazyColumn(
         modifier = modifier.fillMaxSize().background(canvas).testTag("my_profile_list"),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 26.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, top = 12.dp, end = 18.dp, bottom = bottomContentPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
@@ -1196,40 +1291,6 @@ fun MyScreen(
                 }
             }
         }
-        if (profile.profileMusicUrl != null) item {
-            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.MusicNote, null, tint = accent)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("30초 프로필 음악", color = ink, fontWeight = FontWeight.Bold)
-                        Text(profile.profileMusicDescription ?: "나의 바이브를 담은 음악", color = muted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
-                    }
-                    TextButton(onClick = onPlayProfileMusic) { Text("재생", color = accent) }
-                    TextButton(onClick = onDeleteProfileMusic) { Text("삭제", color = MelodyBubbleColors.Danger) }
-                }
-            }
-        }
-        item {
-            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 12.dp, onClick = onOpenMelodyAlias) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Tune, null, tint = accent)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("멜로디 별칭과 30초 음악", color = ink, fontWeight = FontWeight.Bold)
-                        Text(
-                            if (profile.melodyAliasId.isBlank()) "나만의 음악 정체성을 만들어보세요."
-                            else "${profile.melodyAliasMood} · ${profile.melodyAliasTone} · ${profile.melodyAliasTempo} BPM",
-                            color = muted,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(Icons.Outlined.ChevronRight, null, tint = muted)
-                }
-            }
-        }
     }
 }
 
@@ -1242,7 +1303,9 @@ fun PublicProfileScreen(
     onRetry: () -> Unit,
     onFollow: () -> Unit,
     onPlayProfileMusic: (String, Float) -> Unit,
+    onPlayNowPlaying: (String, String, String?) -> Unit = { _, _, _ -> },
     onPlayTrackPreview: (ProfileTrack) -> Unit = {},
+    bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
     onShare: () -> Unit = {},
     onMore: (() -> Unit)? = null,
@@ -1278,7 +1341,7 @@ fun PublicProfileScreen(
             }
             else -> LazyColumn(
                 Modifier.fillMaxSize().testTag("public_profile_list"),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, top = 4.dp, end = 18.dp, bottom = 26.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 18.dp, top = 4.dp, end = 18.dp, bottom = bottomContentPadding),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item {
@@ -1355,7 +1418,11 @@ fun PublicProfileScreen(
                 }
                 profile.nowPlaying?.let { nowPlaying ->
                     item {
-                        ProfileLightPanel(outline = outline, ink = ink) {
+                        ProfileLightPanel(
+                            outline = outline,
+                            ink = ink,
+                            onClick = { onPlayNowPlaying(nowPlaying.title, nowPlaying.artist, nowPlaying.artworkUrl) },
+                        ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("지금 듣는 음악", color = ink, fontWeight = FontWeight.Bold)
                                 Spacer(Modifier.weight(1f))
@@ -1465,26 +1532,6 @@ fun PublicProfileScreen(
                                         Text("${taste.score}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-                profile.profileMusicUrl?.let { musicUrl ->
-                    item {
-                        ProfileLightPanel(
-                            outline = outline,
-                            ink = ink,
-                            contentPadding = 12.dp,
-                            onClick = { onPlayProfileMusic(musicUrl, profile.profileMusicStartSeconds ?: 0f) },
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.MusicNote, null, tint = lavender)
-                                Spacer(Modifier.width(10.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text("30초 프로필 음악", color = ink, fontWeight = FontWeight.Bold)
-                                    Text(profile.profileMusicDescription ?: "이 사용자의 음악 정체성", color = muted, style = MaterialTheme.typography.bodySmall)
-                                }
-                                Icon(Icons.Outlined.ChevronRight, null, tint = muted)
                             }
                         }
                     }
@@ -1776,6 +1823,7 @@ fun SocialConnectionsScreen(
     onBack: () -> Unit,
     onUnfollow: (String) -> Unit,
     onOpenProfile: (String) -> Unit,
+    bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(if (initialFollowing) 0 else 1) }
@@ -1811,7 +1859,7 @@ fun SocialConnectionsScreen(
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = bottomContentPadding),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (!loading && connections.isEmpty()) item {

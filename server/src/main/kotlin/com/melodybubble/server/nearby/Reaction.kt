@@ -40,6 +40,7 @@ data class NearbyReactionCreatedPayload(
     val clientReactionId: UUID,
     val reactionType: String,
     val senderAlias: String,
+    val senderProfileHandle: String,
     val trackTitle: String?,
     val trackArtist: String?,
     val createdAt: Instant,
@@ -72,7 +73,7 @@ class NearbyReactionService(
         return jdbc.query(
             """
             select reaction.id,reaction.client_reaction_id,reaction.reaction_type,
-              sender.display_name,reaction.track_title,reaction.track_artist,reaction.created_at
+              sender.display_name,sender.profile_handle,reaction.track_title,reaction.track_artist,reaction.created_at
             from nearby_reactions reaction
             join users sender on sender.id=reaction.sender_id
             where reaction.recipient_id=?
@@ -85,6 +86,7 @@ class NearbyReactionService(
                     clientReactionId = UUID.fromString(rs.getString("client_reaction_id")),
                     reactionType = rs.getString("reaction_type"),
                     senderAlias = rs.getString("display_name"),
+                    senderProfileHandle = rs.getString("profile_handle"),
                     trackTitle = rs.getString("track_title"),
                     trackArtist = rs.getString("track_artist"),
                     createdAt = rs.getTimestamp("created_at").toInstant(),
@@ -150,11 +152,7 @@ class NearbyReactionService(
     }
 
     private fun publishCreated(reaction: StoredReaction) {
-        val senderAlias = jdbc.queryForObject(
-            "select display_name from users where id=?",
-            String::class.java,
-            reaction.senderId,
-        ) ?: "Listener"
+        val sender = jdbc.queryForMap("select display_name,profile_handle from users where id=?", reaction.senderId)
         realtime.toUserAfterCommit(
             reaction.recipientId,
             RealtimeQueues.REACTIONS,
@@ -163,7 +161,8 @@ class NearbyReactionService(
                 reactionId = reaction.reactionId,
                 clientReactionId = reaction.clientReactionId,
                 reactionType = reaction.reactionType,
-                senderAlias = senderAlias,
+                senderAlias = sender["display_name"] as? String ?: "Listener",
+                senderProfileHandle = sender["profile_handle"] as String,
                 trackTitle = reaction.trackTitle,
                 trackArtist = reaction.trackArtist,
                 createdAt = reaction.createdAt,

@@ -11,6 +11,11 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -47,6 +53,7 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.myapplication.core.model.MainTab
@@ -64,7 +71,6 @@ import com.example.myapplication.ui.screens.BuildingLoungeMapScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
-import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
@@ -82,7 +88,6 @@ private object Route {
     const val MAIN = "main"
     const val USER_DETAIL = "user-detail"
     const val CHAT = "chat/{roomId}"
-    const val MELODY_ALIAS = "melody-alias"
     const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
@@ -252,17 +257,38 @@ fun MelodyBubbleApp(
     }
 
     val navController = rememberNavController()
-    Box(modifier = modifier.fillMaxSize()) {
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val isChatScreen = currentBackStackEntry?.destination?.route == Route.CHAT
+    val previewBarVisible = previewPlaybackState.isPlaying ||
+        previewPlaybackState.isPaused || previewPlaybackState.isLoading
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = Ink,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            MelodyBottomNavigationBar(
+                selectedTab = state.selectedTab,
+                unreadCount = state.unreadChatCount,
+                onTabSelected = { tab ->
+                    viewModel.selectTab(tab)
+                    navController.popBackStack(Route.MAIN, inclusive = false)
+                },
+            )
+        },
+    ) { appPadding ->
+      Box(modifier = Modifier.fillMaxSize().padding(appPadding)) {
         NavHost(
             navController = navController,
             startDestination = Route.MAIN,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
         ) {
             composable(Route.MAIN) {
                 MainShell(
                     state = state,
                     musicSearchState = musicSearchState,
                     buildingLoungeState = buildingLoungeState,
+                    previewBarVisible = previewBarVisible,
                     viewModel = viewModel,
                     onStartSharing = ::requestSharingStart,
                     onStopSharing = {
@@ -275,7 +301,6 @@ fun MelodyBubbleApp(
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
                     onOpenNotifications = { navController.navigate(Route.NOTIFICATIONS) },
-                    onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenSettings = { navController.navigate(Route.SETTINGS) },
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
                     onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
@@ -371,7 +396,8 @@ fun MelodyBubbleApp(
                     onBack = { navController.popBackStack() },
                     onUnfollow = viewModel::unfollowRelationship,
                     onOpenProfile = { navController.navigate(Route.publicProfile(it)) },
-                    modifier = Modifier.safeDrawingPadding(),
+                    bottomContentPadding = if (previewBarVisible) 62.dp else 0.dp,
+                    modifier = Modifier.statusBarsPadding(),
                 )
             }
             composable(Route.FOLLOWERS) {
@@ -384,7 +410,8 @@ fun MelodyBubbleApp(
                     onBack = { navController.popBackStack() },
                     onUnfollow = viewModel::unfollowRelationship,
                     onOpenProfile = { navController.navigate(Route.publicProfile(it)) },
-                    modifier = Modifier.safeDrawingPadding(),
+                    bottomContentPadding = if (previewBarVisible) 62.dp else 0.dp,
+                    modifier = Modifier.statusBarsPadding(),
                 )
             }
             composable(
@@ -409,7 +436,6 @@ fun MelodyBubbleApp(
                     DisposableEffect(profileHandle) {
                         onDispose {
                             viewModel.stopMelodyAudio()
-                            viewModel.stopMusicPreview()
                             viewModel.clearPublicProfile()
                         }
                     }
@@ -421,9 +447,21 @@ fun MelodyBubbleApp(
                         onRetry = { viewModel.loadPublicProfile(profileHandle) },
                         onFollow = viewModel::followPublicProfile,
                         onPlayProfileMusic = viewModel::playProfileMusicUrl,
+                        onPlayNowPlaying = { title, artist, artworkUrl ->
+                            val nearbyHandle = state.nearbyListeners
+                                .firstOrNull { it.profileHandle == profileHandle }
+                                ?.nearbyHandle
+                            viewModel.playMusicPreview(
+                                title,
+                                artist,
+                                artworkUrl = artworkUrl,
+                                sourceNearbyHandle = nearbyHandle,
+                            )
+                        },
                         onPlayTrackPreview = { track ->
                             viewModel.playMusicPreview(track.title, track.artist, artworkUrl = track.artworkUrl)
                         },
+                        bottomContentPadding = if (previewBarVisible) 62.dp else 0.dp,
                         onShare = {
                             val name = state.selectedPublicProfile?.displayName ?: profileHandle
                             context.startActivity(
@@ -435,7 +473,7 @@ fun MelodyBubbleApp(
                                 )
                             )
                         },
-                        modifier = Modifier.safeDrawingPadding(),
+                        modifier = Modifier.statusBarsPadding(),
                     )
                 }
             }
@@ -458,7 +496,6 @@ fun MelodyBubbleApp(
                     }
                     DisposableEffect(exchangeId) {
                         onDispose {
-                            viewModel.stopMusicPreview()
                             viewModel.stopMelodyAudio()
                             viewModel.clearPublicProfile()
                         }
@@ -471,9 +508,21 @@ fun MelodyBubbleApp(
                         onRetry = { viewModel.loadExchangeProfile(exchangeId) },
                         onFollow = viewModel::followPublicProfile,
                         onPlayProfileMusic = viewModel::playProfileMusicUrl,
+                        onPlayNowPlaying = { title, artist, artworkUrl ->
+                            val nearbyHandle = state.selectedPublicProfile?.profileHandle?.let { handle ->
+                                state.nearbyListeners.firstOrNull { it.profileHandle == handle }?.nearbyHandle
+                            }
+                            viewModel.playMusicPreview(
+                                title,
+                                artist,
+                                artworkUrl = artworkUrl,
+                                sourceNearbyHandle = nearbyHandle,
+                            )
+                        },
                         onPlayTrackPreview = { track ->
                             viewModel.playMusicPreview(track.title, track.artist, artworkUrl = track.artworkUrl)
                         },
+                        bottomContentPadding = if (previewBarVisible) 62.dp else 0.dp,
                         onShare = {
                             state.selectedPublicProfile?.let { selected ->
                                 context.startActivity(
@@ -486,7 +535,7 @@ fun MelodyBubbleApp(
                                 )
                             }
                         },
-                        modifier = Modifier.safeDrawingPadding(),
+                        modifier = Modifier.statusBarsPadding(),
                     )
                 }
             }
@@ -506,32 +555,18 @@ fun MelodyBubbleApp(
                     val peerTrack = state.nearbyListeners
                         .firstOrNull { it.nearbyHandle == chat.peerHandle }
                         ?.currentTrack
-                        ?: state.currentTrack
                     ChatScreen(
                         chat = chat,
                         messages = state.chatMessages[roomId].orEmpty(),
                         currentTrack = peerTrack,
+                        previewPlaybackState = previewPlaybackState,
+                        onTogglePreview = viewModel::toggleMusicPreviewPause,
+                        onStopPreview = viewModel::stopMusicPreview,
                         onBack = { navController.popBackStack() },
                         onSend = { viewModel.sendChat(roomId, it) },
-                        modifier = Modifier.safeDrawingPadding()
+                        modifier = Modifier.statusBarsPadding()
                     )
                 }
-            }
-            composable(Route.MELODY_ALIAS) {
-                val lyriaState by viewModel.lyriaGenerationState.collectAsState()
-                DisposableEffect(Unit) {
-                    onDispose { viewModel.stopMelodyAudio() }
-                }
-                MelodyAliasScreen(
-                    onBack = { navController.popBackStack() },
-                    generationState = lyriaState,
-                    onGenerate = viewModel::generateLyriaSong,
-                    onPlayFull = viewModel::playLyriaSong,
-                    onPlaySelection = viewModel::playLyriaSelection,
-                    onSaveProfile = viewModel::saveLyriaAsProfileMusic,
-                    onReset = viewModel::resetLyriaSong,
-                    modifier = Modifier.safeDrawingPadding()
-                )
             }
             composable(Route.OFFLINE_EXCHANGE) {
                 DisposableEffect(Unit) {
@@ -566,7 +601,11 @@ fun MelodyBubbleApp(
                 NotificationScreen(
                     notifications = state.notifications,
                     onBack = { navController.popBackStack() },
-                    onMarkRead = viewModel::markInboxRead,
+                    onClearAll = viewModel::clearNotifications,
+                    onDelete = viewModel::deleteNotification,
+                    onOpenProfile = { profileHandle ->
+                        navController.navigate(Route.publicProfile(profileHandle))
+                    },
                     modifier = Modifier.safeDrawingPadding(),
                 )
             }
@@ -594,19 +633,23 @@ fun MelodyBubbleApp(
             hostState = snackbarHostState,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 88.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
         )
-        if (previewPlaybackState.isPlaying || previewPlaybackState.isLoading) {
+        AnimatedVisibility(
+            visible = previewBarVisible && !isChatScreen,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
             com.example.myapplication.ui.components.PreviewNowPlayingBar(
                 state = previewPlaybackState,
+                onTogglePause = viewModel::toggleMusicPreviewPause,
                 onStop = viewModel::stopMusicPreview,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 88.dp),
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
             )
         }
+      }
     }
 }
 
@@ -615,13 +658,13 @@ private fun MainShell(
     state: MelodyUiState,
     musicSearchState: MusicSearchUiState,
     buildingLoungeState: BuildingLoungeUiState,
+    previewBarVisible: Boolean,
     viewModel: MelodyViewModel,
     onStartSharing: () -> Unit,
     onStopSharing: () -> Unit,
     onOpenUser: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenNotifications: () -> Unit,
-    onOpenMelodyAlias: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
@@ -632,20 +675,7 @@ private fun MainShell(
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
 
-    Scaffold(
-        containerColor = Ink,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            MelodyBottomNavigationBar(
-                selectedTab = state.selectedTab,
-                unreadCount = state.unreadChatCount,
-                onTabSelected = viewModel::selectTab
-            )
-        }
-    ) { innerPadding ->
-        val contentModifier = Modifier
-            .fillMaxSize()
-            .padding(bottom = innerPadding.calculateBottomPadding())
+    val contentModifier = Modifier.fillMaxSize()
         when (state.selectedTab) {
             MainTab.HOME -> HomeScreen(
                 state = state,
@@ -655,7 +685,8 @@ private fun MainShell(
                 onOpenNearby = { viewModel.selectTab(MainTab.NEARBY) },
                 onOpenNotifications = onOpenNotifications,
                 onSelectListener = { onOpenUser(it.nearbyHandle) },
-                onOpenTrack = onOpenTrack
+                onOpenTrack = onOpenTrack,
+                onPlayPreview = { viewModel.playMusicPreview(it.title, it.artist) },
             )
             MainTab.NEARBY -> if (state.sessionMode == SessionMode.OFFLINE) {
                 OfflineServerFeatureScreen("온라인 주변 사용자", onOpenOfflineExchange, contentModifier)
@@ -669,13 +700,25 @@ private fun MainShell(
                 onMusicFilterChange = { nearbyMusicFilter = it },
                 onSelectListener = {
                     viewModel.selectNearby(it.nearbyHandle)
-                    it.currentTrack?.let { track -> viewModel.playMusicPreview(track.title, track.artist) }
+                    it.currentTrack?.let { track ->
+                        viewModel.playMusicPreview(
+                            track.title,
+                            track.artist,
+                            sourceNearbyHandle = it.nearbyHandle,
+                        )
+                    }
                 },
                 onOpenListenerDetail = { onOpenUser(it.nearbyHandle) },
                 onOpenTrack = onOpenTrack,
                 onReact = { listener, label -> viewModel.react(listener.nearbyHandle, label) },
                 onFollow = { viewModel.follow(it.nearbyHandle) },
-                onPlayPreview = { viewModel.playMusicPreview(it.title, it.artist) },
+                onPlayPreview = { listener, track ->
+                    viewModel.playMusicPreview(
+                        track.title,
+                        track.artist,
+                        sourceNearbyHandle = listener.nearbyHandle,
+                    )
+                },
                 onSearchInMusicApp = { track ->
                     val query = "${track.title} ${track.artist}"
                     val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_SEARCH)
@@ -738,12 +781,9 @@ private fun MainShell(
                 onSearchMusic = viewModel::searchMusic,
                 onClearMusicSearch = viewModel::clearMusicSearch,
                 onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
-                onPlayProfileMusic = viewModel::playProfileMusic,
-                onDeleteProfileMusic = viewModel::deleteProfileMusic,
-                onOpenMelodyAlias = onOpenMelodyAlias,
-                modifier = contentModifier.safeDrawingPadding()
+                bottomContentPadding = if (previewBarVisible) 62.dp else 0.dp,
+                modifier = contentModifier.statusBarsPadding()
             )
-        }
     }
 }
 

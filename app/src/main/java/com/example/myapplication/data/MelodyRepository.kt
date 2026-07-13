@@ -147,6 +147,8 @@ interface MelodyRepository {
     fun followPublicProfile()
     fun sendChat(roomId: String, content: String)
     fun markInboxRead()
+    fun clearNotifications()
+    fun deleteNotification(notificationId: String)
     fun setDiscoverable(enabled: Boolean)
     fun setAllowReactions(enabled: Boolean)
     fun setOfflineExchangeEnabled(enabled: Boolean)
@@ -820,6 +822,18 @@ class DemoMelodyRepository(
             current.copy(
                 notifications = current.notifications.map { it.copy(isRead = true) },
             )
+        }
+    }
+
+    override fun clearNotifications() {
+        realtimeInboxStore?.deleteAll()
+        _state.update { it.copy(notifications = emptyList()) }
+    }
+
+    override fun deleteNotification(notificationId: String) {
+        realtimeInboxStore?.delete(notificationId)
+        _state.update { current ->
+            current.copy(notifications = current.notifications.filterNot { it.id == notificationId })
         }
     }
 
@@ -1923,6 +1937,7 @@ class DemoMelodyRepository(
             type = NotificationType.REACTION,
             actorAlias = alias,
             actorColorHex = actorColor,
+            actorProfileHandle = payload.senderProfileHandle?.takeIf(String::isNotBlank),
             preview = preview,
             relativeTime = "방금",
         )
@@ -2057,6 +2072,7 @@ class DemoMelodyRepository(
                         realtimeInboxStore?.recordReaction(
                             reactionId = reaction.reactionId,
                             senderAlias = reaction.senderAlias,
+                            senderProfileHandle = reaction.senderProfileHandle,
                             reactionType = reaction.reactionType,
                             trackTitle = reaction.trackTitle,
                         )
@@ -2068,6 +2084,7 @@ class DemoMelodyRepository(
                             type = NotificationType.REACTION,
                             actorAlias = reaction.senderAlias,
                             actorColorHex = null,
+                            actorProfileHandle = reaction.senderProfileHandle,
                             preview = reaction.trackTitle?.takeIf(String::isNotBlank)?.let {
                                 "$label · ‘$it’"
                             } ?: label,

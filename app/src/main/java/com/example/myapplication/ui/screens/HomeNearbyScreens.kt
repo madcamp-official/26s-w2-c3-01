@@ -66,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -124,7 +125,8 @@ fun HomeScreen(
     onOpenNearby: () -> Unit = {},
     onOpenNotifications: () -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
-    onOpenTrack: (Track) -> Unit = {}
+    onOpenTrack: (Track) -> Unit = {},
+    onPlayPreview: (Track) -> Unit = {},
 ) {
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
@@ -177,7 +179,8 @@ fun HomeScreen(
         item {
             PopularTrackCarousel(
                 tracks = state.popularTracks,
-                onOpenTrack = onOpenTrack
+                onOpenTrack = onOpenTrack,
+                onPlayPreview = onPlayPreview,
             )
         }
     }
@@ -201,9 +204,10 @@ fun NearbyScreen(
     onOpenTrack: (Track) -> Unit = {},
     onReact: (NearbyListener, String) -> Unit = { _, _ -> },
     onFollow: (NearbyListener) -> Unit = {},
-    onPlayPreview: (Track) -> Unit = {},
+    onPlayPreview: (NearbyListener, Track) -> Unit = { _, _ -> },
     onSearchInMusicApp: (Track) -> Unit = {},
 ) {
+    val reactionTarget = remember { mutableStateOf<NearbyListener?>(null) }
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
     val currentTrack = state.currentTrack
@@ -300,14 +304,24 @@ fun NearbyScreen(
                 SelectedListenerCard(
                     listener = selected,
                     onOpenDetail = { onOpenListenerDetail(selected) },
-                    onPlayPreview = { selected.currentTrack?.let(onPlayPreview) },
+                    onPlayPreview = { selected.currentTrack?.let { onPlayPreview(selected, it) } },
                     onSearchInMusicApp = { selected.currentTrack?.let(onSearchInMusicApp) },
                     onOpenTrack = { selected.currentTrack?.let(onOpenTrack) },
-                    onReact = { onReact(selected, "이 곡 좋아요") },
+                    onReact = { reactionTarget.value = selected },
                     onFollow = { onFollow(selected) }
                 )
             }
         }
+    }
+    reactionTarget.value?.let { listener ->
+        ReactionSheet(
+            listener = listener,
+            onDismiss = { reactionTarget.value = null },
+            onReactionSelected = { reaction ->
+                onReact(listener, reaction)
+                reactionTarget.value = null
+            },
+        )
     }
 }
 
@@ -851,7 +865,8 @@ private fun ListenerStrip(
 @Composable
 private fun PopularTrackCarousel(
     tracks: List<PopularTrack>,
-    onOpenTrack: (Track) -> Unit
+    onOpenTrack: (Track) -> Unit,
+    onPlayPreview: (Track) -> Unit,
 ) {
     if (tracks.isEmpty()) {
         EmptyMusicCard()
@@ -864,7 +879,8 @@ private fun PopularTrackCarousel(
         items(tracks, key = { it.track.id }) { popularTrack ->
             PopularTrackCompactCard(
                 popularTrack = popularTrack,
-                onOpenTrack = { onOpenTrack(popularTrack.track) }
+                onOpenTrack = { onOpenTrack(popularTrack.track) },
+                onPlayPreview = { onPlayPreview(popularTrack.track) },
             )
         }
     }
@@ -873,10 +889,11 @@ private fun PopularTrackCarousel(
 @Composable
 private fun PopularTrackCompactCard(
     popularTrack: PopularTrack,
-    onOpenTrack: () -> Unit
+    onOpenTrack: () -> Unit,
+    onPlayPreview: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.width(176.dp),
+        modifier = Modifier.width(176.dp).clickable(onClick = onPlayPreview),
         shape = RoundedCornerShape(20.dp),
         color = MelodyBubbleColors.Surface,
         border = BorderStroke(1.dp, MelodyBubbleColors.Border)

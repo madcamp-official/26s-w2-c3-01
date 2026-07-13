@@ -138,9 +138,10 @@ data class InboxNotification(
     val type: NotificationType,
     val actorAlias: String?,
     val actorColorHex: Long?,
+    val actorProfileHandle: String? = null,
     val preview: String,
     val relativeTime: String,
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
 )
 
 data class ChatPreview(
@@ -234,6 +235,7 @@ data class PreviewPlaybackState(
     val artworkUrl: String? = null,
     val isLoading: Boolean = false,
     val isPlaying: Boolean = false,
+    val isPaused: Boolean = false,
     val errorMessage: String? = null,
 )
 

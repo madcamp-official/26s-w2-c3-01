@@ -187,6 +187,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val _musicSearchState = MutableStateFlow<MusicSearchUiState>(MusicSearchUiState.Idle)
     private var musicSearchJob: Job? = null
     private var nowPlayingPreviewJob: Job? = null
+    private var previewLookupJob: Job? = null
+    private var followedNearbyHandle: String? = null
+    private var followedNearbyTrackKey: String? = null
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
@@ -271,6 +274,29 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     credential.displayAlias != state.profile.accountAlias ||
                     credential.expiresAt - System.currentTimeMillis() < 24 * 60 * 60 * 1_000L
                 if (shouldRenew) accessToken?.let(::prepareOfflineCredential)
+            }
+        }
+        viewModelScope.launch {
+            repository.state.collect { state ->
+                val handle = followedNearbyHandle ?: return@collect
+                val track = state.nearbyListeners
+                    .firstOrNull { it.nearbyHandle == handle }
+                    ?.currentTrack
+                val preview = musicPreviewPlayer.state.value
+                val previewActive = preview.isPlaying || preview.isPaused || preview.isLoading
+                if (!previewActive) return@collect
+                if (track == null) {
+                    stopMusicPreview()
+                    return@collect
+                }
+                val trackKey = track.previewFollowKey()
+                if (trackKey != followedNearbyTrackKey) {
+                    playMusicPreview(
+                        title = track.title,
+                        artist = track.artist,
+                        sourceNearbyHandle = handle,
+                    )
+                }
             }
         }
         viewModelScope.launch {
@@ -670,6 +696,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun autoPlayPublicProfileNowPlaying(profile: com.example.myapplication.core.model.PublicProfile?) {
+        val currentPreview = musicPreviewPlayer.state.value
+        if (currentPreview.isPlaying || currentPreview.isPaused || currentPreview.isLoading) return
+        clearFollowedNearbyPreview()
         nowPlayingPreviewJob?.cancel()
         musicPreviewPlayer.stop()
         lyriaClipPlayer.stop()
@@ -677,6 +706,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val nowPlaying = profile?.nowPlaying
             ?.takeIf { !profile.isSelf && it.isPlaying }
             ?: return
+        repository.state.value.nearbyListeners
+            .firstOrNull { it.profileHandle == profile.profileHandle }
+            ?.let { listener ->
+                followedNearbyHandle = listener.nearbyHandle
+                followedNearbyTrackKey = previewFollowKey(nowPlaying.title, nowPlaying.artist)
+            }
         nowPlayingPreviewJob = viewModelScope.launch {
             runCatching {
                 musicSearchRepository.search("${nowPlaying.title} ${nowPlaying.artist}")
@@ -746,6 +781,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun followPublicProfile() = repository.followPublicProfile()
     fun sendChat(roomId: String, content: String) = repository.sendChat(roomId, content)
     fun markInboxRead() = repository.markInboxRead()
+    fun clearNotifications() = repository.clearNotifications()
+    fun deleteNotification(notificationId: String) = repository.deleteNotification(notificationId)
     fun setDiscoverable(enabled: Boolean) = repository.setDiscoverable(enabled)
     fun setAllowReactions(enabled: Boolean) = repository.setAllowReactions(enabled)
     fun setOfflineExchangeEnabled(enabled: Boolean) = repository.setOfflineExchangeEnabled(enabled)
@@ -849,12 +886,20 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         artist: String,
         previewUrl: String? = null,
         artworkUrl: String? = null,
+        sourceNearbyHandle: String? = null,
     ) {
+        previewLookupJob?.cancel()
+        if (sourceNearbyHandle == null) {
+            clearFollowedNearbyPreview()
+        } else {
+            followedNearbyHandle = sourceNearbyHandle
+            followedNearbyTrackKey = previewFollowKey(title, artist)
+        }
         if (!previewUrl.isNullOrBlank()) {
             musicPreviewPlayer.play(previewUrl, title, artist, artworkUrl)
             return
         }
-        viewModelScope.launch {
+        previewLookupJob = viewModelScope.launch {
             runCatching { musicSearchRepository.search("$title $artist") }
                 .onSuccess { results ->
                     val normalizedTitle = title.trim().lowercase()
@@ -873,7 +918,23 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun stopMusicPreview() = musicPreviewPlayer.stop()
+    fun stopMusicPreview() {
+        previewLookupJob?.cancel()
+        previewLookupJob = null
+        clearFollowedNearbyPreview()
+        musicPreviewPlayer.stop()
+    }
+    fun toggleMusicPreviewPause() = musicPreviewPlayer.togglePauseResume()
+
+    private fun clearFollowedNearbyPreview() {
+        followedNearbyHandle = null
+        followedNearbyTrackKey = null
+    }
+
+    private fun Track.previewFollowKey(): String = previewFollowKey(title, artist)
+
+    private fun previewFollowKey(title: String, artist: String): String =
+        "${title.trim().lowercase()}\u0000${artist.trim().lowercase()}"
 
     fun deleteProfileMusic() = repository.deleteProfileMusic()
     fun resetLyriaSong() {
@@ -882,7 +943,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopMelodyAudio() {
-        stopNowPlayingPreview()
+        nowPlayingPreviewJob?.cancel()
+        nowPlayingPreviewJob = null
         lyriaClipPlayer.stop()
         melodyAliasPreviewPlayer.stop()
     }

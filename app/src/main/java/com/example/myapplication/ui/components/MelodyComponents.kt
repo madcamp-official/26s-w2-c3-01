@@ -29,6 +29,8 @@ import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.WifiTethering
 import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -63,6 +65,7 @@ import com.example.myapplication.core.model.PreviewPlaybackState
 @Composable
 fun PreviewNowPlayingBar(
     state: PreviewPlaybackState,
+    onTogglePause: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -70,19 +73,28 @@ fun PreviewNowPlayingBar(
         modifier = modifier.fillMaxWidth(),
         color = MelodyBubbleColors.SurfaceRaised,
         contentColor = MelodyBubbleColors.Text,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(14.dp),
         shadowElevation = 10.dp,
         border = BorderStroke(1.dp, MelodyBubbleColors.BorderStrong),
     ) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
             EqualizerBars(active = state.isPlaying)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(if (state.isLoading) "미리듣기 준비 중" else "30초 미리듣기 재생 중", style = MaterialTheme.typography.labelSmall, color = MelodyBubbleColors.Primary)
-                Text(state.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(state.artist, color = MelodyBubbleColors.TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+                Text(state.title.ifBlank { "미리듣기 준비 중" }, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(state.artist, color = MelodyBubbleColors.TextMuted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
             }
-            androidx.compose.material3.IconButton(onClick = onStop) {
+            androidx.compose.material3.IconButton(
+                onClick = onTogglePause,
+                enabled = !state.isLoading,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    if (state.isPaused) Icons.Outlined.PlayArrow else Icons.Outlined.Pause,
+                    contentDescription = if (state.isPaused) "미리듣기 계속 재생" else "미리듣기 일시정지",
+                )
+            }
+            androidx.compose.material3.IconButton(onClick = onStop, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Outlined.Stop, contentDescription = "미리듣기 정지")
             }
         }
@@ -93,7 +105,7 @@ fun PreviewNowPlayingBar(
 private fun EqualizerBars(active: Boolean) {
     val transition = rememberInfiniteTransition(label = "preview equalizer")
     Row(
-        modifier = Modifier.size(width = 34.dp, height = 30.dp),
+        modifier = Modifier.size(width = 28.dp, height = 22.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
@@ -109,8 +121,8 @@ private fun EqualizerBars(active: Boolean) {
             )
             Box(
                 Modifier
-                    .width(4.dp)
-                    .height((if (active) maximum * fraction else 5f).dp)
+                    .width(3.dp)
+                    .height((if (active) maximum * fraction * 0.7f else 4f).dp)
                     .background(MelodyBubbleColors.Primary, RoundedCornerShape(2.dp))
             )
         }

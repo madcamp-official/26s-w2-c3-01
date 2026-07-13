@@ -44,6 +44,7 @@ class RealtimeInboxStore(context: Context) {
     fun recordReaction(
         reactionId: String,
         senderAlias: String,
+        senderProfileHandle: String? = null,
         reactionType: String,
         trackTitle: String?,
         createdAtEpochMillis: Long = System.currentTimeMillis(),
@@ -55,6 +56,7 @@ class RealtimeInboxStore(context: Context) {
                 id = reactionId,
                 type = NotificationType.REACTION.name,
                 actorAlias = senderAlias.safeText(40) ?: "주변 사용자",
+                actorProfileHandle = senderProfileHandle.safeText(80),
                 preview = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
                 createdAtEpochMillis = createdAtEpochMillis,
             )
@@ -82,6 +84,7 @@ class RealtimeInboxStore(context: Context) {
                 .getOrDefault(NotificationType.SYSTEM),
             actorAlias = item.actorAlias,
             actorColorHex = null,
+            actorProfileHandle = item.actorProfileHandle,
             preview = item.preview,
             relativeTime = "최근",
             isRead = item.isRead,
@@ -92,6 +95,21 @@ class RealtimeInboxStore(context: Context) {
         if (activeOwner != null) {
             writeItems(readItems().map { it.copy(isRead = true) })
             _notifications.value = readItems().toNotifications()
+        }
+    }
+
+    fun deleteAll() = synchronized(lock) {
+        if (activeOwner != null) {
+            writeItems(emptyList())
+            _notifications.value = emptyList()
+        }
+    }
+
+    fun delete(notificationId: String) = synchronized(lock) {
+        if (activeOwner != null) {
+            val remaining = readItems().filterNot { it.id == notificationId }
+            writeItems(remaining)
+            _notifications.value = remaining.toNotifications()
         }
     }
 
@@ -122,6 +140,7 @@ class RealtimeInboxStore(context: Context) {
                 id = payload.reactionId?.takeIf(String::isNotBlank) ?: envelope.eventId,
                 type = NotificationType.REACTION.name,
                 actorAlias = alias,
+                actorProfileHandle = payload.senderProfileHandle.safeText(80),
                 preview = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
                 createdAtEpochMillis = System.currentTimeMillis(),
             )
@@ -175,6 +194,7 @@ class RealtimeInboxStore(context: Context) {
         val id: String,
         val type: String,
         val actorAlias: String?,
+        val actorProfileHandle: String? = null,
         val preview: String,
         val createdAtEpochMillis: Long,
         val isRead: Boolean = false,

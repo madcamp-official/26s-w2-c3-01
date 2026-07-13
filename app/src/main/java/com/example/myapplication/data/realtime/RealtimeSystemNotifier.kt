@@ -25,7 +25,7 @@ class RealtimeSystemNotifier(context: Context) {
                     "Realtime updates",
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ).apply {
-                    description = "Music reactions and other realtime Melody Bubble updates"
+                    description = "음악 리액션과 새 채팅 메시지를 알려드려요"
                     lockscreenVisibility = Notification.VISIBILITY_PRIVATE
                 }
             )
@@ -43,6 +43,17 @@ class RealtimeSystemNotifier(context: Context) {
                     id = event.envelope.eventId,
                     title = "$alias 님의 음악 리액션",
                     body = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
+                )
+            }
+            is RealtimeEvent.ChatMessageCreated -> {
+                val payload = event.envelope.payload
+                if (payload.isMine == true) return
+                val message = payload.content?.trim()?.takeIf(String::isNotEmpty) ?: return
+                val alias = payload.senderAlias?.trim()?.takeIf(String::isNotEmpty) ?: "새 메시지"
+                NotificationContent(
+                    id = payload.messageId?.takeIf(String::isNotBlank) ?: event.envelope.eventId,
+                    title = "$alias 님의 메시지",
+                    body = message,
                 )
             }
             is RealtimeEvent.NotificationCreated -> NotificationContent(
