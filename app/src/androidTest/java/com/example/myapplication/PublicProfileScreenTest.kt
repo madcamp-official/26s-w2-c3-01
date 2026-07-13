@@ -12,7 +12,6 @@ import androidx.compose.ui.test.performScrollToIndex
 import com.example.myapplication.core.model.CommonTasteMetric
 import com.example.myapplication.core.model.CommonTasteSummary
 import com.example.myapplication.core.model.ProfileArtist
-import com.example.myapplication.core.model.ProfileMelodyAlias
 import com.example.myapplication.core.model.ProfileNowPlaying
 import com.example.myapplication.core.model.ProfileStats
 import com.example.myapplication.core.model.ProfileTrack
@@ -45,13 +44,7 @@ class PublicProfileScreenTest {
                         avatarUrl = null,
                         genres = listOf("R&B", "Indie"),
                         moods = listOf("Night"),
-                        melodyAlias = ProfileMelodyAlias(
-                            id = "night-signal",
-                            notes = listOf("A4", "C5", "E5"),
-                            tone = "전자음",
-                            mood = "몽환",
-                            tempo = 112,
-                        ),
+                        melodyAlias = null,
                         stats = ProfileStats(followerCount = 3, verifiedExchangeCount = 4),
                         tasteFingerprint = TasteFingerprint(
                             genres = listOf(TasteMetric("R&B", 3, 0.75)),
@@ -131,7 +124,9 @@ class PublicProfileScreenTest {
 
         composeRule.onNodeWithText("지금 듣는 음악").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("요즘 나를 설명하는 3곡").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithText("최애 아티스트 3명").performScrollTo().assertIsDisplayed()
+        composeRule.onAllNodesWithText("1").assertCountEquals(0)
+        composeRule.onNodeWithTag("public_profile_list").performScrollToIndex(4)
+        composeRule.onNodeWithText("최애 아티스트 3명").assertIsDisplayed()
         composeRule.onNodeWithTag("public_profile_list").performScrollToIndex(5)
         composeRule.onNodeWithText("87%").assertIsDisplayed()
     }

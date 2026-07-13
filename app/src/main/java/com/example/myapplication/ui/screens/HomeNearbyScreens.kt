@@ -75,6 +75,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -98,6 +100,7 @@ import com.example.myapplication.ui.components.MelodyBubbleColors
 import com.example.myapplication.ui.components.MelodyCard
 import com.example.myapplication.ui.components.SectionTitle
 import com.example.myapplication.ui.components.SharingStatusCard
+import coil3.compose.AsyncImage
 
 private val ScreenHorizontalPadding = 20.dp
 
@@ -393,68 +396,22 @@ fun UserDetailScreen(
                 }
             }
             item {
-                ListenerIdentity(listener = listener)
+                ListenerIdentity(listener, onShowReactionSheet) { onFollow(listener) }
+            }
+            item {
+                CommonTasteCard(listener = listener)
             }
             if (listener.profileHandle != null) {
                 item {
                     OutlinedButton(
                         onClick = { onOpenProfile(listener) },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape = RoundedCornerShape(15.dp),
                     ) {
                         Text("음악 프로필 전체 보기", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(6.dp))
+                        Icon(Icons.Outlined.ChevronRight, contentDescription = null, modifier = Modifier.size(18.dp))
                     }
-                }
-            }
-            item {
-                CurrentTrackCard(
-                    listener = listener
-                )
-            }
-            item {
-                CommonTasteCard(listener = listener)
-            }
-            item {
-                Button(
-                    onClick = onShowReactionSheet,
-                enabled = listener.relationship != RelationshipStatus.BLOCKED && listener.canReact,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MelodyBubbleColors.Primary,
-                        contentColor = MelodyBubbleColors.OnPrimary,
-                        disabledContainerColor = MelodyBubbleColors.SurfaceRaised,
-                        disabledContentColor = MelodyBubbleColors.TextMuted
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.FavoriteBorder,
-                        contentDescription = null
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("음악 리액션 보내기", fontWeight = FontWeight.Bold)
-                }
-            }
-            item {
-                OutlinedButton(
-                    onClick = { onFollow(listener) },
-                    enabled = listener.relationship != RelationshipStatus.BLOCKED &&
-                        listener.relationship != RelationshipStatus.MUTUAL,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    border = BorderStroke(1.dp, MelodyBubbleColors.BorderStrong),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MelodyBubbleColors.Text,
-                        disabledContentColor = MelodyBubbleColors.TextMuted
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.PersonAddAlt,
-                        contentDescription = null
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(listener.relationship.followLabel(), fontWeight = FontWeight.Bold)
                 }
             }
             if (listener.relationship == RelationshipStatus.MUTUAL) {
@@ -487,7 +444,7 @@ fun UserDetailScreen(
                         onClick = { onBlock(listener) },
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp),
+                            .height(38.dp),
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MelodyBubbleColors.TextMuted
                         )
@@ -500,7 +457,7 @@ fun UserDetailScreen(
                         onClick = { onReport(listener) },
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp),
+                            .height(38.dp),
                         colors = ButtonDefaults.textButtonColors(
                             contentColor = MelodyBubbleColors.Danger
                         )
@@ -604,19 +561,12 @@ private fun MyCurrentTrackCard(
 ) {
     MelodyCard(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
+            TrackArtwork(
+                artworkUrl = track?.artworkUrl,
+                title = track?.title,
                 modifier = Modifier.size(44.dp),
-                shape = RoundedCornerShape(14.dp),
-                color = MelodyBubbleColors.SurfaceSelected
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Outlined.GraphicEq,
-                        contentDescription = null,
-                        tint = MelodyBubbleColors.Primary
-                    )
-                }
-            }
+                fallbackIcon = Icons.Outlined.GraphicEq,
+            )
             Spacer(Modifier.width(13.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -913,20 +863,11 @@ private fun PopularTrackCompactCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                Surface(
-                    modifier = Modifier.size(42.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MelodyBubbleColors.SurfaceSelected
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Outlined.MusicNote,
-                            contentDescription = null,
-                            modifier = Modifier.size(21.dp),
-                            tint = MelodyBubbleColors.Primary
-                        )
-                    }
-                }
+                TrackArtwork(
+                    artworkUrl = popularTrack.track.artworkUrl,
+                    title = popularTrack.track.title,
+                    modifier = Modifier.size(52.dp),
+                )
                 if (popularTrack.track.hasExternalMusicLink()) {
                     IconButton(
                         onClick = onOpenTrack,
@@ -980,19 +921,11 @@ private fun PopularTrackRow(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
+            TrackArtwork(
+                artworkUrl = popularTrack.track.artworkUrl,
+                title = popularTrack.track.title,
                 modifier = Modifier.size(48.dp),
-                shape = RoundedCornerShape(15.dp),
-                color = MelodyBubbleColors.SurfaceSelected
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Outlined.MusicNote,
-                        contentDescription = null,
-                        tint = MelodyBubbleColors.Primary
-                    )
-                }
-            }
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -1024,6 +957,38 @@ private fun PopularTrackRow(
                     style = MaterialTheme.typography.labelSmall
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun TrackArtwork(
+    artworkUrl: String?,
+    title: String?,
+    modifier: Modifier = Modifier,
+    fallbackIcon: ImageVector = Icons.Outlined.MusicNote,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = MelodyBubbleColors.SurfaceSelected,
+    ) {
+        if (artworkUrl.isNullOrBlank()) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = fallbackIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(21.dp),
+                    tint = MelodyBubbleColors.Primary,
+                )
+            }
+        } else {
+            AsyncImage(
+                model = artworkUrl,
+                contentDescription = title?.let { "$it 앨범 커버" },
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
         }
     }
 }
@@ -1503,110 +1468,95 @@ private fun NoListenerResult(
 }
 
 @Composable
-private fun ListenerIdentity(listener: NearbyListener) {
-    Column(
+private fun ListenerIdentity(
+    listener: NearbyListener,
+    onReact: () -> Unit,
+    onFollow: () -> Unit,
+) {
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        ListenerAvatar(listener, size = 104.dp, showWave = listener.isPlaying)
-        Spacer(Modifier.height(14.dp))
-        Text(
-            text = listener.displayAlias,
-            color = MelodyBubbleColors.Text,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Black
-        )
-        Spacer(Modifier.height(5.dp))
-        Text(
-            text = "${listener.proximity.label} · 취향 유사도 ${listener.matchScore}%",
-            color = MelodyBubbleColors.TextMuted,
-            style = MaterialTheme.typography.bodyMedium
-        )
-        if (listener.isNew) {
-            Spacer(Modifier.height(8.dp))
-            Surface(
-                shape = RoundedCornerShape(999.dp),
-                color = MelodyBubbleColors.Primary.copy(alpha = 0.14f)
-            ) {
-                Text(
-                    text = "새로 발견한 버블",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    color = MelodyBubbleColors.Primary,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold
-                )
+        ListenerAvatar(listener, size = 88.dp, showWave = listener.isPlaying)
+        Spacer(Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = listener.displayAlias,
+                color = MelodyBubbleColors.Text,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "${listener.proximity.label} · 취향 ${listener.matchScore}%",
+                color = MelodyBubbleColors.TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (listener.isNew) {
+                Spacer(Modifier.height(7.dp))
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = MelodyBubbleColors.Primary.copy(alpha = 0.14f),
+                ) {
+                    Text(
+                        text = "새로 발견",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        color = MelodyBubbleColors.Primary,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            CompactProfileAction(
+                icon = Icons.Outlined.FavoriteBorder,
+                label = "리액션",
+                enabled = listener.relationship != RelationshipStatus.BLOCKED && listener.canReact,
+                onClick = onReact,
+            )
+            CompactProfileAction(
+                icon = Icons.Outlined.PersonAddAlt,
+                label = when (listener.relationship) {
+                    RelationshipStatus.FOLLOWS_ME -> "맞팔"
+                    RelationshipStatus.MUTUAL -> "맞팔 중"
+                    RelationshipStatus.FOLLOWING -> "팔로잉"
+                    RelationshipStatus.BLOCKED -> "차단됨"
+                    RelationshipStatus.NONE -> "팔로우"
+                },
+                enabled = listener.relationship != RelationshipStatus.BLOCKED &&
+                    listener.relationship != RelationshipStatus.MUTUAL,
+                onClick = onFollow,
+            )
         }
     }
 }
 
 @Composable
-private fun CurrentTrackCard(
-    listener: NearbyListener
+private fun CompactProfileAction(
+    icon: ImageVector,
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
 ) {
-    val track = listener.currentTrack
-    MelodyCard {
-        Text(
-            text = "현재 듣는 음악",
-            color = MelodyBubbleColors.TextMuted,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold
-        )
-        Spacer(Modifier.height(12.dp))
-        if (track == null) {
-            Text(
-                text = "공개된 음악이 없어요",
-                color = MelodyBubbleColors.TextMuted,
-                style = MaterialTheme.typography.bodyMedium
-            )
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(58.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = Color(listener.colorHex).copy(alpha = 0.25f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = if (listener.isPlaying) {
-                                Icons.Outlined.GraphicEq
-                            } else {
-                                Icons.Outlined.MusicNote
-                            },
-                            contentDescription = if (listener.isPlaying) "재생 중" else "음악",
-                            tint = Color(listener.colorHex)
-                        )
-                    }
-                }
-                Spacer(Modifier.width(13.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = track.title,
-                        color = MelodyBubbleColors.Text,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = track.artist,
-                        color = MelodyBubbleColors.TextMuted,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val tags = (track.genreTags + track.moodTags).take(3)
-                    if (tags.isNotEmpty()) {
-                        Text(
-                            text = tags.joinToString(" · "),
-                            color = MelodyBubbleColors.TextFaint,
-                            style = MaterialTheme.typography.labelSmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
+    Surface(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = if (enabled) MelodyBubbleColors.Primary.copy(alpha = 0.12f) else MelodyBubbleColors.SurfaceRaised,
+        contentColor = if (enabled) MelodyBubbleColors.Primary else MelodyBubbleColors.TextFaint,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1750,14 +1700,21 @@ private fun ListenerAvatar(
         color = Color(listener.colorHex),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f))
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = if (showWave) Icons.Outlined.GraphicEq else Icons.Outlined.MusicNote,
-                contentDescription = null,
-                modifier = Modifier.size(size * 0.38f),
-                tint = Color(0xFF03170A)
-            )
-        }
+        if (listener.avatarUrl.isNullOrBlank()) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (showWave) Icons.Outlined.GraphicEq else Icons.Outlined.MusicNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(size * 0.38f),
+                    tint = Color(0xFF03170A)
+                )
+            }
+        } else AsyncImage(
+            model = listener.avatarUrl,
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
     }
 }
 

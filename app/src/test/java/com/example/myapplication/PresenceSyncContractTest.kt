@@ -27,13 +27,16 @@ class PresenceSyncContractTest {
                 id = "detected",
                 title = "Night Drive",
                 artist = "Melody",
+                artworkUrl = "https://example.com/night-drive.jpg",
                 platform = "MEDIA_SESSION",
             ),
             isPlaying = true,
+            artworkUrl = "https://example.com/night-drive.jpg",
         ).toMusicUpdateRequest()
 
         assertEquals("Night Drive", request.title)
         assertEquals("Melody", request.artist)
+        assertEquals("https://example.com/night-drive.jpg", request.artworkUrl)
         assertEquals("ANDROID_MEDIA_SESSION", request.sourceType)
         assertTrue(request.isPlaying)
     }

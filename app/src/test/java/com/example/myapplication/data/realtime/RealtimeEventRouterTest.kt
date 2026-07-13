@@ -48,6 +48,7 @@ class RealtimeEventRouterTest {
               "payload":{"tracks":[{
                 "title":"Blue Night",
                 "artist":"Wave",
+                "artworkUrl":"https://example.com/blue-night.jpg",
                 "listenerCount":3,
                 "reactionCount":5
               }]}
@@ -58,6 +59,7 @@ class RealtimeEventRouterTest {
         val track = (event as RealtimeEvent.PopularTracksUpdated).envelope.payload.tracks.single()
         assertEquals(3, track.listenerCount)
         assertEquals(5, track.reactionCount)
+        assertEquals("https://example.com/blue-night.jpg", track.artworkUrl)
     }
 
     @Test

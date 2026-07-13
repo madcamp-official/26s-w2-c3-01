@@ -70,6 +70,8 @@ data class NearbyBubble(
     val nearbyHandle: String,
     val profileHandle: String,
     val displayAlias: String,
+    val avatarSeed: String?,
+    val avatarUrl: String?,
     val profileColor: String,
     val displayPosition: AbstractPosition,
     val matchScore: Int,
@@ -105,6 +107,7 @@ data class MusicUpdate(
 data class PopularTrack(
     val title: String,
     val artist: String,
+    val artworkUrl: String? = null,
     val listenerCount: Int,
     val reactionCount: Int,
 )
@@ -116,7 +119,7 @@ data class NearbyMusicUpdatedPayload(
 data class PopularTracksUpdatedPayload(val tracks: List<PopularTrack>)
 
 data class MusicAudienceMember(val userId: UUID, val sourceHandle: String)
-private data class CurrentMusic(val title: String, val artist: String)
+private data class CurrentMusic(val title: String, val artist: String, val artworkUrl: String?)
 
 @Service
 class NearbyService(
@@ -145,6 +148,7 @@ class NearbyService(
               session.nearby_handle,
               person.profile_handle,
               person.display_name,
+              person.avatar_seed,
               person.profile_color,
               CASE WHEN status.is_playing AND privacy.share_music AND (
                 privacy.music_visibility='TITLE_ARTIST' OR (
@@ -160,6 +164,13 @@ class NearbyService(
                   AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=session.user_id AND f.followed_id=?)
                 )
               ) THEN status.artist_name END AS artist_name,
+              CASE WHEN status.is_playing AND privacy.share_music AND (
+                privacy.music_visibility='TITLE_ARTIST' OR (
+                  privacy.music_visibility='MUTUALS'
+                  AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=? AND f.followed_id=session.user_id)
+                  AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=session.user_id AND f.followed_id=?)
+                )
+              ) THEN status.album_art_url END AS album_art_url,
               CASE
                 WHEN EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=? AND f.followed_id=session.user_id)
                  AND EXISTS(SELECT 1 FROM user_follows f WHERE f.follower_id=session.user_id AND f.followed_id=?) THEN 'MUTUAL'
@@ -196,10 +207,10 @@ class NearbyService(
           )
           SELECT * FROM candidates ORDER BY distance_meters LIMIT 40
         """.trimIndent()
-        val repeatedUserIds = Array(12) { userId }
+        val repeatedUserIds = Array(14) { userId }
         val args = buildList<Any> {
             add(userId)
-            addAll(repeatedUserIds.take(8))
+            addAll(repeatedUserIds.take(10))
             add(radius)
             add(userId)
             addAll(repeatedUserIds.takeLast(4))
@@ -212,6 +223,8 @@ class NearbyService(
                 nearbyHandle = handle,
                 profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
+                avatarSeed = rs.getString("avatar_seed"),
+                avatarUrl = null,
                 profileColor = rs.getString("profile_color"),
                 displayPosition = abstractPosition(handle, band),
                 matchScore = 65 + stable(handle, 31),
@@ -219,7 +232,7 @@ class NearbyService(
                 relationship = rs.getString("relationship"),
                 canReact = rs.getBoolean("allow_reactions"),
                 track = rs.getString("track_title")?.let {
-                    TrackSummary(it, rs.getString("artist_name"))
+                    TrackSummary(it, rs.getString("artist_name"), rs.getString("album_art_url"))
                 },
             )
         }, *args)
@@ -321,8 +334,15 @@ class NearbyService(
             Timestamp.from(observedAt),
             expiresAt,
         )
-        val changed = previous == null || previous.title != normalizedTitle || previous.artist != normalizedArtist
-        if (changed) publishMusicChanged(userId, true, TrackSummary(normalizedTitle, normalizedArtist))
+        val changed = previous == null || previous.title != normalizedTitle ||
+            previous.artist != normalizedArtist || previous.artworkUrl != normalizedArtwork
+        if (changed) {
+            publishMusicChanged(
+                userId,
+                true,
+                TrackSummary(normalizedTitle, normalizedArtist, normalizedArtwork),
+            )
+        }
     }
 
     fun popularTracks(userId: UUID): List<PopularTrack> {
@@ -437,10 +457,10 @@ class NearbyService(
 
     private fun currentMusic(userId: UUID): CurrentMusic? = jdbc.query(
         """
-        select track_title,artist_name from music_statuses
+        select track_title,artist_name,album_art_url from music_statuses
         where user_id=? and is_playing=true and expires_at>now()
         """.trimIndent(),
-        { rs, _ -> CurrentMusic(rs.getString(1), rs.getString(2)) },
+        { rs, _ -> CurrentMusic(rs.getString(1), rs.getString(2), rs.getString(3)) },
         userId,
     ).firstOrNull()
 
@@ -565,7 +585,7 @@ class NearbyService(
                      or (block.blocker_id=session.user_id and block.blocked_id=?)
                 )
             ), visible_tracks as (
-              select candidate.user_id,status.track_title,status.artist_name
+              select candidate.user_id,status.track_title,status.artist_name,status.album_art_url
               from candidate_users candidate
               join music_statuses status
                 on status.user_id=candidate.user_id and status.is_playing=true and status.expires_at>now()
@@ -579,7 +599,7 @@ class NearbyService(
                   or (candidate.music_visibility='MUTUALS' and candidate.is_mutual)
                 )
             )
-            select visible.track_title,visible.artist_name,
+            select visible.track_title,visible.artist_name,max(visible.album_art_url) artwork_url,
               count(distinct visible.user_id) listener_count,
               (
                 select count(*) from nearby_reactions reaction
@@ -598,6 +618,7 @@ class NearbyService(
                 PopularTrack(
                     title = rs.getString("track_title"),
                     artist = rs.getString("artist_name"),
+                    artworkUrl = rs.getString("artwork_url"),
                     listenerCount = rs.getInt("listener_count"),
                     reactionCount = rs.getInt("reaction_count"),
                 )

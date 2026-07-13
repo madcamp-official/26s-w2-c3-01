@@ -8,7 +8,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performClick
+import com.example.myapplication.core.model.MusicSearchResult
+import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.ProfileSettings
+import com.example.myapplication.core.model.ProfileTrack
+import com.example.myapplication.ui.GenreCatalogUiState
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.MusicSearchUiState
 import com.example.myapplication.ui.theme.MelodyBubbleTheme
@@ -42,11 +46,12 @@ class MyProfileScreenTest {
                     onProfileUpdate = { _, _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
                     onRandomizeAvatar = {},
-                    onOpenMelodyAlias = {},
                 )
             }
         }
@@ -85,11 +90,12 @@ class MyProfileScreenTest {
                     onProfileUpdate = { _, _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
                     onRandomizeAvatar = {},
-                    onOpenMelodyAlias = {},
                 )
             }
         }
@@ -100,6 +106,112 @@ class MyProfileScreenTest {
         composeRule.onNodeWithText("대표곡 편집").assertIsDisplayed()
         composeRule.onAllNodesWithText("프로필 이름").assertCountEquals(0)
         composeRule.onAllNodesWithText("최애 아티스트 편집").assertCountEquals(0)
+    }
+
+    @Test
+    fun curatedSectionsUseTheSameRankFreeLayoutAsPublicProfiles() {
+        val profile = emptyProfile().copy(
+            signatureTracks = listOf(
+                ProfileTrack(rank = 1, title = "새벽의 온도", artist = "Clouded Steps"),
+            ),
+            favoriteArtists = listOf(
+                ProfileArtist(rank = 1, name = "루엘"),
+            ),
+        )
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                MyScreen(
+                    profile = profile,
+                    profileSaving = false,
+                    feedbackMessage = null,
+                    followingCount = 0,
+                    followerCount = 0,
+                    verifiedOfflineExchangeCount = 0,
+                    offlineExchangeGenres = emptyList(),
+                    offlineExchangeMoods = emptyList(),
+                    nowPlayingTrack = null,
+                    nowPlayingActive = false,
+                    onLoadConnections = {},
+                    onOpenFollowing = {},
+                    onOpenFollowers = {},
+                    onOpenSettings = {},
+                    onOpenBubbleMode = {},
+                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileCurationUpdate = { _, _ -> },
+                    musicSearchState = MusicSearchUiState.Idle,
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
+                    onSearchMusic = {},
+                    onClearMusicSearch = {},
+                    onPreviewMusic = {},
+                    onRandomizeAvatar = {},
+                )
+            }
+        }
+
+        val list = composeRule.onNodeWithTag("my_profile_list")
+        list.performScrollToIndex(4)
+        composeRule.onNodeWithText("새벽의 온도").assertIsDisplayed()
+        composeRule.onAllNodesWithText("1").assertCountEquals(0)
+        list.performScrollToIndex(5)
+        composeRule.onNodeWithText("루엘").assertIsDisplayed()
+    }
+
+    @Test
+    fun trackEditorScrollsThirtyResultsWhileSearchAndSaveStayVisible() {
+        val results = (1L..30L).map { index ->
+            MusicSearchResult(
+                id = index,
+                artistId = index,
+                title = "검색 곡 $index",
+                artist = "아티스트 $index",
+                album = "앨범 $index",
+                genre = "K-Pop",
+                releaseDate = null,
+                durationSeconds = 180,
+                artworkUrl = null,
+                previewUrl = null,
+                appleMusicUrl = null,
+            )
+        }
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                MyScreen(
+                    profile = emptyProfile(),
+                    profileSaving = false,
+                    feedbackMessage = null,
+                    followingCount = 0,
+                    followerCount = 0,
+                    verifiedOfflineExchangeCount = 0,
+                    offlineExchangeGenres = emptyList(),
+                    offlineExchangeMoods = emptyList(),
+                    nowPlayingTrack = null,
+                    nowPlayingActive = false,
+                    onLoadConnections = {},
+                    onOpenFollowing = {},
+                    onOpenFollowers = {},
+                    onOpenSettings = {},
+                    onOpenBubbleMode = {},
+                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileCurationUpdate = { _, _ -> },
+                    musicSearchState = MusicSearchUiState.Success("검색", results),
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
+                    onSearchMusic = {},
+                    onClearMusicSearch = {},
+                    onPreviewMusic = {},
+                    onRandomizeAvatar = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("my_profile_list").performScrollToIndex(4)
+        composeRule.onNodeWithText("아직 고른 곡이 없어요").performClick()
+        composeRule.onNodeWithTag("profile_track_results").performScrollToIndex(29)
+
+        composeRule.onNodeWithText("검색 곡 30").assertIsDisplayed()
+        composeRule.onNodeWithText("곡 또는 아티스트 검색").assertIsDisplayed()
+        composeRule.onNodeWithText("대표곡 저장").assertIsDisplayed()
     }
 
     private fun emptyProfile() = ProfileSettings(

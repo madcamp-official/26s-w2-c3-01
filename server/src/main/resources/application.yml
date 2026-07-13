@@ -19,9 +19,6 @@ app:
     # 공개 식별자인 개발 OAuth client ID. 운영에서는 compose가 환경변수를 필수로 요구합니다.
     web-client-id: ${GOOGLE_WEB_CLIENT_ID:170698756702-dactjs85sco3reamftdjjt2brvd396cn.apps.googleusercontent.com}
   seed-demo: ${DEMO_SEED_ENABLED:false}
-  openai:
-    api-key: ${OPENAI_API_KEY:}
-    model: ${OPENAI_MODEL:gpt-5.4}
   ops:
     username: ${OPS_USERNAME:ops}
     password: ${OPS_PASSWORD:local-ops-password-change-me}

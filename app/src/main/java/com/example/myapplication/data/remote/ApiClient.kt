@@ -76,6 +76,18 @@ object ApiClient {
         .build()
         .create(MusicSearchApi::class.java)
 
+    fun createDeezerArtistApi(): DeezerArtistApi = Retrofit.Builder()
+        .baseUrl("https://api.deezer.com/")
+        .client(
+            OkHttpClient.Builder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .build()
+        )
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+        .create(DeezerArtistApi::class.java)
+
     fun createNearbyApi(environment: ApiEnvironment = ApiEnvironment()): NearbyApi =
         authenticatedRetrofit(environment).create(NearbyApi::class.java)
 
@@ -84,9 +96,6 @@ object ApiClient {
 
     fun createSocialApi(environment: ApiEnvironment = ApiEnvironment()): SocialApi =
         authenticatedRetrofit(environment).create(SocialApi::class.java)
-
-    fun createMelodyAliasApi(environment: ApiEnvironment = ApiEnvironment()): MelodyAliasApi =
-        authenticatedRetrofit(environment).create(MelodyAliasApi::class.java)
 
     fun createOfflineExchangeApi(environment: ApiEnvironment = ApiEnvironment()): OfflineExchangeApi =
         authenticatedRetrofit(environment).create(OfflineExchangeApi::class.java)
