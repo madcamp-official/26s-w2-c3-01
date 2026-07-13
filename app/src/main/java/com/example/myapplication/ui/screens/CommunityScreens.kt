@@ -136,6 +136,7 @@ fun OnboardingScreen(
     musicSearchState: MusicSearchUiState,
     onSearchMusic: (String) -> Unit,
     onClearMusicSearch: () -> Unit,
+    onPreviewMusic: (MusicSearchResult) -> Unit = {},
     onComplete: (List<String>, List<String>, List<ProfileArtist>, List<ProfileTrack>) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -335,6 +336,7 @@ fun OnboardingScreen(
                         selected = selected,
                         enabled = selected || signatureTracks.size < 3,
                     ) {
+                        onPreviewMusic(result)
                         signatureTracks = if (selected) {
                             signatureTracks.filterNot { it.providerTrackId == result.id.toString() }
                         } else {
@@ -788,6 +790,7 @@ fun MyScreen(
     musicSearchState: MusicSearchUiState,
     onSearchMusic: (String) -> Unit,
     onClearMusicSearch: () -> Unit,
+    onPreviewMusic: (MusicSearchResult) -> Unit,
     onPlayProfileMusic: () -> Unit,
     onDeleteProfileMusic: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
@@ -942,6 +945,7 @@ fun MyScreen(
                         selected = selected,
                         enabled = selected || signatureTracks.size < 3,
                     ) {
+                        onPreviewMusic(result)
                         signatureTracks = if (selected) {
                             signatureTracks.filterNot { it.providerTrackId == result.id.toString() }
                         } else {
@@ -1238,6 +1242,7 @@ fun PublicProfileScreen(
     onRetry: () -> Unit,
     onFollow: () -> Unit,
     onPlayProfileMusic: (String, Float) -> Unit,
+    onPlayTrackPreview: (ProfileTrack) -> Unit = {},
     modifier: Modifier = Modifier,
     onShare: () -> Unit = {},
     onMore: (() -> Unit)? = null,
@@ -1388,7 +1393,7 @@ fun PublicProfileScreen(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 profile.signatureTracks.take(3).forEachIndexed { index, track ->
                                     Surface(
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.weight(1f).clickable { onPlayTrackPreview(track) },
                                         color = MelodyBubbleColors.SurfaceRaised,
                                         contentColor = ink,
                                         shape = RoundedCornerShape(14.dp),

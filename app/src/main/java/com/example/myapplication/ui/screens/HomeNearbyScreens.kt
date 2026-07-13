@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.PersonAddAlt
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.ReportGmailerrorred
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -196,7 +197,9 @@ fun NearbyScreen(
     onSelectListener: (NearbyListener) -> Unit = {},
     onOpenListenerDetail: (NearbyListener) -> Unit = {},
     onReact: (NearbyListener, String) -> Unit = { _, _ -> },
-    onFollow: (NearbyListener) -> Unit = {}
+    onFollow: (NearbyListener) -> Unit = {},
+    onPlayPreview: (Track) -> Unit = {},
+    onSearchInMusicApp: (Track) -> Unit = {},
 ) {
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
@@ -294,6 +297,8 @@ fun NearbyScreen(
                 SelectedListenerCard(
                     listener = selected,
                     onOpenDetail = { onOpenListenerDetail(selected) },
+                    onPlayPreview = { selected.currentTrack?.let(onPlayPreview) },
+                    onSearchInMusicApp = { selected.currentTrack?.let(onSearchInMusicApp) },
                     onReact = { onReact(selected, "이 곡 좋아요") },
                     onFollow = { onFollow(selected) }
                 )
@@ -1244,7 +1249,9 @@ private fun SelectedListenerCard(
     listener: NearbyListener,
     onOpenDetail: () -> Unit,
     onReact: () -> Unit,
-    onFollow: () -> Unit
+    onFollow: () -> Unit,
+    onPlayPreview: () -> Unit,
+    onSearchInMusicApp: () -> Unit,
 ) {
     MelodyCard(
         onClick = onOpenDetail,
@@ -1282,14 +1289,22 @@ private fun SelectedListenerCard(
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall
                 )
-                Text(
-                    text = listener.currentTrack?.let { "${it.title} · ${it.artist}" }
-                        ?: "현재 공개된 음악 없음",
-                    color = MelodyBubbleColors.PrimarySoft,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = listener.currentTrack?.let { "${it.title} · ${it.artist}" }
+                            ?: "현재 공개된 음악 없음",
+                        modifier = Modifier.weight(1f).clickable(enabled = listener.currentTrack != null) { onPlayPreview() },
+                        color = MelodyBubbleColors.PrimarySoft,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (listener.currentTrack != null) {
+                        IconButton(onClick = onSearchInMusicApp, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Outlined.Search, contentDescription = "음악 앱에서 검색", modifier = Modifier.size(18.dp), tint = MelodyBubbleColors.Primary)
+                        }
+                    }
+                }
             }
             Icon(
                 imageVector = Icons.Outlined.ChevronRight,

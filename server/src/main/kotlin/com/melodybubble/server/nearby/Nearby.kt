@@ -184,7 +184,8 @@ class NearbyService(
                     TrackSummary(it, rs.getString("artist_name"))
                 },
                 melodyIdUrl = media.signedUrl(rs.getString("melody_id_object_key")),
-                melodyIdStartSeconds = rs.getObject("melody_id_start_seconds", Float::class.java),
+                melodyIdStartSeconds = rs.getFloat("melody_id_start_seconds")
+                    .takeUnless { rs.wasNull() },
             )
         }, *args)
         return NearbySnapshot(radiusMeters = radius, items = items)

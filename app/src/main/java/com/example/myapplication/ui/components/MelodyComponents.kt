@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -37,6 +39,12 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,6 +58,64 @@ import androidx.compose.ui.unit.dp
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.SharingState
+import com.example.myapplication.core.model.PreviewPlaybackState
+
+@Composable
+fun PreviewNowPlayingBar(
+    state: PreviewPlaybackState,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MelodyBubbleColors.SurfaceRaised,
+        contentColor = MelodyBubbleColors.Text,
+        shape = RoundedCornerShape(18.dp),
+        shadowElevation = 10.dp,
+        border = BorderStroke(1.dp, MelodyBubbleColors.BorderStrong),
+    ) {
+        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            EqualizerBars(active = state.isPlaying)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (state.isLoading) "미리듣기 준비 중" else "30초 미리듣기 재생 중", style = MaterialTheme.typography.labelSmall, color = MelodyBubbleColors.Primary)
+                Text(state.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(state.artist, color = MelodyBubbleColors.TextMuted, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            }
+            androidx.compose.material3.IconButton(onClick = onStop) {
+                Icon(Icons.Outlined.Stop, contentDescription = "미리듣기 정지")
+            }
+        }
+    }
+}
+
+@Composable
+private fun EqualizerBars(active: Boolean) {
+    val transition = rememberInfiniteTransition(label = "preview equalizer")
+    Row(
+        modifier = Modifier.size(width = 34.dp, height = 30.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        listOf(15, 27, 20, 30, 18).forEachIndexed { index, maximum ->
+            val fraction by transition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(260 + index * 90),
+                    repeatMode = RepeatMode.Reverse,
+                ),
+                label = "bar $index",
+            )
+            Box(
+                Modifier
+                    .width(4.dp)
+                    .height((if (active) maximum * fraction else 5f).dp)
+                    .background(MelodyBubbleColors.Primary, RoundedCornerShape(2.dp))
+            )
+        }
+    }
+}
 
 /** Palette shared by the handoff screens so they stay consistent even before app theming is wired. */
 object MelodyBubbleColors {

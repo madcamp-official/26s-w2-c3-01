@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
+import android.util.Log
 import com.example.myapplication.MelodyApplication
 import com.example.myapplication.core.model.ChatMessage
 import com.example.myapplication.core.model.ChatPreview
@@ -1630,6 +1631,7 @@ class DemoMelodyRepository(
             refreshPopularTracks(token)
             true
         }.getOrElse { error ->
+            Log.e("MelodyNearby", "Presence snapshot failed", error)
             if (!isCurrentSession(token)) return false
             _state.update { current ->
                 current.copy(

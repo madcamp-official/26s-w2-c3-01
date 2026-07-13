@@ -2,10 +2,12 @@ package com.example.myapplication.ui
 
 import android.Manifest
 import android.content.Intent
+import android.app.SearchManager
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -104,6 +106,7 @@ fun MelodyBubbleApp(
     val loginState by viewModel.loginState.collectAsState()
     val emailAvailabilityState by viewModel.emailAvailabilityState.collectAsState()
     val musicSearchState by viewModel.musicSearchState.collectAsState()
+    val previewPlaybackState by viewModel.previewPlaybackState.collectAsState()
     val buildingLoungeState by viewModel.buildingLoungeState.collectAsState()
     val exchangeState by viewModel.exchangeState.collectAsState()
     val context = LocalContext.current
@@ -233,6 +236,7 @@ fun MelodyBubbleApp(
             musicSearchState = musicSearchState,
             onSearchMusic = viewModel::searchMusic,
             onClearMusicSearch = viewModel::clearMusicSearch,
+            onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
             onComplete = viewModel::completeOnboarding,
             modifier = modifier.safeDrawingPadding()
         )
@@ -394,8 +398,16 @@ fun MelodyBubbleApp(
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
                     LaunchedEffect(profileHandle) { viewModel.loadPublicProfile(profileHandle) }
+                    LaunchedEffect(profileHandle, state.selectedPublicProfile?.nowPlaying) {
+                        state.selectedPublicProfile?.nowPlaying?.takeIf { it.isPlaying }?.let {
+                            viewModel.playMusicPreview(it.title, it.artist, artworkUrl = it.artworkUrl)
+                        }
+                    }
                     DisposableEffect(profileHandle) {
-                        onDispose { viewModel.clearPublicProfile() }
+                        onDispose {
+                            viewModel.stopMusicPreview()
+                            viewModel.clearPublicProfile()
+                        }
                     }
                     PublicProfileScreen(
                         profile = state.selectedPublicProfile,
@@ -405,6 +417,9 @@ fun MelodyBubbleApp(
                         onRetry = { viewModel.loadPublicProfile(profileHandle) },
                         onFollow = viewModel::followPublicProfile,
                         onPlayProfileMusic = viewModel::playProfileMusicUrl,
+                        onPlayTrackPreview = { track ->
+                            viewModel.playMusicPreview(track.title, track.artist, artworkUrl = track.artworkUrl)
+                        },
                         onShare = {
                             val name = state.selectedPublicProfile?.displayName ?: profileHandle
                             context.startActivity(
@@ -430,7 +445,10 @@ fun MelodyBubbleApp(
                 } else {
                     LaunchedEffect(exchangeId) { viewModel.loadExchangeProfile(exchangeId) }
                     DisposableEffect(exchangeId) {
-                        onDispose { viewModel.clearPublicProfile() }
+                        onDispose {
+                            viewModel.stopMusicPreview()
+                            viewModel.clearPublicProfile()
+                        }
                     }
                     PublicProfileScreen(
                         profile = state.selectedPublicProfile,
@@ -440,6 +458,9 @@ fun MelodyBubbleApp(
                         onRetry = { viewModel.loadExchangeProfile(exchangeId) },
                         onFollow = viewModel::followPublicProfile,
                         onPlayProfileMusic = viewModel::playProfileMusicUrl,
+                        onPlayTrackPreview = { track ->
+                            viewModel.playMusicPreview(track.title, track.artist, artworkUrl = track.artworkUrl)
+                        },
                         onShare = {
                             state.selectedPublicProfile?.let { selected ->
                                 context.startActivity(
@@ -563,6 +584,16 @@ fun MelodyBubbleApp(
                 .navigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 88.dp)
         )
+        if (previewPlaybackState.isPlaying || previewPlaybackState.isLoading) {
+            com.example.myapplication.ui.components.PreviewNowPlayingBar(
+                state = previewPlaybackState,
+                onStop = viewModel::stopMusicPreview,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 88.dp),
+            )
+        }
     }
 }
 
@@ -583,6 +614,7 @@ private fun MainShell(
     onOpenFollowers: () -> Unit,
     onOpenOfflineExchange: () -> Unit,
 ) {
+    val context = LocalContext.current
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
 
@@ -620,10 +652,24 @@ private fun MainShell(
                 onSimilarityThresholdChange = { similarityThreshold = it.toFloat() },
                 onRetry = viewModel::retrySharing,
                 onMusicFilterChange = { nearbyMusicFilter = it },
-                onSelectListener = { viewModel.selectNearby(it.nearbyHandle) },
+                onSelectListener = {
+                    viewModel.selectNearby(it.nearbyHandle)
+                    it.currentTrack?.let { track -> viewModel.playMusicPreview(track.title, track.artist) }
+                },
                 onOpenListenerDetail = { onOpenUser(it.nearbyHandle) },
                 onReact = { listener, label -> viewModel.react(listener.nearbyHandle, label) },
-                onFollow = { viewModel.follow(it.nearbyHandle) }
+                onFollow = { viewModel.follow(it.nearbyHandle) },
+                onPlayPreview = { viewModel.playMusicPreview(it.title, it.artist) },
+                onSearchInMusicApp = { track ->
+                    val query = "${track.title} ${track.artist}"
+                    val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_SEARCH)
+                        .putExtra(SearchManager.QUERY, query)
+                        .putExtra(MediaStore.EXTRA_MEDIA_TITLE, track.title)
+                        .putExtra(MediaStore.EXTRA_MEDIA_ARTIST, track.artist)
+                    runCatching { context.startActivity(intent) }.onFailure {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.apple.com/kr/search?term=${Uri.encode(query)}")))
+                    }
+                },
             )
             MainTab.LOUNGE -> if (state.sessionMode == SessionMode.OFFLINE) {
                 OfflineServerFeatureScreen("음악 라운지", onOpenOfflineExchange, contentModifier)
@@ -675,6 +721,7 @@ private fun MainShell(
                 musicSearchState = musicSearchState,
                 onSearchMusic = viewModel::searchMusic,
                 onClearMusicSearch = viewModel::clearMusicSearch,
+                onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
                 onPlayProfileMusic = viewModel::playProfileMusic,
                 onDeleteProfileMusic = viewModel::deleteProfileMusic,
                 onOpenMelodyAlias = onOpenMelodyAlias,

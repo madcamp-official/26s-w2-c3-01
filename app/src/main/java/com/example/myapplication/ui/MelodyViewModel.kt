@@ -17,6 +17,7 @@ import com.example.myapplication.core.model.ProfilePrivacySettings
 import com.example.myapplication.core.model.ProfileTrack
 import com.example.myapplication.audio.MelodyAliasPreviewPlayer
 import com.example.myapplication.audio.LyriaClipPlayer
+import com.example.myapplication.audio.MusicPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.MelodyApplication
 import com.example.myapplication.data.MelodyRepository
@@ -152,6 +153,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val realtimeClient = (application as MelodyApplication).realtimeClient
     private val presenceCoordinator = PresenceSyncCoordinator.get(application)
     private val lyriaClipPlayer = LyriaClipPlayer(application)
+    private val musicPreviewPlayer = MusicPreviewPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     private val _sessionState = MutableStateFlow<SessionState>(SessionState.SignedOut)
     private val _emailAvailabilityState = MutableStateFlow<EmailAvailabilityUiState>(EmailAvailabilityUiState.Idle)
@@ -193,6 +195,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     val lyriaGenerationState = _lyriaGenerationState.asStateFlow()
     val buildingLoungeState = _buildingLoungeState.asStateFlow()
     val musicSearchState = _musicSearchState.asStateFlow()
+    val previewPlaybackState = musicPreviewPlayer.state
     val exchangeState = nearbyExchangeManager.state
 
     init {
@@ -818,6 +821,37 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         lyriaClipPlayer.playSelection(startSeconds.coerceIn(0f, 25f))
     }
 
+    fun playMusicPreview(
+        title: String,
+        artist: String,
+        previewUrl: String? = null,
+        artworkUrl: String? = null,
+    ) {
+        if (!previewUrl.isNullOrBlank()) {
+            musicPreviewPlayer.play(previewUrl, title, artist, artworkUrl)
+            return
+        }
+        viewModelScope.launch {
+            runCatching { musicSearchRepository.search("$title $artist") }
+                .onSuccess { results ->
+                    val normalizedTitle = title.trim().lowercase()
+                    val match = results.firstOrNull {
+                        it.title.trim().lowercase() == normalizedTitle &&
+                            it.artist.contains(artist, ignoreCase = true)
+                    } ?: results.firstOrNull { it.previewUrl != null }
+                    val url = match?.previewUrl
+                    if (url == null) {
+                        musicPreviewPlayer.stop("이 곡은 30초 미리듣기를 제공하지 않아요.")
+                    } else {
+                        musicPreviewPlayer.play(url, title, artist, match.artworkUrl ?: artworkUrl)
+                    }
+                }
+                .onFailure { musicPreviewPlayer.stop("미리듣기를 찾지 못했어요.") }
+        }
+    }
+
+    fun stopMusicPreview() = musicPreviewPlayer.stop()
+
     fun deleteProfileMusic() = repository.deleteProfileMusic()
     fun resetLyriaSong() {
         lyriaClipPlayer.stop()
@@ -1226,6 +1260,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         removeAccessTokenListener = null
         melodyAliasPreviewPlayer.release()
         lyriaClipPlayer.release()
+        musicPreviewPlayer.release()
         nearbyExchangeManager.stop()
         runCatching { connectivityManager.unregisterNetworkCallback(connectivityCallback) }
         repository.close()

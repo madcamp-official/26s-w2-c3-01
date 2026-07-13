@@ -228,6 +228,15 @@ data class MusicSearchResult(
     val appleMusicUrl: String?,
 )
 
+data class PreviewPlaybackState(
+    val title: String = "",
+    val artist: String = "",
+    val artworkUrl: String? = null,
+    val isLoading: Boolean = false,
+    val isPlaying: Boolean = false,
+    val errorMessage: String? = null,
+)
+
 data class ProfilePrivacySettings(
     val currentMusicVisibility: String = "EVERYONE",
     val listeningInsightsEnabled: Boolean = false,
