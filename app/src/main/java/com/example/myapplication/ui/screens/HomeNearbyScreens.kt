@@ -144,7 +144,7 @@ fun HomeScreen(
             start = ScreenHorizontalPadding,
             top = 18.dp,
             end = ScreenHorizontalPadding,
-            bottom = 32.dp
+            bottom = 0.dp
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -231,7 +231,7 @@ fun NearbyScreen(
             start = ScreenHorizontalPadding,
             top = 18.dp,
             end = ScreenHorizontalPadding,
-            bottom = 32.dp
+            bottom = 0.dp
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -356,12 +356,12 @@ fun UserDetailScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .windowInsetsPadding(screenTopInsets()),
             contentPadding = PaddingValues(
                 start = ScreenHorizontalPadding,
                 top = 8.dp,
                 end = ScreenHorizontalPadding,
-                bottom = 32.dp
+                bottom = 0.dp
             ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
