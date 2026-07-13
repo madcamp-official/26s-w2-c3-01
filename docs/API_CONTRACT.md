@@ -193,8 +193,10 @@ PUT /api/v1/me/presence-settings
 `profile-curation`은 대표곡·최애 아티스트를 각각 최대 3개까지 순서대로 저장합니다. 요청의 `profileRevision`이 서버와 다르면 `409 Conflict`를 반환합니다. `profile-privacy`는 현재 음악, 청취 분석, 교환 기반 취향, 버블 참여 상태의 공개 범위를 독립적으로 저장하며 서버가 수신자별로 집행합니다.
 
 Presence 설정은 `discoverabilityScope`(`NEARBY`, `MUTUALS`, `HIDDEN`),
-`musicVisibility`(`TITLE_ARTIST`, `MUTUALS`, `HIDDEN`), `discoveryRadiusMeters`(50–2000),
-`allowReactions`를 저장합니다. 서버 주변 검색은 요청자의 저장된 반경과 상대의 공개 범위를 함께 집행합니다.
+`musicVisibility`(`TITLE_ARTIST`, `MUTUALS`, `HIDDEN`), 고정된 `discoveryRadiusMeters`(`15`),
+`allowReactions`를 저장합니다. 서버 주변 검색은 15m 하드캡과 상대의 공개 범위를 함께 집행합니다.
+주변 응답은 정확한 거리가 아니라 `WITHIN_5M`, `WITHIN_10M`, `WITHIN_15M` 구간만 제공하며,
+`displayPosition`의 각도는 실제 방위와 무관한 익명 handle 기반 가상 값입니다.
 
 ```json
 {

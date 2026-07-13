@@ -32,7 +32,7 @@ Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Comp
 - 안정적인 `profileHandle`, 멜로디 별칭, 취향 지문과 `GET /api/v1/profiles/{profileHandle}` 공개 프로필
 - 주변 세션과 무관한 프로필 팔로우 및 검증된 교환에서 상대 프로필 해석
 
-`current_locations`에는 세션당 최신 위치만 유지하며 90초 TTL 뒤 주변 조회에서 제외됩니다. `displayPosition`은 `nearbyHandle`에서 결정되는 추상 좌표로, 실제 위치와 방향을 표현하지 않습니다.
+`current_locations`에는 세션당 최신 위치만 유지하며 90초 TTL 뒤 주변 조회에서 제외됩니다. 주변 조회는 15m로 제한되고 정확한 거리 대신 5m·10m·15m 구간만 반환합니다. `displayPosition`의 각도는 `nearbyHandle`에서 결정되므로 실제 방향을 표현하지 않습니다.
 
 실시간 이벤트는 모두 아래 envelope를 사용하며, 채팅·리액션·음악 쓰기 이벤트는 DB commit 이후에만 발행합니다.
 

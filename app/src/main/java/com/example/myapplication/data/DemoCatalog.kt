@@ -3,7 +3,6 @@ package com.example.myapplication.data
 import com.example.myapplication.core.model.ChatMessage
 import com.example.myapplication.core.model.ChatPreview
 import com.example.myapplication.core.model.DeliveryState
-import com.example.myapplication.core.model.DisplayPosition
 import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.NearbyListener
@@ -13,6 +12,7 @@ import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.Proximity
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.Track
+import com.example.myapplication.core.model.abstractDisplayPosition
 
 object DemoCatalog {
     val blueNight = Track(
@@ -55,9 +55,9 @@ object DemoCatalog {
                 nearbyHandle = "nearby-mint-session",
                 displayAlias = "Mint",
                 colorHex = 0xFF25C76FL,
-                displayPosition = DisplayPosition(0.31f, 0.28f),
+                displayPosition = abstractDisplayPosition("nearby-mint-session", Proximity.WITHIN_5M),
                 matchScore = 93,
-                proximity = Proximity.VERY_CLOSE,
+                proximity = Proximity.WITHIN_5M,
                 isPlaying = true,
                 currentTrack = blueNight,
                 commonGenres = listOf("Indie", "R&B"),
@@ -68,9 +68,9 @@ object DemoCatalog {
                 nearbyHandle = "nearby-wave-session",
                 displayAlias = "Wave",
                 colorHex = 0xFF53D889L,
-                displayPosition = DisplayPosition(0.73f, 0.34f),
+                displayPosition = abstractDisplayPosition("nearby-wave-session", Proximity.WITHIN_10M),
                 matchScore = 81,
-                proximity = Proximity.CLOSE,
+                proximity = Proximity.WITHIN_10M,
                 isPlaying = true,
                 currentTrack = summerEnd,
                 commonGenres = listOf("R&B", "Pop")
@@ -79,9 +79,9 @@ object DemoCatalog {
                 nearbyHandle = "nearby-nova-session",
                 displayAlias = "Nova",
                 colorHex = 0xFF299F61L,
-                displayPosition = DisplayPosition(0.20f, 0.67f),
+                displayPosition = abstractDisplayPosition("nearby-nova-session", Proximity.WITHIN_15M),
                 matchScore = 70,
-                proximity = Proximity.AROUND,
+                proximity = Proximity.WITHIN_15M,
                 isPlaying = false,
                 currentTrack = indieRain,
                 commonGenres = listOf("Indie")
@@ -90,9 +90,9 @@ object DemoCatalog {
                 nearbyHandle = "nearby-echo-session",
                 displayAlias = "Echo",
                 colorHex = 0xFF79A85BL,
-                displayPosition = DisplayPosition(0.67f, 0.73f),
+                displayPosition = abstractDisplayPosition("nearby-echo-session", Proximity.WITHIN_10M),
                 matchScore = 76,
-                proximity = Proximity.CLOSE,
+                proximity = Proximity.WITHIN_10M,
                 isPlaying = true,
                 currentTrack = lateDrive,
                 commonGenres = listOf("City Pop", "R&B")

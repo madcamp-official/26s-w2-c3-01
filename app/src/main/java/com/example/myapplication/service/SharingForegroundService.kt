@@ -12,13 +12,16 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.Build
-import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import com.example.myapplication.MainActivity
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 
 /**
  * A user-started foreground service that keeps nearby sharing active.
@@ -29,45 +32,26 @@ import com.example.myapplication.MainActivity
  */
 class SharingForegroundService : Service() {
 
-    private lateinit var locationManager: LocationManager
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var notificationManager: NotificationManager
     private var isForeground = false
     private var isReceivingLocationUpdates = false
+    private var interactiveMode = true
+    private var locationRequestGeneration = 0
 
     private val preferences by lazy(LazyThreadSafetyMode.NONE) {
         getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     }
 
-    private val locationListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            preferences.edit()
-                .putLong(KEY_LAST_LOCATION_UPDATE_EPOCH_MS, System.currentTimeMillis())
-                .putString(KEY_LAST_LOCATION_ACCURACY_QUALITY, accuracyQuality(location))
-                .apply()
-            sendBroadcast(
-                Intent(ACTION_LOCATION_FIX)
-                    .setPackage(packageName)
-                    .putExtra(EXTRA_LATITUDE, location.latitude)
-                    .putExtra(EXTRA_LONGITUDE, location.longitude)
-                    .putExtra(
-                        EXTRA_ACCURACY_METERS,
-                        if (location.hasAccuracy()) location.accuracy else Float.NaN,
-                    )
-                    .putExtra(EXTRA_LOCATION_TIME_EPOCH_MS, location.time)
-            )
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            result.locations.forEach(::publishLocationIfUsable)
         }
-
-        override fun onProviderEnabled(provider: String) = Unit
-
-        override fun onProviderDisabled(provider: String) = Unit
-
-        @Deprecated("Deprecated by Android")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
     }
 
     override fun onCreate() {
         super.onCreate()
-        locationManager = getSystemService(LocationManager::class.java)
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
     }
@@ -77,6 +61,11 @@ class SharingForegroundService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+
+        val isProfileUpdate = intent?.action == ACTION_UPDATE_PROFILE
+        val nextInteractiveMode = intent?.getBooleanExtra(EXTRA_INTERACTIVE, interactiveMode) ?: interactiveMode
+        val profileChanged = interactiveMode != nextInteractiveMode
+        interactiveMode = nextInteractiveMode
 
         // A location foreground service cannot be promoted on Android 14+ without a currently
         // granted while-in-use location permission. The UI should request permission first and
@@ -93,19 +82,16 @@ class SharingForegroundService : Service() {
 
         preferences.edit().putBoolean(KEY_SHARING_ACTIVE, true).apply()
         publishSharingState(active = true)
-        requestLocationUpdatesIfNeeded()
+        if (isProfileUpdate && profileChanged) restartLocationUpdates() else requestLocationUpdatesIfNeeded()
         return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        locationRequestGeneration += 1
         if (isReceivingLocationUpdates) {
-            try {
-                locationManager.removeUpdates(locationListener)
-            } catch (_: RuntimeException) {
-                // The system location service or permission state may change during teardown.
-            }
+            runCatching { fusedLocationClient.removeLocationUpdates(locationCallback) }
             isReceivingLocationUpdates = false
         }
         preferences.edit().putBoolean(KEY_SHARING_ACTIVE, false).apply()
@@ -141,32 +127,53 @@ class SharingForegroundService : Service() {
     @SuppressLint("MissingPermission")
     private fun requestLocationUpdatesIfNeeded() {
         if (isReceivingLocationUpdates || !hasLocationPermission(this)) return
-
-        val availableProviders = try {
-            locationManager.allProviders.toSet()
-        } catch (_: RuntimeException) {
-            emptySet()
+        val profile = if (interactiveMode) NearbyLocationPolicy.INTERACTIVE else NearbyLocationPolicy.EFFICIENT
+        val request = LocationRequest.Builder(
+            Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+            profile.intervalMillis,
+        )
+            .setMinUpdateIntervalMillis(profile.minIntervalMillis)
+            .setMinUpdateDistanceMeters(profile.minDistanceMeters)
+            .setMaxUpdateAgeMillis(NearbyLocationPolicy.MAX_AGE_MILLIS)
+            .build()
+        try {
+            fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+                .addOnFailureListener { isReceivingLocationUpdates = false }
+            isReceivingLocationUpdates = true
+        } catch (_: SecurityException) {
+            isReceivingLocationUpdates = false
         }
+    }
 
-        var registeredAtLeastOnce = false
-        for (provider in LOCATION_PROVIDERS) {
-            if (provider !in availableProviders) continue
-            try {
-                locationManager.requestLocationUpdates(
-                    provider,
-                    MIN_UPDATE_TIME_MS,
-                    MIN_UPDATE_DISTANCE_METERS,
-                    locationListener,
-                    Looper.getMainLooper(),
-                )
-                registeredAtLeastOnce = true
-            } catch (_: SecurityException) {
-                // Permission can be revoked between the check and registration.
-            } catch (_: IllegalArgumentException) {
-                // The provider may disappear while the service is starting.
-            }
+    private fun restartLocationUpdates() {
+        if (!isReceivingLocationUpdates) {
+            requestLocationUpdatesIfNeeded()
+            return
         }
-        isReceivingLocationUpdates = registeredAtLeastOnce
+        val generation = ++locationRequestGeneration
+        fusedLocationClient.removeLocationUpdates(locationCallback).addOnCompleteListener {
+            if (generation != locationRequestGeneration) return@addOnCompleteListener
+            isReceivingLocationUpdates = false
+            requestLocationUpdatesIfNeeded()
+        }
+    }
+
+    private fun publishLocationIfUsable(location: Location) {
+        val accuracy = location.accuracy.takeIf { location.hasAccuracy() && it.isFinite() }
+        val now = System.currentTimeMillis()
+        if (!NearbyLocationPolicy.isUsable(location.time, accuracy, now)) return
+        preferences.edit()
+            .putLong(KEY_LAST_LOCATION_UPDATE_EPOCH_MS, now)
+            .putString(KEY_LAST_LOCATION_ACCURACY_QUALITY, accuracyQuality(location))
+            .apply()
+        sendBroadcast(
+            Intent(ACTION_LOCATION_FIX)
+                .setPackage(packageName)
+                .putExtra(EXTRA_LATITUDE, location.latitude)
+                .putExtra(EXTRA_LONGITUDE, location.longitude)
+                .putExtra(EXTRA_ACCURACY_METERS, accuracy ?: Float.NaN)
+                .putExtra(EXTRA_LOCATION_TIME_EPOCH_MS, location.time)
+        )
     }
 
     private fun accuracyQuality(location: Location): String {
@@ -279,17 +286,14 @@ class SharingForegroundService : Service() {
             "com.example.myapplication.service.action.START_SHARING"
         private const val ACTION_STOP =
             "com.example.myapplication.service.action.STOP_SHARING"
+        private const val ACTION_UPDATE_PROFILE =
+            "com.example.myapplication.service.action.UPDATE_LOCATION_PROFILE"
         private const val NOTIFICATION_CHANNEL_ID = "nearby_sharing"
         private const val NOTIFICATION_CHANNEL_NAME = "Nearby sharing"
         private const val NOTIFICATION_ID = 2101
         private const val CONTENT_REQUEST_CODE = 2101
         private const val STOP_REQUEST_CODE = 2102
-        private const val MIN_UPDATE_TIME_MS = 20_000L
-        private const val MIN_UPDATE_DISTANCE_METERS = 10f
-        private val LOCATION_PROVIDERS = listOf(
-            LocationManager.GPS_PROVIDER,
-            LocationManager.NETWORK_PROVIDER,
-        )
+        private const val EXTRA_INTERACTIVE = "interactive"
 
         /**
          * Starts sharing only when location permission is already granted. Call this directly from
@@ -299,6 +303,7 @@ class SharingForegroundService : Service() {
             if (!hasLocationPermission(context)) return false
             val intent = Intent(context, SharingForegroundService::class.java).apply {
                 action = ACTION_START
+                putExtra(EXTRA_INTERACTIVE, true)
             }
             return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -315,6 +320,17 @@ class SharingForegroundService : Service() {
         /** Stops sharing from an explicit UI action. */
         fun stop(context: Context): Boolean =
             context.stopService(Intent(context, SharingForegroundService::class.java))
+
+        fun setInteractive(context: Context, interactive: Boolean): Boolean {
+            if (!isSharingActive(context)) return false
+            return runCatching {
+                context.startService(Intent(context, SharingForegroundService::class.java).apply {
+                    action = ACTION_UPDATE_PROFILE
+                    putExtra(EXTRA_INTERACTIVE, interactive)
+                })
+                true
+            }.getOrDefault(false)
+        }
 
         fun hasLocationPermission(context: Context): Boolean =
             context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==

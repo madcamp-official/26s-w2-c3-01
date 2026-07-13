@@ -1,5 +1,6 @@
 package com.example.myapplication.ui.screens
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -65,6 +66,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,6 +88,7 @@ import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.NearbyLoadState
+import com.example.myapplication.core.model.NearbyRingFractions
 import com.example.myapplication.core.model.PopularTrack
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.SharingState
@@ -184,8 +188,8 @@ fun HomeScreen(
 }
 
 /**
- * Nearby discovery. [displayPosition] is a server-provided drawing coordinate only; it is never
- * converted to metres, bearings, or a physical map.
+ * Nearby discovery. [displayPosition] is a server-provided drawing coordinate: its radius carries
+ * only the 5 m, 10 m, or 15 m band while its angle never represents physical bearing.
  */
 @Composable
 fun NearbyScreen(
@@ -266,7 +270,7 @@ fun NearbyScreen(
         }
         item {
             Text(
-                text = "버블 배치는 탐색 신호를 위한 추상 표현이며 실제 거리·방향·이동 경로와 무관해요.",
+                text = "링은 5m·10m·15m 거리 구간이며 방향과 구간 안의 배치는 추상 표현이에요.",
                 modifier = Modifier.fillMaxWidth(),
                 color = MelodyBubbleColors.TextMuted,
                 style = MaterialTheme.typography.bodySmall,
@@ -647,11 +651,11 @@ private fun CompactRadar(
                 modifier = Modifier
                     .fillMaxSize()
                     .semantics {
-                        contentDescription = "추상 주변 레이더, 리스너 ${listeners.size}명. 실제 위치나 방향을 나타내지 않음"
+                        contentDescription = "15미터 이내 추상 주변 레이더, 리스너 ${listeners.size}명. 원은 5미터, 10미터, 15미터 구간이며 버블 방향은 실제 방향이 아님"
                     }
             ) {
                 val center = Offset(size.width * 0.5f, size.height * 0.5f)
-                listOf(0.22f, 0.39f, 0.56f).forEach { scale ->
+                NearbyRingFractions.forEach { scale ->
                     drawCircle(
                         color = MelodyBubbleColors.Border.copy(alpha = 0.82f),
                         radius = size.minDimension * scale,
@@ -687,11 +691,16 @@ private fun CompactRadar(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "실제 거리·방향을 숨긴 추상 분포",
+                    text = "정확한 거리·방향을 숨긴 15m 이내 추상 분포",
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "링 5m · 10m · 15m",
+                    color = MelodyBubbleColors.Primary,
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
             Row(
@@ -1117,11 +1126,11 @@ private fun AbstractNearbyMap(
                 modifier = Modifier
                     .fillMaxSize()
                     .semantics {
-                        contentDescription = "추상 근처 버블맵. 버블 위치는 실제 거리 또는 방향을 나타내지 않음"
+                        contentDescription = "15미터 이내 추상 근처 버블맵. 원은 5미터, 10미터, 15미터 구간이며 버블 방향은 실제 방향이 아님"
                     }
             ) {
                 val center = Offset(size.width / 2f, size.height / 2f)
-                listOf(0.17f, 0.30f, 0.43f).forEach { factor ->
+                NearbyRingFractions.forEach { factor ->
                     drawCircle(
                         color = MelodyBubbleColors.Border,
                         radius = size.minDimension * factor,
@@ -1156,22 +1165,35 @@ private fun AbstractNearbyMap(
             }
 
             listeners.forEach { listener ->
-                val selected = listener.nearbyHandle == selectedHandle
-                val musicMatchLevel = listener.musicMatchLevel(currentTrack)
-                val pointSize = if (musicMatchLevel == MusicMatchLevel.SONG) 22.dp else 16.dp
-                val labelWidth = 88.dp
-                val position = listener.displayPosition.safePosition()
-                ListenerMapBubble(
-                    listener = listener,
-                    selected = selected,
-                    musicMatchLevel = musicMatchLevel,
-                    pointSize = pointSize,
-                    modifier = Modifier.offset(
-                        x = (maxWidth - labelWidth) * position.x,
-                        y = (maxHeight - 54.dp) * position.y
-                    ),
-                    onClick = { onSelectListener(listener) }
-                )
+                key(listener.nearbyHandle) {
+                    val selected = listener.nearbyHandle == selectedHandle
+                    val musicMatchLevel = listener.musicMatchLevel(currentTrack)
+                    val pointSize = if (musicMatchLevel == MusicMatchLevel.SONG) 22.dp else 16.dp
+                    val labelWidth = 88.dp
+                    val position = listener.displayPosition.safePosition()
+                    val targetX = (maxWidth * position.x - labelWidth / 2)
+                        .coerceIn(0.dp, maxWidth - labelWidth)
+                    val targetY = (maxHeight * position.y - 19.dp)
+                        .coerceIn(0.dp, maxHeight - 54.dp)
+                    val animatedX by animateDpAsState(
+                        targetValue = targetX,
+                        label = "nearby-bubble-x",
+                    )
+                    val animatedY by animateDpAsState(
+                        targetValue = targetY,
+                        label = "nearby-bubble-y",
+                    )
+                    ListenerMapBubble(
+                        listener = listener,
+                        selected = selected,
+                        musicMatchLevel = musicMatchLevel,
+                        pointSize = pointSize,
+                        modifier = Modifier
+                            .offset(x = animatedX, y = animatedY)
+                            .width(labelWidth),
+                        onClick = { onSelectListener(listener) }
+                    )
+                }
             }
         }
     }

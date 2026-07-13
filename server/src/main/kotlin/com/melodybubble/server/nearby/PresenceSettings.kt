@@ -45,9 +45,6 @@ class PresenceSettingsController(
         if (discoverability !in DISCOVERABILITY_SCOPES || musicVisibility !in MUSIC_VISIBILITIES) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 공개 범위입니다.")
         }
-        if (request.discoveryRadiusMeters !in 50..2000) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "검색 반경은 50m부터 2000m까지 설정할 수 있습니다.")
-        }
         jdbc.update(
             """
             insert into user_privacy_settings(
@@ -66,7 +63,7 @@ class PresenceSettingsController(
             musicVisibility != "HIDDEN",
             discoverability,
             musicVisibility,
-            request.discoveryRadiusMeters,
+            NEARBY_RADIUS_METERS,
             request.allowReactions,
         )
         nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
@@ -80,7 +77,7 @@ class PresenceSettingsController(
         """.trimIndent(),
         { rs, _ -> PresenceSettings(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getBoolean(4)) },
         userId,
-    ).firstOrNull() ?: PresenceSettings("NEARBY", "TITLE_ARTIST", 300, true)
+    ).firstOrNull() ?: PresenceSettings("NEARBY", "TITLE_ARTIST", NEARBY_RADIUS_METERS, true)
 
     companion object {
         private val DISCOVERABILITY_SCOPES = setOf("NEARBY", "MUTUALS", "HIDDEN")

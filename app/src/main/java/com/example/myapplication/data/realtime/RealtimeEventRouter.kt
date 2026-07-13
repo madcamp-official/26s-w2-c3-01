@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.example.myapplication.data.remote.RemoteNearbySnapshot
 import java.util.Locale
 
 /** Converts the common server envelope into exhaustively handled app events. */
@@ -41,6 +42,11 @@ class RealtimeEventRouter(
             TYPE_NEARBY_MUSIC_UPDATED -> RealtimeEvent.NearbyMusicUpdated(
                 destination = destination,
                 envelope = envelope.withPayload(decode(envelope.payload, NearbyMusicUpdatedPayload::class.java)),
+            )
+
+            TYPE_NEARBY_SNAPSHOT -> RealtimeEvent.NearbySnapshot(
+                destination = destination,
+                envelope = envelope.withPayload(decode(envelope.payload, RemoteNearbySnapshot::class.java)),
             )
 
             TYPE_POPULAR_TRACKS_UPDATED -> RealtimeEvent.PopularTracksUpdated(
@@ -142,6 +148,7 @@ class RealtimeEventRouter(
         const val TYPE_CHAT_MESSAGE_READ = "CHAT_MESSAGE_READ"
         const val TYPE_CHAT_ROOM_UPDATED = "CHAT_ROOM_UPDATED"
         const val TYPE_NEARBY_REACTION_CREATED = "NEARBY_REACTION_CREATED"
+        const val TYPE_NEARBY_SNAPSHOT = "NEARBY_SNAPSHOT"
         const val TYPE_NEARBY_MUSIC_UPDATED = "NEARBY_MUSIC_UPDATED"
         const val TYPE_POPULAR_TRACKS_UPDATED = "POPULAR_TRACKS_UPDATED"
         const val TYPE_NOTIFICATION_CREATED = "NOTIFICATION_CREATED"

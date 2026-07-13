@@ -31,10 +31,23 @@ enum class NearbyLoadState {
     ERROR
 }
 
-enum class Proximity(val label: String) {
-    VERY_CLOSE("아주 가까움"),
-    CLOSE("가까움"),
-    AROUND("주변")
+enum class Proximity(
+    val label: String,
+    val outerRadiusFraction: Float,
+) {
+    WITHIN_5M("5m 안쪽", 0.143f),
+    WITHIN_10M("10m 안쪽", 0.286f),
+    WITHIN_15M("15m 안쪽", 0.429f);
+
+    companion object {
+        /** Accepts one release of the former broad-distance contract during rollout. */
+        fun fromWire(value: String?): Proximity = when (value?.trim()?.uppercase()) {
+            "WITHIN_5M", "VERY_CLOSE" -> WITHIN_5M
+            "WITHIN_10M", "CLOSE" -> WITHIN_10M
+            "WITHIN_15M", "AROUND" -> WITHIN_15M
+            else -> WITHIN_15M
+        }
+    }
 }
 
 enum class RelationshipStatus {
@@ -416,7 +429,7 @@ data class MelodyUiState(
     val selectedPublicProfile: PublicProfile? = null,
     val publicProfileLoading: Boolean = false,
     val publicProfileError: String? = null,
-    val discoveryRadiusMeters: Int = 300,
+    val discoveryRadiusMeters: Int = 15,
     val discoverabilityScope: String = "NEARBY",
     val musicVisibility: String = "TITLE_ARTIST",
     val nearbyLoadState: NearbyLoadState = NearbyLoadState.IDLE,

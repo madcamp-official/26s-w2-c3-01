@@ -44,6 +44,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.clickable
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -629,8 +632,33 @@ private fun MainShell(
     onOpenTrack: (Track) -> Unit,
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
+
+    DisposableEffect(lifecycleOwner, state.selectedTab, state.sharingState) {
+        fun updateLocationProfile(started: Boolean) {
+            val nearbyVisible = state.selectedTab == MainTab.HOME || state.selectedTab == MainTab.NEARBY
+            SharingForegroundService.setInteractive(
+                context,
+                state.sharingState in setOf(SharingState.STARTING, SharingState.ACTIVE) &&
+                    started && nearbyVisible,
+            )
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> updateLocationProfile(started = true)
+                Lifecycle.Event.ON_STOP -> updateLocationProfile(started = false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        updateLocationProfile(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            SharingForegroundService.setInteractive(context, interactive = false)
+        }
+    }
 
     Scaffold(
         containerColor = Ink,

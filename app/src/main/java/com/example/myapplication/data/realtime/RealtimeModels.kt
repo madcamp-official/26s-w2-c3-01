@@ -1,5 +1,6 @@
 package com.example.myapplication.data.realtime
 
+import com.example.myapplication.data.remote.RemoteNearbySnapshot
 import com.google.gson.JsonElement
 
 object RealtimeDestinations {
@@ -162,6 +163,14 @@ sealed interface RealtimeEvent {
     data class NearbyMusicUpdated(
         override val destination: String,
         val envelope: RealtimeEventEnvelope<NearbyMusicUpdatedPayload>,
+    ) : RealtimeEvent {
+        override val eventId: String = envelope.eventId
+        override val type: String = envelope.type
+    }
+
+    data class NearbySnapshot(
+        override val destination: String,
+        val envelope: RealtimeEventEnvelope<RemoteNearbySnapshot>,
     ) : RealtimeEvent {
         override val eventId: String = envelope.eventId
         override val type: String = envelope.type
