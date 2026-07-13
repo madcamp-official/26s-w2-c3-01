@@ -13,10 +13,12 @@ import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.core.model.MainTab
+import com.example.myapplication.core.model.MAX_NEARBY_RADIUS_METERS
 import com.example.myapplication.core.model.MelodyReducers
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.NearbyLoadState
+import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NotificationType
 import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.PopularTrack
@@ -80,7 +82,6 @@ import com.example.myapplication.offlineexchange.OfflineExchangeResult
 import com.example.myapplication.offlineexchange.OfflineExchangeSyncWorker
 import android.Manifest
 import android.content.pm.PackageManager
-import android.location.LocationManager
 import androidx.core.content.ContextCompat
 import androidx.room.withTransaction
 import com.google.android.gms.location.LocationServices
@@ -88,6 +89,7 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.gson.Gson
 import com.example.myapplication.service.SharingForegroundService
+import com.example.myapplication.service.NearbyLocationPolicy
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
@@ -106,6 +108,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
 
 private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 15_000L
+private const val PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS = 60_000L
 private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
 private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
@@ -226,6 +229,7 @@ class DemoMelodyRepository(
     private val clientSessionId = preferences.getString("client-session-id", null)
         ?: UUID.randomUUID().toString().also { preferences.edit().putString("client-session-id", it).apply() }
     private val nearbyApi = ApiClient.createNearbyApi(environment)
+    private val nearbyProximityStabilizer = NearbyProximityStabilizer()
     private val profileApi = ApiClient.createProfileApi(environment)
     private val socialApi = ApiClient.createSocialApi(environment)
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationContext)
@@ -399,6 +403,7 @@ class DemoMelodyRepository(
     override fun stopSharing() {
         sharingJob?.cancel()
         sharingJob = null
+        nearbyProximityStabilizer.clear()
         _state.update {
             it.copy(
                 sharingState = SharingState.STOPPED,
@@ -957,7 +962,10 @@ class DemoMelodyRepository(
     ) {
         _state.update {
             it.copy(
-                discoveryRadiusMeters = radiusMeters.coerceIn(50, 2000),
+                discoveryRadiusMeters = radiusMeters.coerceIn(
+                    MAX_NEARBY_RADIUS_METERS,
+                    MAX_NEARBY_RADIUS_METERS,
+                ),
                 discoverabilityScope = discoverabilityScope,
                 musicVisibility = musicVisibility,
                 profile = it.profile.copy(
@@ -1293,7 +1301,7 @@ class DemoMelodyRepository(
                     if (!isCurrentSession(accessToken)) return@onSuccess
                     _state.update {
                         it.copy(
-                            discoveryRadiusMeters = remote.discoveryRadiusMeters,
+                            discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
                             discoverabilityScope = remote.discoverabilityScope,
                             musicVisibility = remote.musicVisibility,
                             profile = it.profile.copy(
@@ -1416,7 +1424,7 @@ class DemoMelodyRepository(
                     PresenceSettingsUpdateRequest(
                         state.discoverabilityScope,
                         state.musicVisibility,
-                        state.discoveryRadiusMeters,
+                        MAX_NEARBY_RADIUS_METERS,
                         state.profile.allowReactions,
                     ),
                 )
@@ -1424,7 +1432,7 @@ class DemoMelodyRepository(
                 if (!isCurrentSession(token)) return@onSuccess
                 _state.update {
                     it.copy(
-                        discoveryRadiusMeters = remote.discoveryRadiusMeters,
+                        discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
                         discoverabilityScope = remote.discoverabilityScope,
                         musicVisibility = remote.musicVisibility,
                         feedbackMessage = "주변 공개 범위를 저장했어요",
@@ -1619,13 +1627,16 @@ class DemoMelodyRepository(
                 )
             )
             if (!isCurrentSession(token)) return@runCatching false
+            val stabilizedListeners = nearbyProximityStabilizer.stabilize(
+                _state.value.nearbyListeners,
+                snapshot.items.map { it.toDomain() },
+            )
             _state.update { current ->
-                val remoteListeners = snapshot.items.map { it.toDomain() }
                 val listeners = if (nearbyRealtimeVersion.get() == nearbyVersionAtRequest) {
-                    remoteListeners
+                    stabilizedListeners
                 } else {
                     val currentByHandle = current.nearbyListeners.associateBy { it.nearbyHandle }
-                    remoteListeners.map { remote ->
+                    stabilizedListeners.map { remote ->
                         currentByHandle[remote.nearbyHandle]?.let { latest ->
                             remote.copy(
                                 isPlaying = latest.isPlaying,
@@ -1639,7 +1650,7 @@ class DemoMelodyRepository(
                     connectionState = if (
                         realtimeClient.connectionState.value is RealtimeConnectionState.Connected
                     ) ConnectionState.LIVE else ConnectionState.RECONNECTING,
-                    discoveryRadiusMeters = snapshot.radiusMeters ?: current.discoveryRadiusMeters,
+                    discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
                     nearbyLoadState = if (snapshot.items.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
                     nearbyErrorMessage = null,
                     dataSourceLabel = "SERVER LIVE",
@@ -1678,22 +1689,7 @@ class DemoMelodyRepository(
         }
     }
 
-    private fun lastKnownLocation(): android.location.Location? {
-        val fine = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val coarse = ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!fine && !coarse) return null
-        val manager = applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val freshAfter = System.currentTimeMillis() - 2 * 60 * 1_000L
-        return manager.getProviders(true).mapNotNull { provider ->
-            runCatching { manager.getLastKnownLocation(provider) }.getOrNull()
-                ?.takeIf { it.time >= freshAfter }
-        }
-            .maxByOrNull { it.time }
-    }
-
     private suspend fun currentLocation(): android.location.Location? {
-        lastKnownLocation()?.let { return it }
-
         val fine = ContextCompat.checkSelfPermission(
             applicationContext,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -1704,13 +1700,26 @@ class DemoMelodyRepository(
         ) == PackageManager.PERMISSION_GRANTED
         if (!fine && !coarse) return null
 
+        val cached = runCatching { fusedLocationClient.lastLocation.await() }.getOrNull()
+        if (cached != null && cached.hasAccuracy() && cached.accuracy <= NearbyLocationPolicy.MAX_ACCURACY_METERS &&
+            System.currentTimeMillis() - cached.time in 0L..PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS
+        ) {
+            return cached
+        }
+
         val cancellation = CancellationTokenSource()
         return try {
             withTimeoutOrNull(CURRENT_LOCATION_TIMEOUT_MILLIS) {
                 fusedLocationClient.getCurrentLocation(
-                    if (fine) Priority.PRIORITY_HIGH_ACCURACY else Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    Priority.PRIORITY_BALANCED_POWER_ACCURACY,
                     cancellation.token,
                 ).await()
+            }?.takeIf { location ->
+                NearbyLocationPolicy.isUsable(
+                    observedAtMillis = location.time,
+                    accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
+                    nowMillis = System.currentTimeMillis(),
+                )
             }
         } catch (_: SecurityException) {
             null
@@ -1726,7 +1735,7 @@ class DemoMelodyRepository(
         colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
         displayPosition = com.example.myapplication.core.model.DisplayPosition(displayPosition.x, displayPosition.y),
         matchScore = matchScore,
-        proximity = runCatching { com.example.myapplication.core.model.Proximity.valueOf(proximity) }.getOrDefault(com.example.myapplication.core.model.Proximity.AROUND),
+        proximity = com.example.myapplication.core.model.Proximity.fromWire(proximity),
         isPlaying = track != null,
         currentTrack = track?.let { Track(id = "remote-$nearbyHandle", title = it.title, artist = it.artist, platform = "REMOTE") },
         commonGenres = emptyList(),
@@ -1805,7 +1814,9 @@ class DemoMelodyRepository(
         ) {
             chatRealtimeVersion.incrementAndGet()
         }
-        if (event is RealtimeEvent.NearbyMusicUpdated) nearbyRealtimeVersion.incrementAndGet()
+        if (event is RealtimeEvent.NearbyMusicUpdated || event is RealtimeEvent.NearbySnapshot) {
+            nearbyRealtimeVersion.incrementAndGet()
+        }
         if (event is RealtimeEvent.PopularTracksUpdated) popularRealtimeVersion.incrementAndGet()
         when (event) {
             is RealtimeEvent.ChatRoomCreated -> loadChatRooms()
@@ -1814,6 +1825,7 @@ class DemoMelodyRepository(
             is RealtimeEvent.ChatRoomUpdated -> applyChatRoomUpdated(event)
             is RealtimeEvent.NearbyReactionCreated -> applyNearbyReaction(event)
             is RealtimeEvent.NearbyMusicUpdated -> applyNearbyMusicUpdated(event)
+            is RealtimeEvent.NearbySnapshot -> applyNearbySnapshot(event)
             is RealtimeEvent.PopularTracksUpdated -> applyPopularTracksUpdated(event)
             is RealtimeEvent.NotificationCreated -> applyNotificationCreated(event)
             is RealtimeEvent.SubLoungeUpdated -> Unit
@@ -1977,6 +1989,23 @@ class DemoMelodyRepository(
         if (!found) refreshNearbySnapshot()
     }
 
+    private fun applyNearbySnapshot(event: RealtimeEvent.NearbySnapshot) {
+        val snapshot = event.envelope.payload
+        val listeners = nearbyProximityStabilizer.stabilize(
+            _state.value.nearbyListeners,
+            snapshot.items.map { it.toDomain() },
+        )
+        _state.update { current ->
+            current.copy(
+                nearbyListeners = listeners,
+                discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
+                nearbyLoadState = if (snapshot.items.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
+                nearbyErrorMessage = null,
+                snapshotSequence = current.snapshotSequence + 1,
+            )
+        }
+    }
+
     private fun applyPopularTracksUpdated(event: RealtimeEvent.PopularTracksUpdated) {
         val tracks = event.envelope.payload.tracks.mapNotNull { remote ->
             val title = remote.title?.trim()?.takeIf(String::isNotEmpty) ?: return@mapNotNull null
@@ -2032,13 +2061,16 @@ class DemoMelodyRepository(
             runCatching { nearbyApi.snapshot("Bearer $token") }
                 .onSuccess { snapshot ->
                     if (!isCurrentSession(token)) return@onSuccess
+                    val stabilizedListeners = nearbyProximityStabilizer.stabilize(
+                        _state.value.nearbyListeners,
+                        snapshot.items.map { it.toDomain() },
+                    )
                     _state.update { current ->
-                        val remoteListeners = snapshot.items.map { it.toDomain() }
                         val listeners = if (nearbyRealtimeVersion.get() == versionAtRequest) {
-                            remoteListeners
+                            stabilizedListeners
                         } else {
                             val currentByHandle = current.nearbyListeners.associateBy { it.nearbyHandle }
-                            remoteListeners.map { remote ->
+                            stabilizedListeners.map { remote ->
                                 currentByHandle[remote.nearbyHandle]?.let { latest ->
                                     remote.copy(
                                         isPlaying = latest.isPlaying,
@@ -2049,8 +2081,7 @@ class DemoMelodyRepository(
                         }
                         current.copy(
                             nearbyListeners = listeners,
-                            discoveryRadiusMeters = snapshot.radiusMeters
-                                ?: current.discoveryRadiusMeters,
+                            discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
                             nearbyLoadState = if (snapshot.items.isEmpty()) {
                                 NearbyLoadState.EMPTY
                             } else NearbyLoadState.READY,

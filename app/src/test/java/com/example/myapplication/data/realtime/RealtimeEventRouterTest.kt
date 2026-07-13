@@ -61,6 +61,42 @@ class RealtimeEventRouterTest {
     }
 
     @Test
+    fun routesAuthoritativeNearbySnapshotWithoutExactDistance() {
+        val event = router.route(
+            RealtimeDestinations.NEARBY,
+            """{
+              "eventId":"nearby-snapshot-1",
+              "type":"NEARBY_SNAPSHOT",
+              "version":1,
+              "timestamp":"2026-07-13T12:00:00Z",
+              "payload":{
+                "generatedAt":"2026-07-13T12:00:00Z",
+                "radiusMeters":15,
+                "items":[{
+                  "nearbyHandle":"n_opaque",
+                  "profileHandle":"p_public",
+                  "displayAlias":"Mint",
+                  "profileColor":"#25C76F",
+                  "displayPosition":{"x":0.6,"y":0.5},
+                  "matchScore":80,
+                  "proximity":"WITHIN_5M",
+                  "relationship":"NONE",
+                  "canReact":true,
+                  "track":null,
+                  "melodyIdUrl":null,
+                  "melodyIdStartSeconds":null
+                }]
+              }
+            }""".trimIndent(),
+        )
+
+        assertTrue(event is RealtimeEvent.NearbySnapshot)
+        val snapshot = (event as RealtimeEvent.NearbySnapshot).envelope.payload
+        assertEquals(15, snapshot.radiusMeters)
+        assertEquals("WITHIN_5M", snapshot.items.single().proximity)
+    }
+
+    @Test
     fun malformedEnvelopeBecomesParsingError() {
         val event = router.route(RealtimeDestinations.CHAT, "{\"type\":\"CHAT_MESSAGE_CREATED\"}")
         assertTrue(event is RealtimeEvent.ParsingError)

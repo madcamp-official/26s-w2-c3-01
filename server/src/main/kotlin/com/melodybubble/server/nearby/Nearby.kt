@@ -24,6 +24,46 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
+
+internal const val NEARBY_RADIUS_METERS = 15
+
+internal enum class ProximityBand {
+    WITHIN_5M,
+    WITHIN_10M,
+    WITHIN_15M,
+}
+
+internal fun proximityBand(distanceMeters: Double): ProximityBand? = when {
+    distanceMeters < 0.0 || !distanceMeters.isFinite() -> null
+    distanceMeters <= 5.0 -> ProximityBand.WITHIN_5M
+    distanceMeters <= 10.0 -> ProximityBand.WITHIN_10M
+    distanceMeters <= NEARBY_RADIUS_METERS.toDouble() -> ProximityBand.WITHIN_15M
+    else -> null
+}
+
+/**
+ * Produces a stable drawing coordinate whose angle is unrelated to physical bearing.
+ * The radial annulus communicates only the 5 m, 10 m, or 15 m proximity band.
+ */
+internal fun abstractPosition(handle: String, band: ProximityBand): AbstractPosition {
+    val angle = stableHash(handle, 360) * PI / 180.0
+    val jitter = stableHash("radius:$handle", 1_000) / 1_000f
+    val radius = when (band) {
+        ProximityBand.WITHIN_5M -> 0.05f + jitter * 0.08f
+        ProximityBand.WITHIN_10M -> 0.16f + jitter * 0.11f
+        ProximityBand.WITHIN_15M -> 0.30f + jitter * 0.11f
+    }
+    return AbstractPosition(
+        x = (0.5 + cos(angle) * radius).toFloat(),
+        y = (0.5 + sin(angle) * radius).toFloat(),
+    )
+}
+
+private fun stableHash(value: String, modulo: Int): Int =
+    (value.hashCode().toUInt().toLong() % modulo).toInt()
 
 data class TrackSummary(val title: String, val artist: String, val albumArtUrl: String? = null)
 data class AbstractPosition(val x: Float, val y: Float)
@@ -88,10 +128,12 @@ class NearbyService(
     private val realtime: RealtimePublisher,
     private val media: ProfileMediaStorage,
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
-    @Value("\${app.nearby.max-radius-meters:2000}") private val maxRadiusMeters: Int,
+    @Value("\${app.nearby.max-radius-meters:15}") private val maxRadiusMeters: Int,
 ) {
-    fun snapshot(userId: UUID): NearbySnapshot {
-        rateLimiter.enforce(userId, "NEARBY_SNAPSHOT", 60, Duration.ofMinutes(1))
+    fun snapshot(userId: UUID): NearbySnapshot = snapshot(userId, enforceRateLimit = true)
+
+    private fun snapshot(userId: UUID, enforceRateLimit: Boolean): NearbySnapshot {
+        if (enforceRateLimit) rateLimiter.enforce(userId, "NEARBY_SNAPSHOT", 60, Duration.ofMinutes(1))
         val radius = discoveryRadius(userId)
         val sql = """
           WITH my_location AS (
@@ -170,14 +212,16 @@ class NearbyService(
         }.toTypedArray()
         val items = jdbc.query(sql, { rs, _ ->
             val handle = rs.getString("nearby_handle")
+            val band = proximityBand(rs.getDouble("distance_meters").coerceAtMost(radius.toDouble()))
+                ?: ProximityBand.WITHIN_15M
             NearbyBubble(
                 nearbyHandle = handle,
                 profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
                 profileColor = rs.getString("profile_color"),
-                displayPosition = position(handle),
+                displayPosition = abstractPosition(handle, band),
                 matchScore = 65 + stable(handle, 31),
-                proximity = proximity(rs.getDouble("distance_meters")),
+                proximity = band.name,
                 relationship = rs.getString("relationship"),
                 canReact = rs.getBoolean("allow_reactions"),
                 track = rs.getString("track_title")?.let {
@@ -195,6 +239,7 @@ class NearbyService(
     fun updateLocation(userId: UUID, update: LocationUpdate) {
         rateLimiter.enforce(userId, "PRESENCE_LOCATION", 30, Duration.ofMinutes(1))
         validateLocation(update)
+        val previousViewers = nearbyViewerIds(userId)
         val expiresAt = Timestamp.from(Instant.now().plusSeconds(presenceTtlSeconds.coerceIn(30, 300)))
         val session = jdbc.query(
             """
@@ -223,6 +268,7 @@ class NearbyService(
             update.accuracyMeters,
             expiresAt,
         )
+        publishNearbySnapshotsAfterCommit(previousViewers + nearbyViewerIds(userId))
     }
 
     @Transactional
@@ -334,8 +380,69 @@ class NearbyService(
     }
 
     fun stop(userId: UUID, clientSessionId: String) {
+        val previousViewers = nearbyViewerIds(userId)
         jdbc.update("delete from presence_sessions where user_id=? and client_session_id=?", userId, clientSessionId.take(128))
+        publishNearbySnapshotsAfterCommit(previousViewers)
     }
+
+    private fun publishNearbySnapshotsAfterCommit(viewerIds: Set<UUID>) {
+        viewerIds.forEach { viewerId ->
+            realtime.toUserAfterCommit(
+                viewerId,
+                RealtimeQueues.NEARBY,
+                RealtimeEventTypes.NEARBY_SNAPSHOT,
+                snapshot(viewerId, enforceRateLimit = false),
+            )
+        }
+    }
+
+    private fun nearbyViewerIds(sourceUserId: UUID): Set<UUID> = jdbc.query(
+        """
+        with source_locations as (
+          select location.point
+          from presence_sessions session
+          join current_locations location on location.session_id=session.id
+          where session.user_id=? and session.expires_at>now() and location.expires_at>now()
+        )
+        select distinct viewer_session.user_id
+        from source_locations source
+        join current_locations viewer_location
+          on viewer_location.expires_at>now()
+         and ST_DWithin(
+           source.point::geography,
+           viewer_location.point::geography,
+           ?
+         )
+        join presence_sessions viewer_session
+          on viewer_session.id=viewer_location.session_id
+         and viewer_session.expires_at>now()
+         and viewer_session.user_id<>?
+        join user_privacy_settings source_privacy on source_privacy.user_id=?
+        where source_privacy.discoverable=true
+          and source_privacy.discoverability_scope<>'HIDDEN'
+          and (
+            source_privacy.discoverability_scope='NEARBY' or (
+              source_privacy.discoverability_scope='MUTUALS'
+              and exists(select 1 from user_follows f where f.follower_id=viewer_session.user_id and f.followed_id=?)
+              and exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=viewer_session.user_id)
+            )
+          )
+          and not exists(
+            select 1 from user_blocks block
+            where (block.blocker_id=? and block.blocked_id=viewer_session.user_id)
+               or (block.blocker_id=viewer_session.user_id and block.blocked_id=?)
+          )
+        """.trimIndent(),
+        { rs, _ -> UUID.fromString(rs.getString(1)) },
+        sourceUserId,
+        NEARBY_RADIUS_METERS,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+    ).toSet()
 
     private fun currentMusic(userId: UUID): CurrentMusic? = jdbc.query(
         """
@@ -390,7 +497,7 @@ class NearbyService(
         where ST_DWithin(
             source.point::geography,
             recipient_location.point::geography,
-            recipient_privacy.discovery_radius_meters
+            least(recipient_privacy.discovery_radius_meters, 15)
           )
           and source_privacy.discoverable=true
           and source_privacy.share_music=true
@@ -515,10 +622,10 @@ class NearbyService(
     }
 
     private fun discoveryRadius(userId: UUID): Int = (jdbc.queryForObject(
-        "select coalesce(discovery_radius_meters,300) from user_privacy_settings where user_id=?",
+        "select coalesce(discovery_radius_meters,15) from user_privacy_settings where user_id=?",
         Int::class.java,
         userId,
-    ) ?: 300).coerceIn(50, maxRadiusMeters.coerceAtLeast(50))
+    ) ?: NEARBY_RADIUS_METERS).coerceIn(1, minOf(NEARBY_RADIUS_METERS, maxRadiusMeters.coerceAtLeast(1)))
 
     private fun validateLocation(update: LocationUpdate) {
         if (update.requestId.length !in 1..128 || update.clientSessionId.length !in 8..128) {
@@ -536,16 +643,7 @@ class NearbyService(
         }
     }
 
-    private fun proximity(distance: Double) = when {
-        distance < 45 -> "VERY_CLOSE"
-        distance < 130 -> "CLOSE"
-        else -> "AROUND"
-    }
     private fun stable(value: String, modulo: Int) = (value.hashCode().toUInt().toLong() % modulo).toInt()
-    private fun position(handle: String) = AbstractPosition(
-        (stable(handle, 73) + 14) / 100f,
-        (stable(handle.reversed(), 73) + 14) / 100f,
-    )
 }
 
 @RestController

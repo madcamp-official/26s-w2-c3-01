@@ -220,7 +220,10 @@ class NearbyReactionService(
                   and ST_DWithin(
                     recipient_location.point::geography,
                     sender_location.point::geography,
-                    (select discovery_radius_meters from user_privacy_settings where user_id=?)
+                    least(
+                      (select discovery_radius_meters from user_privacy_settings where user_id=?),
+                      15
+                    )
                   )
               )
             """.trimIndent(),

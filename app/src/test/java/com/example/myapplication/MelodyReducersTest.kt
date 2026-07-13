@@ -102,7 +102,7 @@ class MelodyReducersTest {
         colorHex = 0xFF25C76FL,
         displayPosition = DisplayPosition(0.3f, 0.4f),
         matchScore = score,
-        proximity = Proximity.CLOSE,
+        proximity = Proximity.WITHIN_10M,
         isPlaying = false,
         currentTrack = null,
         commonGenres = emptyList()
