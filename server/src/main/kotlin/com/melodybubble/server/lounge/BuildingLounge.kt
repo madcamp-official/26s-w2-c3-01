@@ -160,7 +160,35 @@ class BuildingLoungeService(
     ): UUID {
         val normalizedName = wifiName.trim().take(80).ifBlank { "Wi-Fi" }
         val buildingName = "$normalizedName 라운지"
-        val placeId = "wifi-$wifiFingerprint"
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext(?))", { _, _ -> Unit }, wifiFingerprint)
+        val existing = jdbc.query(
+            """
+            SELECT bl.id
+            FROM lounge_buildings building
+            JOIN building_lounges bl ON bl.building_id=building.id AND bl.active=true
+            WHERE building.active=true AND building.category='WIFI'
+              AND building.google_place_id LIKE ?
+              AND ST_DWithin(
+                building.point::geography,
+                ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography,
+                ?
+              )
+            ORDER BY ST_DistanceSphere(
+              building.point, ST_SetSRID(ST_MakePoint(?, ?), 4326)
+            )
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ -> UUID.fromString(rs.getString("id")) },
+            "wifi-$wifiFingerprint-%",
+            longitude,
+            latitude,
+            WIFI_LOCATION_CLUSTER_METERS,
+            longitude,
+            latitude,
+        ).firstOrNull()
+        if (existing != null) return existing
+
+        val placeId = "wifi-$wifiFingerprint-${UUID.randomUUID()}"
         val buildingId = jdbc.query(
             """
             INSERT INTO lounge_buildings(name,address,google_place_id,point,radius_m,category,active)
@@ -706,7 +734,8 @@ class BuildingLoungeService(
 
     companion object {
         private val WIFI_FINGERPRINT = Regex("[0-9a-f]{64}")
-        private const val WIFI_LOUNGE_RADIUS_METERS = 150
+        private const val WIFI_LOUNGE_RADIUS_METERS = 300
+        private const val WIFI_LOCATION_CLUSTER_METERS = 300
         private const val WIFI_DISCOVERY_METERS = 1_500
     }
 }

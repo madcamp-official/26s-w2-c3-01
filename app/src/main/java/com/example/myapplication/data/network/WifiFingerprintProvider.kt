@@ -7,7 +7,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import java.security.MessageDigest
 
-/** Returns a one-way identifier for the currently connected access point. */
+/** Returns the current SSID and a one-way identifier shared by that SSID. */
 data class WifiIdentity(val displayName: String, val fingerprint: String)
 
 object WifiFingerprintProvider {
@@ -23,21 +23,16 @@ object WifiFingerprintProvider {
                     .connectionInfo
             }
         }.getOrNull() ?: return null
-        val bssid = wifiInfo.bssid?.lowercase()?.takeUnless {
-            it == "02:00:00:00:00:00" || !BSSID.matches(it)
-        } ?: return null
         val displayName = wifiInfo.ssid
             ?.removeSurrounding("\"")
             ?.trim()
             ?.takeUnless { it.isBlank() || it.equals("<unknown ssid>", ignoreCase = true) }
             ?.take(80)
-            ?: "Wi-Fi 라운지"
+            ?: return null
 
         val fingerprint = MessageDigest.getInstance("SHA-256")
-            .digest(bssid.toByteArray(Charsets.UTF_8))
+            .digest(displayName.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
         return WifiIdentity(displayName, fingerprint)
     }
-
-    private val BSSID = Regex("(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
 }
