@@ -289,7 +289,16 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
-    fun selectNearby(handle: String?) = repository.selectNearby(handle)
+    fun selectNearby(handle: String?) {
+        repository.selectNearby(handle)
+        if (handle == null) return
+        repository.state.value.selectedNearby?.melodyIdUrl?.let { url ->
+            lyriaClipPlayer.loadUrl(url)
+            lyriaClipPlayer.playSelection(
+                repository.state.value.selectedNearby?.melodyIdStartSeconds ?: 0f
+            )
+        }
+    }
     fun openChat(roomId: String) = repository.openChat(roomId)
     fun closeChat(roomId: String) = repository.closeChat(roomId)
     fun startSharing() = repository.startSharing()
@@ -379,25 +388,31 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun playLyriaSong() = lyriaClipPlayer.playFull()
     fun playLyriaSelection(startSeconds: Float) = lyriaClipPlayer.playSelection(startSeconds)
-    fun saveLyriaAsProfileMusic() {
+    fun saveLyriaAsProfileMusic(startSeconds: Float) {
         val song = (_lyriaGenerationState.value as? LyriaGenerationState.Success)?.song ?: return
         val candidateKey = song.candidateKey ?: run {
             _lyriaGenerationState.value = LyriaGenerationState.Error("저장할 음악 정보를 찾지 못했어요.")
             return
         }
-        repository.setProfileMusic(candidateKey, song.description)
+        lyriaClipPlayer.stop()
+        repository.setProfileMusic(candidateKey, song.description, startSeconds.coerceIn(0f, 25f))
     }
 
     fun playProfileMusic() {
         val url = repository.state.value.profile.profileMusicUrl ?: return
         lyriaClipPlayer.loadUrl(url)
-        lyriaClipPlayer.playFull()
+        lyriaClipPlayer.playSelection(repository.state.value.profile.profileMusicStartSeconds ?: 0f)
     }
 
     fun deleteProfileMusic() = repository.deleteProfileMusic()
     fun resetLyriaSong() {
         lyriaClipPlayer.stop()
         _lyriaGenerationState.value = LyriaGenerationState.Idle
+    }
+
+    fun stopMelodyAudio() {
+        lyriaClipPlayer.stop()
+        melodyAliasPreviewPlayer.stop()
     }
 
     fun refreshBuildingLounges(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {

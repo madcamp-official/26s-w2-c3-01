@@ -93,6 +93,8 @@ data class NearbyListener(
     val commonGenres: List<String>,
     val relationship: RelationshipStatus = RelationshipStatus.NONE,
     val canReact: Boolean = true,
+    val melodyIdUrl: String? = null,
+    val melodyIdStartSeconds: Float? = null,
     val isNew: Boolean = false
 )
 
@@ -167,7 +169,8 @@ data class ProfileSettings(
     val allowReactions: Boolean,
     val offlineExchangeEnabled: Boolean,
     val profileMusicUrl: String? = null,
-    val profileMusicDescription: String? = null
+    val profileMusicDescription: String? = null,
+    val profileMusicStartSeconds: Float? = null
 )
 
 data class MelodyAliasCandidate(

@@ -859,7 +859,7 @@ fun MelodyAliasScreen(
     onGenerate: (Map<String, Int>, String, List<String>, Int, Int) -> Unit,
     onPlayFull: () -> Unit,
     onPlaySelection: (Float) -> Unit,
-    onSaveProfile: () -> Unit,
+    onSaveProfile: (Float) -> Unit,
     onReset: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -961,8 +961,8 @@ fun MelodyAliasScreen(
                         Spacer(Modifier.height(10.dp))
                         OutlinedButton(onClick = onPlayFull, modifier = Modifier.fillMaxWidth()) { Text("전체 30초 듣기") }
                         Spacer(Modifier.height(8.dp))
-                        Button(onClick = onSaveProfile, enabled = generationState.song.candidateKey != null, modifier = Modifier.fillMaxWidth()) {
-                            Text("프로필 음악으로 설정")
+                        Button(onClick = { onSaveProfile(clipStart) }, enabled = generationState.song.candidateKey != null, modifier = Modifier.fillMaxWidth()) {
+                            Text("선택한 5초를 Melody ID로 저장")
                         }
                     }
                 }

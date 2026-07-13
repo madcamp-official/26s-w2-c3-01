@@ -14,6 +14,7 @@ data class RemoteProfile(
     val avatarDataUrl: String?,
     val profileMusicUrl: String?,
     val profileMusicDescription: String?,
+    val profileMusicStartSeconds: Float?,
     val genres: List<String>?,
     val moods: List<String>?,
     val discoverable: Boolean,
@@ -28,7 +29,11 @@ data class ProfileUpdateRequest(
     val moods: List<String>,
 )
 data class PrivacyUpdateRequest(val discoverable: Boolean, val shareMusic: Boolean)
-data class ProfileMusicUpdateRequest(val candidateKey: String, val description: String?)
+data class ProfileMusicUpdateRequest(
+    val candidateKey: String,
+    val description: String?,
+    val startSeconds: Float,
+)
 
 interface ProfileApi {
     @GET("api/v1/me") suspend fun me(@Header("Authorization") authorization: String): RemoteProfile

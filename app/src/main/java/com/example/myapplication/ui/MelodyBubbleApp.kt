@@ -212,6 +212,9 @@ fun MelodyBubbleApp(
                 if (listener == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
+                    DisposableEffect(listener.nearbyHandle) {
+                        onDispose { viewModel.stopMelodyAudio() }
+                    }
                     var reactionSheetVisible by rememberSaveable { mutableStateOf(false) }
                     UserDetailScreen(
                         listener = listener,
@@ -302,6 +305,9 @@ fun MelodyBubbleApp(
             }
             composable(Route.MELODY_ALIAS) {
                 val lyriaState by viewModel.lyriaGenerationState.collectAsState()
+                DisposableEffect(Unit) {
+                    onDispose { viewModel.stopMelodyAudio() }
+                }
                 MelodyAliasScreen(
                     onBack = { navController.popBackStack() },
                     generationState = lyriaState,

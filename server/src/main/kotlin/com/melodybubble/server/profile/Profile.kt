@@ -21,6 +21,7 @@ data class ProfileResponse(
     val avatarDataUrl: String?,
     val profileMusicUrl: String?,
     val profileMusicDescription: String?,
+    val profileMusicStartSeconds: Float?,
     val profileMusicUpdatedAt: Instant?,
     val genres: List<String>,
     val moods: List<String>,
@@ -36,7 +37,11 @@ data class ProfileUpdate(
     val moods: List<String> = emptyList(),
 )
 data class PrivacyUpdate(val discoverable: Boolean, val shareMusic: Boolean)
-data class ProfileMusicUpdate(val candidateKey: String, val description: String? = null)
+data class ProfileMusicUpdate(
+    val candidateKey: String,
+    val description: String? = null,
+    val startSeconds: Float,
+)
 
 @RestController
 @RequestMapping("/api/v1/me")
@@ -105,11 +110,13 @@ class ProfileController(
             "select profile_music_object_key from users where id=?",
             String::class.java, userId,
         )
+        require(request.startSeconds in 0f..25f) { "Melody ID start must be between 0 and 25 seconds" }
         val stored = media.promoteCandidate(userId, request.candidateKey)
         jdbc.update(
             """update users set profile_music_object_key=?,profile_music_mime_type=?,
-                profile_music_description=?,profile_music_updated_at=now(),updated_at=now() where id=?""",
-            stored.key, stored.mimeType, request.description?.trim()?.take(500), userId,
+                profile_music_description=?,profile_music_start_seconds=?,
+                profile_music_updated_at=now(),updated_at=now() where id=?""",
+            stored.key, stored.mimeType, request.description?.trim()?.take(500), request.startSeconds, userId,
         )
         if (previous != stored.key) media.delete(previous)
         return load(userId)
@@ -124,7 +131,8 @@ class ProfileController(
         )
         jdbc.update(
             """update users set profile_music_object_key=null,profile_music_mime_type=null,
-                profile_music_description=null,profile_music_updated_at=null,updated_at=now() where id=?""",
+                profile_music_description=null,profile_music_start_seconds=null,
+                profile_music_updated_at=null,updated_at=now() where id=?""",
             userId,
         )
         media.delete(previous)
@@ -133,16 +141,22 @@ class ProfileController(
 
     private fun load(userId: UUID): ProfileResponse = jdbc.query("""select u.display_name,u.profile_color,u.bio,
         u.avatar_data_url,u.avatar_object_key,u.preferred_genres,u.mood_tags,
-        u.profile_music_object_key,u.profile_music_description,u.profile_music_updated_at,
+        u.profile_music_object_key,u.profile_music_description,u.profile_music_start_seconds,u.profile_music_updated_at,
         coalesce(p.discoverable,true) discoverable,coalesce(p.share_music,true) share_music
         from users u left join user_privacy_settings p on p.user_id=u.id where u.id=?""", { rs, _ ->
         ProfileResponse(
-            rs.getString(1), rs.getString(2), rs.getString(3),
-            media.signedUrl(rs.getString(5)) ?: rs.getString(4),
-            media.signedUrl(rs.getString(8)), rs.getString(9), rs.getTimestamp(10)?.toInstant(),
-            rs.getString(6).orEmpty().split(',').filter(String::isNotBlank),
-            rs.getString(7).orEmpty().split(',').filter(String::isNotBlank),
-            rs.getBoolean(11), rs.getBoolean(12),
+            displayName = rs.getString(1),
+            profileColor = rs.getString(2),
+            bio = rs.getString(3),
+            avatarDataUrl = media.signedUrl(rs.getString(5)) ?: rs.getString(4),
+            profileMusicUrl = media.signedUrl(rs.getString(8)),
+            profileMusicDescription = rs.getString(9),
+            profileMusicStartSeconds = rs.getObject(10, Float::class.java),
+            profileMusicUpdatedAt = rs.getTimestamp(11)?.toInstant(),
+            genres = rs.getString(6).orEmpty().split(',').filter(String::isNotBlank),
+            moods = rs.getString(7).orEmpty().split(',').filter(String::isNotBlank),
+            discoverable = rs.getBoolean(12),
+            shareMusic = rs.getBoolean(13),
         )
     }, userId).first()
 }
