@@ -53,6 +53,7 @@ import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.SessionMode
+import com.example.myapplication.core.model.Track
 import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.service.NowPlayingNotificationListenerService
@@ -118,6 +119,13 @@ fun MelodyBubbleApp(
     fun requestNowPlayingAccessIfNeeded() {
         if (!NowPlayingNotificationListenerService.isEnabled(context)) {
             context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+    }
+
+    fun openTrackOnDevice(track: Track) {
+        val externalUrl = track.externalUrl?.takeIf { it.startsWith("https://") } ?: return
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl)))
         }
     }
 
@@ -272,6 +280,7 @@ fun MelodyBubbleApp(
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
                     onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
                     onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) },
+                    onOpenTrack = ::openTrackOnDevice,
                 )
             }
             composable(Route.USER_DETAIL) {
@@ -287,17 +296,6 @@ fun MelodyBubbleApp(
                         listener = listener,
                         reactionSheetVisible = reactionSheetVisible,
                         onBack = { navController.popBackStack() },
-                        onOpenTrack = { track ->
-                            val externalUrl = track.externalUrl
-                                ?.takeIf { it.startsWith("https://") }
-                            if (externalUrl != null) {
-                                runCatching {
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl))
-                                    )
-                                }
-                            }
-                        },
                         onShowReactionSheet = { reactionSheetVisible = true },
                         onDismissReactionSheet = { reactionSheetVisible = false },
                         onReact = { selected, label -> viewModel.react(selected.nearbyHandle, label) },
@@ -398,13 +396,19 @@ fun MelodyBubbleApp(
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
                     LaunchedEffect(profileHandle) { viewModel.loadPublicProfile(profileHandle) }
-                    LaunchedEffect(profileHandle, state.selectedPublicProfile?.nowPlaying) {
-                        state.selectedPublicProfile?.nowPlaying?.takeIf { it.isPlaying }?.let {
-                            viewModel.playMusicPreview(it.title, it.artist, artworkUrl = it.artworkUrl)
-                        }
+                    LaunchedEffect(
+                        profileHandle,
+                        state.selectedPublicProfile?.profileHandle,
+                        state.selectedPublicProfile?.nowPlaying?.title,
+                        state.selectedPublicProfile?.nowPlaying?.artist,
+                    ) {
+                        state.selectedPublicProfile
+                            ?.takeIf { it.profileHandle == profileHandle }
+                            ?.let(viewModel::autoPlayPublicProfileNowPlaying)
                     }
                     DisposableEffect(profileHandle) {
                         onDispose {
+                            viewModel.stopMelodyAudio()
                             viewModel.stopMusicPreview()
                             viewModel.clearPublicProfile()
                         }
@@ -444,9 +448,18 @@ fun MelodyBubbleApp(
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
                     LaunchedEffect(exchangeId) { viewModel.loadExchangeProfile(exchangeId) }
+                    LaunchedEffect(
+                        exchangeId,
+                        state.selectedPublicProfile?.profileHandle,
+                        state.selectedPublicProfile?.nowPlaying?.title,
+                        state.selectedPublicProfile?.nowPlaying?.artist,
+                    ) {
+                        state.selectedPublicProfile?.let(viewModel::autoPlayPublicProfileNowPlaying)
+                    }
                     DisposableEffect(exchangeId) {
                         onDispose {
                             viewModel.stopMusicPreview()
+                            viewModel.stopMelodyAudio()
                             viewModel.clearPublicProfile()
                         }
                     }
@@ -613,6 +626,7 @@ private fun MainShell(
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
     onOpenOfflineExchange: () -> Unit,
+    onOpenTrack: (Track) -> Unit,
 ) {
     val context = LocalContext.current
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
@@ -641,6 +655,7 @@ private fun MainShell(
                 onOpenNearby = { viewModel.selectTab(MainTab.NEARBY) },
                 onOpenNotifications = onOpenNotifications,
                 onSelectListener = { onOpenUser(it.nearbyHandle) },
+                onOpenTrack = onOpenTrack
             )
             MainTab.NEARBY -> if (state.sessionMode == SessionMode.OFFLINE) {
                 OfflineServerFeatureScreen("온라인 주변 사용자", onOpenOfflineExchange, contentModifier)
@@ -657,6 +672,7 @@ private fun MainShell(
                     it.currentTrack?.let { track -> viewModel.playMusicPreview(track.title, track.artist) }
                 },
                 onOpenListenerDetail = { onOpenUser(it.nearbyHandle) },
+                onOpenTrack = onOpenTrack,
                 onReact = { listener, label -> viewModel.react(listener.nearbyHandle, label) },
                 onFollow = { viewModel.follow(it.nearbyHandle) },
                 onPlayPreview = { viewModel.playMusicPreview(it.title, it.artist) },

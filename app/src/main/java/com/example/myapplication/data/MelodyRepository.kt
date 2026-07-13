@@ -1302,6 +1302,9 @@ class DemoMelodyRepository(
         handleRealtimeConnectionState(realtimeClient.connectionState.value)
         startChatSync(accessToken)
         com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
+        if (SharingForegroundService.isSharingActive(applicationContext)) {
+            startSharing()
+        }
     }
 
     override fun authenticateOffline(account: CachedAccount) {

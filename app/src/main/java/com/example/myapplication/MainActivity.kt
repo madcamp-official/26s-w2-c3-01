@@ -20,6 +20,7 @@ import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.ui.MelodyViewModel
 import com.example.myapplication.ui.MelodyBubbleApp
+import com.example.myapplication.ui.LoginUiState
 import com.example.myapplication.ui.theme.MelodyBubbleTheme
 
 class MainActivity : ComponentActivity() {
@@ -86,13 +87,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun reconcileSharingService() {
-        val serviceActive = getSharedPreferences(
-            SharingForegroundService.PREFERENCES_NAME,
-            MODE_PRIVATE
-        ).getBoolean(SharingForegroundService.KEY_SHARING_ACTIVE, false)
+        val serviceActive = SharingForegroundService.isSharingActive(this)
+        val onlineSessionReady = (viewModel.loginState.value as? LoginUiState.Success)
+            ?.mode == com.example.myapplication.core.model.SessionMode.ONLINE
 
         when {
-            serviceActive && viewModel.uiState.value.sharingState != SharingState.ACTIVE -> {
+            shouldResumeSharing(serviceActive, onlineSessionReady, viewModel.uiState.value.sharingState) -> {
                 viewModel.startSharing()
             }
             !serviceActive && viewModel.uiState.value.sharingState == SharingState.ACTIVE -> {
@@ -102,3 +102,10 @@ class MainActivity : ComponentActivity() {
     }
 
 }
+
+internal fun shouldResumeSharing(
+    serviceActive: Boolean,
+    onlineSessionReady: Boolean,
+    sharingState: SharingState,
+): Boolean = serviceActive && onlineSessionReady &&
+    sharingState != SharingState.ACTIVE && sharingState != SharingState.STARTING
