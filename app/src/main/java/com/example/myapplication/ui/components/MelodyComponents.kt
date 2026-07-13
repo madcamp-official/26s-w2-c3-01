@@ -23,7 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.WifiTethering
@@ -348,6 +348,6 @@ private fun MainTab.icon(): ImageVector = when (this) {
     MainTab.HOME -> Icons.Outlined.Home
     MainTab.NEARBY -> Icons.Outlined.Radar
     MainTab.LOUNGE -> Icons.Outlined.Groups
-    MainTab.INBOX -> Icons.Outlined.NotificationsNone
+    MainTab.INBOX -> Icons.Outlined.ChatBubbleOutline
     MainTab.MY -> Icons.Outlined.PersonOutline
 }

@@ -45,6 +45,12 @@ internal object SubLoungeEventReducer {
                         generatedAt = event.envelope.timestamp,
                     )
                 }
+                "RECOMMENDATION_CARD_DELETED" -> snapshot.copy(
+                    cards = snapshot.cards.filterNot {
+                        it.id == payload.asJsonObject.get("cardId").asString
+                    },
+                    generatedAt = event.envelope.timestamp,
+                )
                 "LOUNGE_POLL_UPDATED" -> {
                     val poll = gson.fromJson(payload, LoungePollStateDto::class.java)
                     snapshot.copy(

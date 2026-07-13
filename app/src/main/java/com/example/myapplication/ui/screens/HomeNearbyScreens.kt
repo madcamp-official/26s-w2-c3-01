@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -44,6 +43,7 @@ import androidx.compose.material.icons.outlined.GraphicEq
 import androidx.compose.material.icons.outlined.Headphones
 import androidx.compose.material.icons.outlined.IosShare
 import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.NotificationsNone
 import androidx.compose.material.icons.outlined.PersonAddAlt
 import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.ReportGmailerrorred
@@ -60,7 +60,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -122,12 +121,11 @@ fun HomeScreen(
     onStartSharing: () -> Unit = {},
     onStopSharing: () -> Unit = {},
     onOpenNearby: () -> Unit = {},
+    onOpenNotifications: () -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
-    onSelectTrack: (Track) -> Unit = {}
 ) {
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
-    val nearestMusic = visibleListeners.firstOrNull { it.isPlaying && it.currentTrack != null }
 
     LazyColumn(
         modifier = modifier
@@ -144,15 +142,15 @@ fun HomeScreen(
     ) {
         item {
             HomeHeader(
-                listenerCount = visibleListeners.size,
-                dataSourceLabel = state.dataSourceLabel
+                unreadNotificationCount = state.unreadNotificationCount,
+                onOpenNotifications = onOpenNotifications,
             )
         }
         item {
             SharingStatusCard(
                 sharingState = state.sharingState,
                 connectionState = state.connectionState,
-                scopeLabel = "반경 ${state.discoveryRadiusMeters}m",
+                scopeLabel = "주변 공개 사용자",
                 onStart = onStartSharing,
                 onStop = onStopSharing,
             )
@@ -160,18 +158,12 @@ fun HomeScreen(
         item {
             CompactRadar(
                 listeners = visibleListeners,
-                nearestMusic = nearestMusic,
                 onOpenNearby = onOpenNearby
             )
         }
         item {
             MyCurrentTrackCard(
-                track = state.currentTrack,
-                sharingEnabled = isSharingActive,
-                onClick = { onSelectTrack(state.currentTrack) },
-                onSharingToggle = {
-                    if (isSharingActive) onStopSharing() else onStartSharing()
-                }
+                track = state.detectedTrack.takeIf { state.detectedTrackPlaying },
             )
         }
         item {
@@ -183,7 +175,6 @@ fun HomeScreen(
         item {
             PopularTrackCarousel(
                 tracks = state.popularTracks,
-                onSelectTrack = onSelectTrack
             )
         }
     }
@@ -200,9 +191,6 @@ fun NearbyScreen(
     similarityThreshold: Int = 60,
     musicFilter: NearbyMusicFilter = NearbyMusicFilter.ALL,
     onSimilarityThresholdChange: (Int) -> Unit = {},
-    radiusMeters: Int = state.discoveryRadiusMeters,
-    onRadiusChange: (Int) -> Unit = {},
-    onRadiusChangeFinished: () -> Unit = {},
     onRetry: () -> Unit = {},
     onMusicFilterChange: (NearbyMusicFilter) -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
@@ -244,14 +232,6 @@ fun NearbyScreen(
                 }
             )
         }
-        item {
-            RadiusSelector(
-                radiusMeters = radiusMeters,
-                enabled = state.sharingState != SharingState.STARTING,
-                onRadiusChange = onRadiusChange,
-                onRadiusChangeFinished = onRadiusChangeFinished,
-            )
-        }
         if (state.nearbyLoadState == NearbyLoadState.ERROR ||
             state.nearbyLoadState == NearbyLoadState.LOADING ||
             state.nearbyLoadState == NearbyLoadState.EMPTY
@@ -260,7 +240,6 @@ fun NearbyScreen(
                 NearbyResultState(
                     state = state.nearbyLoadState,
                     message = state.nearbyErrorMessage,
-                    radiusMeters = state.discoveryRadiusMeters,
                     onRetry = onRetry,
                 )
             }
@@ -294,7 +273,7 @@ fun NearbyScreen(
                 subtitle = when {
                     !isSharingActive -> "위치 공유를 켜야 주변 리스너를 확인할 수 있어요"
                     state.nearbyLoadState == NearbyLoadState.ERROR -> "서버 연결을 확인한 뒤 다시 시도해 주세요"
-                    filteredListeners.isEmpty() -> "반경 ${state.discoveryRadiusMeters}m 안에 조건에 맞는 리스너가 없어요"
+                    filteredListeners.isEmpty() -> "조건에 맞는 주변 리스너가 없어요"
                     selected == null -> "레이더의 이름을 눌러 상세를 확인하세요"
                     else -> null
                 }
@@ -307,7 +286,7 @@ fun NearbyScreen(
                     message = when {
                         !isSharingActive -> "위치 공유안함 상태예요"
                         state.nearbyLoadState == NearbyLoadState.ERROR -> "주변 목록을 불러오지 못했어요"
-                        filteredListeners.isEmpty() -> "반경 ${state.discoveryRadiusMeters}m 안에 버블이 없어요"
+                        filteredListeners.isEmpty() -> "주변에 공개된 버블이 없어요"
                         else -> "확인할 리스너를 선택해 주세요"
                     }
                 )
@@ -513,8 +492,8 @@ fun UserDetailScreen(
 
 @Composable
 private fun HomeHeader(
-    listenerCount: Int,
-    dataSourceLabel: String
+    unreadNotificationCount: Int,
+    onOpenNotifications: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -547,34 +526,47 @@ private fun HomeHeader(
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        Surface(
-            shape = RoundedCornerShape(999.dp),
-            color = MelodyBubbleColors.Primary.copy(alpha = 0.12f),
-            border = BorderStroke(1.dp, MelodyBubbleColors.Border)
-        ) {
-            Text(
-                text = "$listenerCount 버블 · $dataSourceLabel",
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                color = MelodyBubbleColors.PrimarySoft,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold
-            )
+        Box {
+            IconButton(
+                onClick = onOpenNotifications,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(MelodyBubbleColors.Surface, CircleShape)
+                    .border(1.dp, MelodyBubbleColors.Border, CircleShape),
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.NotificationsNone,
+                    contentDescription = "알림 열기",
+                    tint = MelodyBubbleColors.Text,
+                )
+            }
+            if (unreadNotificationCount > 0) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 4.dp, y = (-4).dp),
+                    shape = CircleShape,
+                    color = MelodyBubbleColors.Danger,
+                    border = BorderStroke(2.dp, MelodyBubbleColors.Background),
+                ) {
+                    Text(
+                        text = unreadNotificationCount.coerceAtMost(99).toString(),
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Black,
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun MyCurrentTrackCard(
-    track: Track,
-    sharingEnabled: Boolean,
-    onClick: () -> Unit,
-    onSharingToggle: () -> Unit
+    track: Track?,
 ) {
-    MelodyCard(
-        onClick = onClick,
-        onClickLabel = "${track.title} 음악 상세 보기",
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
-    ) {
+    MelodyCard(contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
                 modifier = Modifier.size(44.dp),
@@ -598,7 +590,7 @@ private fun MyCurrentTrackCard(
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = track.title,
+                    text = track?.title ?: "재생 중인 음악이 없어요",
                     color = MelodyBubbleColors.Text,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
@@ -606,45 +598,13 @@ private fun MyCurrentTrackCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = listOfNotNull(track.artist, track.album).joinToString(" · "),
+                    text = track?.let { listOfNotNull(it.artist, it.album).joinToString(" · ") }
+                        ?: "음악 앱에서 재생하면 자동으로 표시돼요",
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.labelMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-            Spacer(Modifier.width(10.dp))
-            Surface(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clickable(
-                        role = Role.Switch,
-                        onClickLabel = if (sharingEnabled) "공유 비허용" else "공유 허용",
-                        onClick = onSharingToggle
-                    ),
-                shape = CircleShape,
-                color = if (sharingEnabled) {
-                    MelodyBubbleColors.Primary
-                } else {
-                    MelodyBubbleColors.SurfaceRaised
-                },
-                border = BorderStroke(
-                    1.dp,
-                    if (sharingEnabled) MelodyBubbleColors.Primary else MelodyBubbleColors.BorderStrong
-                )
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Outlined.Radar,
-                        contentDescription = if (sharingEnabled) "공유 허용" else "공유 비허용",
-                        modifier = Modifier.size(21.dp),
-                        tint = if (sharingEnabled) {
-                            MelodyBubbleColors.OnPrimary
-                        } else {
-                            MelodyBubbleColors.TextMuted
-                        }
-                    )
-                }
             }
         }
     }
@@ -653,7 +613,6 @@ private fun MyCurrentTrackCard(
 @Composable
 private fun CompactRadar(
     listeners: List<NearbyListener>,
-    nearestMusic: NearbyListener?,
     onOpenNearby: () -> Unit
 ) {
     MelodyCard(
@@ -685,13 +644,8 @@ private fun CompactRadar(
                 listeners.take(6).forEach { listener ->
                     val position = listener.displayPosition.safePosition()
                     drawCircle(
-                        color = Color(listener.colorHex).copy(alpha = 0.22f),
-                        radius = if (listener.isNew) 18.dp.toPx() else 13.dp.toPx(),
-                        center = Offset(size.width * position.x, size.height * position.y)
-                    )
-                    drawCircle(
-                        color = Color(listener.colorHex),
-                        radius = 6.dp.toPx(),
+                        color = MelodyBubbleColors.Text,
+                        radius = 7.dp.toPx(),
                         center = Offset(size.width * position.x, size.height * position.y)
                     )
                 }
@@ -721,46 +675,6 @@ private fun CompactRadar(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
-            nearestMusic?.currentTrack?.let { track ->
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(14.dp)
-                        .widthIn(max = 168.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MelodyBubbleColors.Background.copy(alpha = 0.84f),
-                    border = BorderStroke(1.dp, MelodyBubbleColors.Border)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Headphones,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MelodyBubbleColors.Primary
-                        )
-                        Spacer(Modifier.width(7.dp))
-                        Column {
-                            Text(
-                                text = "가장 가까운 음악",
-                                color = MelodyBubbleColors.TextMuted,
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = track.title,
-                                color = MelodyBubbleColors.Text,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
             }
             Row(
                 modifier = Modifier
@@ -919,7 +833,6 @@ private fun ListenerStrip(
 @Composable
 private fun PopularTrackCarousel(
     tracks: List<PopularTrack>,
-    onSelectTrack: (Track) -> Unit
 ) {
     if (tracks.isEmpty()) {
         EmptyMusicCard()
@@ -932,7 +845,6 @@ private fun PopularTrackCarousel(
         items(tracks, key = { it.track.id }) { popularTrack ->
             PopularTrackCompactCard(
                 popularTrack = popularTrack,
-                onClick = { onSelectTrack(popularTrack.track) }
             )
         }
     }
@@ -941,16 +853,9 @@ private fun PopularTrackCarousel(
 @Composable
 private fun PopularTrackCompactCard(
     popularTrack: PopularTrack,
-    onClick: () -> Unit
 ) {
     Surface(
-        modifier = Modifier
-            .width(176.dp)
-            .clickable(
-                role = Role.Button,
-                onClickLabel = "${popularTrack.track.title} 선택",
-                onClick = onClick
-            ),
+        modifier = Modifier.width(176.dp),
         shape = RoundedCornerShape(20.dp),
         color = MelodyBubbleColors.Surface,
         border = BorderStroke(1.dp, MelodyBubbleColors.Border)
@@ -1420,47 +1325,9 @@ private fun SelectedListenerCard(
 }
 
 @Composable
-private fun RadiusSelector(
-    radiusMeters: Int,
-    enabled: Boolean,
-    onRadiusChange: (Int) -> Unit,
-    onRadiusChangeFinished: () -> Unit,
-) {
-    MelodyCard {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("검색 반경", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "정확한 좌표는 숨기고 이 반경 안의 공개 허용 사용자만 찾아요",
-                        color = MelodyBubbleColors.TextMuted,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Text(
-                    "$radiusMeters m",
-                    color = MelodyBubbleColors.Primary,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            Slider(
-                value = radiusMeters.toFloat(),
-                onValueChange = { value -> onRadiusChange((value / 50).toInt() * 50) },
-                onValueChangeFinished = onRadiusChangeFinished,
-                valueRange = 50f..2000f,
-                steps = 38,
-                enabled = enabled,
-            )
-        }
-    }
-}
-
-@Composable
 private fun NearbyResultState(
     state: NearbyLoadState,
     message: String?,
-    radiusMeters: Int,
     onRetry: () -> Unit,
 ) {
     MelodyCard {
@@ -1480,7 +1347,7 @@ private fun NearbyResultState(
             Text(
                 text = when (state) {
                     NearbyLoadState.LOADING -> "주변을 안전하게 찾고 있어요"
-                    NearbyLoadState.EMPTY -> "반경 ${radiusMeters}m 안에 공개된 버블이 없어요"
+                    NearbyLoadState.EMPTY -> "주변에 공개된 버블이 없어요"
                     NearbyLoadState.ERROR -> "주변 목록을 불러오지 못했어요"
                     else -> "주변 상태를 확인하고 있어요"
                 },

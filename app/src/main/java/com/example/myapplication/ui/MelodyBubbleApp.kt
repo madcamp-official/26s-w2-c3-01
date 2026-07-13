@@ -53,6 +53,7 @@ import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
+import com.example.myapplication.ui.screens.NotificationScreen
 import com.example.myapplication.ui.screens.OfflineExchangeScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.screens.ReportUserScreen
@@ -67,6 +68,7 @@ private object Route {
     const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
+    const val NOTIFICATIONS = "notifications"
 
     fun chat(roomId: String) = "chat/$roomId"
 }
@@ -199,6 +201,7 @@ fun MelodyBubbleApp(
                         navController.navigate(Route.USER_DETAIL)
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
+                    onOpenNotifications = { navController.navigate(Route.NOTIFICATIONS) },
                     onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenNotificationAccess = {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -224,14 +227,11 @@ fun MelodyBubbleApp(
                             val externalUrl = track.externalUrl
                                 ?.takeIf { it.startsWith("https://") }
                             if (externalUrl != null) {
-                                val opened = runCatching {
+                                runCatching {
                                     context.startActivity(
                                         Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl))
                                     )
-                                }.isSuccess
-                                if (!opened) viewModel.selectTrack(track)
-                            } else {
-                                viewModel.selectTrack(track)
+                                }
                             }
                         },
                         onShowReactionSheet = { reactionSheetVisible = true },
@@ -328,6 +328,14 @@ fun MelodyBubbleApp(
                     modifier = Modifier.safeDrawingPadding()
                 )
             }
+            composable(Route.NOTIFICATIONS) {
+                NotificationScreen(
+                    notifications = state.notifications,
+                    onBack = { navController.popBackStack() },
+                    onMarkRead = viewModel::markInboxRead,
+                    modifier = Modifier.safeDrawingPadding(),
+                )
+            }
         }
 
         SnackbarHost(
@@ -349,6 +357,7 @@ private fun MainShell(
     onStopSharing: () -> Unit,
     onOpenUser: (String) -> Unit,
     onOpenChat: (String) -> Unit,
+    onOpenNotifications: () -> Unit,
     onOpenMelodyAlias: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onOpenOfflineExchange: () -> Unit,
@@ -356,10 +365,6 @@ private fun MainShell(
 ) {
     var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
     var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
-    var nearbyRadius by rememberSaveable { mutableFloatStateOf(state.discoveryRadiusMeters.toFloat()) }
-    LaunchedEffect(state.discoveryRadiusMeters) {
-        nearbyRadius = state.discoveryRadiusMeters.toFloat()
-    }
 
     Scaffold(
         containerColor = Ink,
@@ -367,7 +372,7 @@ private fun MainShell(
         bottomBar = {
             MelodyBottomNavigationBar(
                 selectedTab = state.selectedTab,
-                unreadCount = state.unreadNotificationCount,
+                unreadCount = state.unreadChatCount,
                 onTabSelected = viewModel::selectTab
             )
         }
@@ -382,24 +387,15 @@ private fun MainShell(
                 onStartSharing = onStartSharing,
                 onStopSharing = onStopSharing,
                 onOpenNearby = { viewModel.selectTab(MainTab.NEARBY) },
+                onOpenNotifications = onOpenNotifications,
                 onSelectListener = { onOpenUser(it.nearbyHandle) },
-                onSelectTrack = viewModel::selectTrack
             )
             MainTab.NEARBY -> NearbyScreen(
                 state = state,
                 modifier = contentModifier,
                 similarityThreshold = similarityThreshold.toInt(),
-                radiusMeters = nearbyRadius.toInt(),
                 musicFilter = nearbyMusicFilter,
                 onSimilarityThresholdChange = { similarityThreshold = it.toFloat() },
-                onRadiusChange = { nearbyRadius = it.toFloat() },
-                onRadiusChangeFinished = {
-                    viewModel.updatePresenceSettings(
-                        nearbyRadius.toInt(),
-                        state.discoverabilityScope,
-                        state.musicVisibility,
-                    )
-                },
                 onRetry = viewModel::retrySharing,
                 onMusicFilterChange = { nearbyMusicFilter = it },
                 onSelectListener = { viewModel.selectNearby(it.nearbyHandle) },
@@ -410,23 +406,26 @@ private fun MainShell(
             MainTab.LOUNGE -> BuildingLoungeMapScreen(
                 state = buildingLoungeState,
                 onLocationUpdate = viewModel::refreshBuildingLounges,
+                onLocationUnavailable = viewModel::setBuildingLoungeLocationUnavailable,
                 onHeartbeat = viewModel::heartbeatBuildingLounge,
                 onEnter = viewModel::enterBuildingLounge,
                 onLeave = viewModel::leaveBuildingLounge,
                 onCreateSubLounge = viewModel::createBuildingSubLounge,
                 onOpenSubLounge = viewModel::openSubLounge,
                 onLeaveSubLounge = viewModel::leaveSubLounge,
+                onDeleteSubLounge = viewModel::deleteSubLounge,
                 onSendTrack = viewModel::sendDetectedTrackToLounge,
+                onSearchTracks = viewModel::searchLoungeTracks,
+                onSendSearchedTrack = viewModel::sendSearchedTrackToLounge,
+                onDeleteCard = viewModel::deleteLoungeCard,
                 onReactToCard = viewModel::reactToLoungeCard,
                 onVote = viewModel::voteInSubLounge,
                 onRefreshSubLounge = viewModel::refreshSubLounge,
                 modifier = contentModifier
             )
             MainTab.INBOX -> InboxScreen(
-                notifications = state.notifications,
                 chats = state.chats,
                 onOpenChat = onOpenChat,
-                onMarkRead = viewModel::markInboxRead,
                 modifier = contentModifier.safeDrawingPadding()
             )
             MainTab.MY -> MyScreen(

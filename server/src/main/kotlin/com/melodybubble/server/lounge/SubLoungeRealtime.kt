@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -41,8 +42,11 @@ data class LoungeRecommendationCard(
     val message: String?,
     val reactionCount: Int,
     val reactedByMe: Boolean,
+    val canDelete: Boolean,
     val createdAt: Instant,
 )
+
+data class RecommendationCardDeletedPayload(val cardId: UUID, val subLoungeId: UUID)
 
 data class LoungePollOption(val key: String, val voteCount: Int)
 data class LoungePollState(val options: List<LoungePollOption>, val myVote: String?)
@@ -54,6 +58,7 @@ data class SubLoungeSnapshot(
     val style: String?,
     val memberCount: Int,
     val joined: Boolean,
+    val canDelete: Boolean,
     val listeningStatuses: List<LoungeListeningStatus>,
     val cards: List<LoungeRecommendationCard>,
     val poll: LoungePollState,
@@ -77,6 +82,7 @@ data class CreateLoungeCardRequest(
 data class LoungeVoteRequest(val targetKey: String)
 data class SubLoungeMemberPayload(val memberCount: Int, val memberAlias: String, val updatedAt: Instant = Instant.now())
 data class SubLoungeStatePayload(val memberCount: Int, val updatedAt: Instant = Instant.now())
+data class SubLoungeDeletedPayload(val subLoungeId: UUID, val buildingLoungeId: UUID, val deletedAt: Instant = Instant.now())
 
 @Component
 class SubLoungeTopicAuthorizer(private val jdbc: JdbcTemplate) {
@@ -325,6 +331,50 @@ class SubLoungeRealtimeService(
     }
 
     @Transactional
+    fun deleteSubLounge(userId: UUID, subLoungeId: UUID) {
+        val room = jdbc.query(
+            "select building_lounge_id,creator_user_id from sub_lounges where id=? and active=true",
+            { rs, _ -> UUID.fromString(rs.getString("building_lounge_id")) to UUID.fromString(rs.getString("creator_user_id")) },
+            subLoungeId,
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "하위 라운지를 찾을 수 없습니다.")
+        val (buildingLoungeId, creatorUserId) = room
+        if (creatorUserId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "하위 라운지 생성자만 삭제할 수 있습니다.")
+        }
+        rateLimiter.enforce(userId, "SUB_LOUNGE_DELETE", 10, Duration.ofMinutes(1))
+        jdbc.update("update sub_lounges set active=false where id=? and creator_user_id=?", subLoungeId, userId)
+        jdbc.update("update sub_lounge_members set active=false,last_seen_at=now() where sub_lounge_id=?", subLoungeId)
+        jdbc.update("delete from sub_lounge_listening_statuses where sub_lounge_id=?", subLoungeId)
+        realtime.toTopicAfterCommit(
+            topic(subLoungeId),
+            RealtimeEventTypes.SUB_LOUNGE_DELETED,
+            SubLoungeDeletedPayload(subLoungeId, buildingLoungeId),
+        )
+    }
+
+    @Transactional
+    fun deleteCard(userId: UUID, cardId: UUID) {
+        val card = jdbc.query(
+            "select sub_lounge_id,sender_id from sub_lounge_recommendation_cards where id=?",
+            { rs, _ -> UUID.fromString(rs.getString("sub_lounge_id")) to UUID.fromString(rs.getString("sender_id")) },
+            cardId,
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "추천 카드를 찾을 수 없습니다.")
+        val (subLoungeId, senderId) = card
+        requireMember(userId, subLoungeId)
+        if (senderId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "내가 추천한 곡만 삭제할 수 있습니다.")
+        }
+        rateLimiter.enforce(userId, "LOUNGE_CARD_DELETE", 20, Duration.ofMinutes(1))
+        if (jdbc.update("delete from sub_lounge_recommendation_cards where id=? and sender_id=?", cardId, userId) == 1) {
+            realtime.toTopicAfterCommit(
+                topic(subLoungeId),
+                RealtimeEventTypes.RECOMMENDATION_CARD_DELETED,
+                RecommendationCardDeletedPayload(cardId, subLoungeId),
+            )
+        }
+    }
+
+    @Transactional
     fun vote(userId: UUID, subLoungeId: UUID, request: LoungeVoteRequest): LoungePollState {
         requireMember(userId, subLoungeId)
         rateLimiter.enforce(userId, "LOUNGE_VOTE", 20, Duration.ofMinutes(1))
@@ -350,7 +400,7 @@ class SubLoungeRealtimeService(
             """
             select card.id,card.client_card_id,sender.display_name,card.track_title,card.artist_name,
               card.message,card.created_at,count(reaction.user_id) reaction_count,
-              bool_or(reaction.user_id=?) reacted_by_me
+              bool_or(reaction.user_id=?) reacted_by_me,card.sender_id=? can_delete
             from sub_lounge_recommendation_cards card
             join users sender on sender.id=card.sender_id
             left join sub_lounge_card_reactions reaction on reaction.card_id=card.id
@@ -369,9 +419,11 @@ class SubLoungeRealtimeService(
                     message = rs.getString("message"),
                     reactionCount = rs.getInt("reaction_count"),
                     reactedByMe = rs.getBoolean("reacted_by_me"),
+                    canDelete = rs.getBoolean("can_delete"),
                     createdAt = rs.getTimestamp("created_at").toInstant(),
                 )
             },
+            userId,
             userId,
             subLoungeId,
         )
@@ -380,10 +432,10 @@ class SubLoungeRealtimeService(
     private fun snapshotUnchecked(userId: UUID, subLoungeId: UUID): SubLoungeSnapshot {
         val room = jdbc.query(
             """
-            select room.id,room.building_lounge_id,room.title,room.style
+            select room.id,room.building_lounge_id,room.title,room.style,room.creator_user_id
             from sub_lounges room where room.id=? and room.active=true
             """.trimIndent(),
-            { rs, _ -> arrayOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)) },
+            { rs, _ -> arrayOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) },
             subLoungeId,
         ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "하위 라운지를 찾을 수 없습니다.")
         return SubLoungeSnapshot(
@@ -393,6 +445,7 @@ class SubLoungeRealtimeService(
             style = room[3],
             memberCount = memberCount(subLoungeId),
             joined = hasActiveMembership(jdbc, userId, subLoungeId),
+            canDelete = UUID.fromString(room[4]) == userId,
             listeningStatuses = listeningStatuses(subLoungeId),
             cards = cards(userId, subLoungeId),
             poll = poll(userId, subLoungeId),
@@ -539,6 +592,10 @@ class SubLoungeRealtimeController(private val service: SubLoungeRealtimeService)
     fun leave(principal: Principal, @PathVariable subLoungeId: UUID) =
         service.leave(UUID.fromString(principal.name), subLoungeId)
 
+    @DeleteMapping("/{subLoungeId}")
+    fun deleteSubLounge(principal: Principal, @PathVariable subLoungeId: UUID) =
+        service.deleteSubLounge(UUID.fromString(principal.name), subLoungeId)
+
     @PutMapping("/{subLoungeId}/listening")
     fun listening(
         principal: Principal,
@@ -552,6 +609,10 @@ class SubLoungeRealtimeController(private val service: SubLoungeRealtimeService)
         @PathVariable subLoungeId: UUID,
         @RequestBody request: LoungeVoteRequest,
     ) = service.vote(UUID.fromString(principal.name), subLoungeId, request)
+
+    @DeleteMapping("/cards/{cardId}")
+    fun deleteCard(principal: Principal, @PathVariable cardId: UUID) =
+        service.deleteCard(UUID.fromString(principal.name), cardId)
 }
 
 internal fun hasActiveMembership(jdbc: JdbcTemplate, userId: UUID, subLoungeId: UUID): Boolean =
