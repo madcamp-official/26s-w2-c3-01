@@ -100,6 +100,7 @@ data class Track(
     val title: String,
     val artist: String,
     val album: String? = null,
+    val artworkUrl: String? = null,
     val platform: String = "MANUAL",
     val externalUrl: String? = null,
     val genreTags: List<String> = emptyList(),
@@ -119,7 +120,8 @@ data class NearbyListener(
     val commonGenres: List<String>,
     val relationship: RelationshipStatus = RelationshipStatus.NONE,
     val canReact: Boolean = true,
-    val isNew: Boolean = false
+    val isNew: Boolean = false,
+    val avatarUrl: String? = null,
 )
 
 data class PopularTrack(
@@ -163,7 +165,9 @@ data class ChatPreview(
     val lastMessage: String,
     val relativeTime: String,
     val unreadCount: Int,
-    val relationship: RelationshipStatus
+    val relationship: RelationshipStatus,
+    val hasMessages: Boolean = true,
+    val isHidden: Boolean = false,
 )
 
 data class ChatMessage(
@@ -236,6 +240,7 @@ data class MusicSearchResult(
     val artworkUrl: String?,
     val previewUrl: String?,
     val appleMusicUrl: String?,
+    val artistImageUrl: String? = null,
 )
 
 data class PreviewPlaybackState(
@@ -445,5 +450,5 @@ data class MelodyUiState(
         get() = notifications.count { !it.isRead }
 
     val unreadChatCount: Int
-        get() = chats.sumOf { it.unreadCount }
+        get() = chats.filterNot(ChatPreview::isHidden).sumOf { it.unreadCount }
 }

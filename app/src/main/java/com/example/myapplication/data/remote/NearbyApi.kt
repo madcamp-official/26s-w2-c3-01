@@ -13,6 +13,8 @@ data class RemoteNearbyBubble(
     val nearbyHandle: String,
     val profileHandle: String? = null,
     val displayAlias: String,
+    val avatarSeed: String? = null,
+    val avatarUrl: String? = null,
     val profileColor: String,
     val displayPosition: RemotePosition,
     val matchScore: Int,
@@ -29,6 +31,7 @@ data class RemoteNearbySnapshot(
 data class RemotePopularTrack(
     val title: String,
     val artist: String,
+    val artworkUrl: String? = null,
     val listenerCount: Int,
     val reactionCount: Int
 )

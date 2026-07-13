@@ -16,7 +16,6 @@ import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MAX_NEARBY_RADIUS_METERS
 import com.example.myapplication.core.model.MelodyReducers
 import com.example.myapplication.core.model.MelodyUiState
-import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NotificationType
@@ -42,7 +41,6 @@ import com.example.myapplication.core.model.TasteMetric
 import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.local.MelodyDatabase
-import com.example.myapplication.data.local.MelodyAliasCandidateEntity
 import com.example.myapplication.data.local.OfflineExchangeEntity
 import com.example.myapplication.data.local.SyncOutboxEntity
 import com.example.myapplication.data.local.CachedAccount
@@ -51,9 +49,12 @@ import com.example.myapplication.data.realtime.RealtimeConnectionState
 import com.example.myapplication.data.realtime.RealtimeEvent
 import com.example.myapplication.data.realtime.RealtimeSyncRequest
 import com.example.myapplication.data.realtime.StompRealtimeClient
+import com.example.myapplication.data.realtime.notificationRelativeTime
+import com.example.myapplication.data.realtime.toServerEpochMillis
 import com.example.myapplication.data.remote.ApiEnvironment
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.LocationUpdateRequest
+import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.NearbyReactionRequest
 import com.example.myapplication.data.remote.PresenceSettingsUpdateRequest
 import com.example.myapplication.data.remote.RemoteChatSummary
@@ -66,7 +67,6 @@ import com.example.myapplication.data.remote.ProfileUpdateRequest
 import com.example.myapplication.data.remote.ProfileCurationUpdateRequest
 import com.example.myapplication.data.remote.ProfilePrivacyUpdateRequest
 import com.example.myapplication.data.remote.PrivacyUpdateRequest
-import com.example.myapplication.data.remote.MelodyAliasUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
 import com.example.myapplication.data.remote.RemoteProfileMelodyAlias
 import com.example.myapplication.data.remote.RemoteProfileStats
@@ -111,6 +111,7 @@ private const val PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS = 60_000L
 private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
 private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
+private const val KEY_HIDDEN_CHAT_ROOM_IDS = "hidden-chat-room-ids"
 
 internal fun reactionTypeForLabel(label: String): String? = when (label.trim()) {
     "이 곡 좋아요", "LIKE" -> "LIKE"
@@ -130,6 +131,7 @@ interface MelodyRepository {
     fun exitBubbleMode()
     fun openChat(roomId: String)
     fun closeChat(roomId: String)
+    fun leaveChat(roomId: String)
     fun startSharing()
     fun stopSharing()
     fun setSharingPermissionRequired()
@@ -160,8 +162,6 @@ interface MelodyRepository {
     fun randomizeAvatar()
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings)
-    fun selectMelodyAlias(candidateId: String)
-    fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate)
     fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String)
     fun syncExchange(exchangeId: String)
     fun deleteExchange(exchangeId: String)
@@ -221,6 +221,7 @@ class DemoMelodyRepository(
     private val nearbyRealtimeVersion = AtomicLong(0)
     private val popularRealtimeVersion = AtomicLong(0)
     private val chatReadLock = Any()
+    private val hiddenChatRoomLock = Any()
     private val chatReadJobs = mutableMapOf<String, Job>()
     private val chatReadDirty = mutableSetOf<String>()
     @Volatile private var activeChatRoomId: String? = null
@@ -230,6 +231,7 @@ class DemoMelodyRepository(
     private val nearbyProximityStabilizer = NearbyProximityStabilizer()
     private val profileApi = ApiClient.createProfileApi(environment)
     private val socialApi = ApiClient.createSocialApi(environment)
+    private val musicSearchRepository = MusicSearchRepository()
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationContext)
     @Volatile private var accessToken: String? = null
     private var liveTick = 0
@@ -314,14 +316,6 @@ class DemoMelodyRepository(
             }
         }
         scope.launch {
-            database.melodyAliasCandidateDao().observeAll().collect { entities ->
-                _state.update { current ->
-                    current.copy(melodyAliasCandidates = entities.map { it.toDomain() })
-                }
-            }
-        }
-
-        scope.launch {
             while (isActive) {
                 delay(3_500)
                 if (_state.value.sharingState == SharingState.ACTIVE && accessToken == null) {
@@ -355,12 +349,53 @@ class DemoMelodyRepository(
     }
 
     override fun openChat(roomId: String) {
+        setChatRoomHidden(roomId, hidden = false)
         activeChatRoomId = roomId
         markChatRoomRead(roomId)
     }
 
     override fun closeChat(roomId: String) {
         if (activeChatRoomId == roomId) activeChatRoomId = null
+    }
+
+    override fun leaveChat(roomId: String) {
+        if (activeChatRoomId == roomId) activeChatRoomId = null
+        setChatRoomHidden(roomId, hidden = true)
+        markChatRoomRead(roomId)
+    }
+
+    private fun setChatRoomHidden(roomId: String, hidden: Boolean) {
+        persistChatRoomHidden(roomId, hidden)
+        _state.update { current ->
+            current.copy(
+                chats = current.chats.map { chat ->
+                    if (chat.roomId == roomId) chat.copy(isHidden = hidden) else chat
+                },
+            )
+        }
+    }
+
+    private fun persistChatRoomHidden(roomId: String, hidden: Boolean) {
+        synchronized(hiddenChatRoomLock) {
+            val updated = hiddenChatRoomIds().toMutableSet().apply {
+                if (hidden) add(roomId) else remove(roomId)
+            }
+            persistHiddenChatRoomIds(updated)
+        }
+    }
+
+    private fun hiddenChatRoomIds(): Set<String> = synchronized(hiddenChatRoomLock) {
+        preferences.getStringSet(profileScopedKey(KEY_HIDDEN_CHAT_ROOM_IDS), emptySet())
+            ?.toSet()
+            .orEmpty()
+    }
+
+    private fun persistHiddenChatRoomIds(roomIds: Set<String>) {
+        synchronized(hiddenChatRoomLock) {
+            preferences.edit()
+                .putStringSet(profileScopedKey(KEY_HIDDEN_CHAT_ROOM_IDS), roomIds.toSet())
+                .apply()
+        }
     }
 
     override fun startSharing() {
@@ -650,13 +685,15 @@ class DemoMelodyRepository(
             runCatching { profileApi.publicProfile("Bearer $token", profileHandle) }
                 .onSuccess { remote ->
                     if (!isCurrentSession(token)) return@onSuccess
+                    val profile = remote.toDomain()
                     _state.update {
                         it.copy(
-                            selectedPublicProfile = remote.toDomain(),
+                            selectedPublicProfile = profile,
                             publicProfileLoading = false,
                             publicProfileError = null,
                         )
                     }
+                    resolvePublicProfileArtwork(profile)
                 }
                 .onFailure { error ->
                     if (!isCurrentSession(token)) return@onFailure
@@ -759,7 +796,13 @@ class DemoMelodyRepository(
                 ),
                 chats = current.chats.map {
                     if (it.roomId == roomId) {
-                        it.copy(lastMessage = pending.content, relativeTime = "방금", unreadCount = 0)
+                        it.copy(
+                            lastMessage = pending.content,
+                            relativeTime = "방금",
+                            unreadCount = 0,
+                            hasMessages = true,
+                            isHidden = false,
+                        )
                     } else {
                         it
                     }
@@ -1010,7 +1053,22 @@ class DemoMelodyRepository(
 
     override fun randomizeAvatar() {
         val token = accessToken ?: return
-        _state.update { it.copy(profileSaving = true) }
+        val previousProfile = _state.value.profile
+        val optimisticAvatar = AvatarProfileResolver.resolve(
+            remoteSeed = UUID.randomUUID().toString(),
+            remoteUrl = null,
+            stableIdentity = null,
+            fallbackSeed = previousProfile.avatarSeed,
+        )
+        _state.update { current ->
+            current.copy(
+                profileSaving = true,
+                profile = current.profile.copy(
+                    avatarSeed = optimisticAvatar.seed,
+                    avatarUrl = optimisticAvatar.url,
+                ),
+            )
+        }
         scope.launch {
             runCatching { profileApi.randomizeAvatar("Bearer $token") }
                 .onSuccess {
@@ -1020,6 +1078,7 @@ class DemoMelodyRepository(
                     if (isCurrentSession(token)) {
                         _state.update { state ->
                             state.copy(
+                                profile = previousProfile,
                                 profileSaving = false,
                                 feedbackMessage = requestErrorMessage(it, "아바타를 변경하지 못했어요"),
                             )
@@ -1140,40 +1199,6 @@ class DemoMelodyRepository(
                 it.copy(profileSaving = false, feedbackMessage = "공개 범위를 기기에 보관했어요. 연결되면 다시 시도해요")
             }
         }
-    }
-
-    override fun selectMelodyAlias(candidateId: String) {
-        val candidate = _state.value.melodyAliasCandidates.firstOrNull { it.id == candidateId }
-            ?: return
-        _state.update { current ->
-            current.copy(
-                profile = current.profile.copy(
-                    melodyNotes = candidate.notes,
-                    melodyAliasId = candidate.id,
-                    melodyAliasTone = candidate.tone,
-                    melodyAliasMood = candidate.mood,
-                    melodyAliasTempo = candidate.tempo
-                ),
-                feedbackMessage = "${candidate.name}을(를) 멜로디 별칭으로 설정했어요"
-            )
-        }
-        syncMelodyAlias(candidate)
-    }
-
-    override fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate) {
-        _state.update { current ->
-            current.copy(
-                profile = current.profile.copy(
-                    melodyNotes = candidate.notes,
-                    melodyAliasId = candidate.id,
-                    melodyAliasTone = candidate.tone,
-                    melodyAliasMood = candidate.mood,
-                    melodyAliasTempo = candidate.tempo
-                ),
-                feedbackMessage = "${candidate.name}을(를) 멜로디 별칭으로 설정했어요"
-            )
-        }
-        syncMelodyAlias(candidate)
     }
 
     override fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String) {
@@ -1438,29 +1463,6 @@ class DemoMelodyRepository(
         }
     }
 
-    private fun syncMelodyAlias(candidate: MelodyAliasCandidate) {
-        persistProfile(_state.value.profile)
-        val token = accessToken ?: return
-        scope.launch {
-            runCatching {
-                profileApi.setMelodyAlias(
-                    "Bearer $token",
-                    MelodyAliasUpdateRequest(
-                        id = candidate.id,
-                        notes = candidate.notes,
-                        tone = candidate.tone,
-                        mood = candidate.mood,
-                        tempo = candidate.tempo,
-                    ),
-                )
-            }.onSuccess {
-                if (isCurrentSession(token)) applyRemoteProfile(it, "멜로디 별칭을 프로필에 저장했어요")
-            }.onFailure { error ->
-                if (isCurrentSession(token)) showRequestError(error, "멜로디 별칭을 저장하지 못했어요")
-            }
-        }
-    }
-
     private fun applyRemoteProfile(remote: RemoteProfile, feedback: String? = null) {
         _state.update { current ->
             val cachedProfile = restoreProfile(current.profile)
@@ -1476,54 +1478,63 @@ class DemoMelodyRepository(
                     remote.offlineExchangeGenres.orEmpty().map { TasteMetric(it, 0, 0.0) },
                     remote.offlineExchangeMoods.orEmpty().map { TasteMetric(it, 0, 0.0) },
                 )
-            current.copy(profileSaving = false, profile = current.profile.copy(
-            accountAlias = remote.displayName,
-            nearbyDisplayAlias = remote.displayName,
-            colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
-            bio = remote.bio.orEmpty(),
-            avatarSeed = remote.avatarSeed,
-            avatarUrl = remote.avatarUrl,
-            genres = remote.genres.orEmpty(),
-            moods = remote.moods.orEmpty(),
-            profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
-            offlineExchangeEnabled = remote.offlineExchangeEnabled ?: current.profile.offlineExchangeEnabled,
-            stats = stats,
-            tasteFingerprint = fingerprint,
-            profileRevision = if (keepPendingCuration) cachedProfile.profileRevision else remote.profileRevision,
-            signatureTracks = if (keepPendingCuration) {
-                cachedProfile.signatureTracks
-            } else remote.signatureTracks.orEmpty().map { it.toDomain() },
-            favoriteArtists = if (keepPendingCuration) {
-                cachedProfile.favoriteArtists
-            } else remote.favoriteArtists.orEmpty().map { it.toDomain() },
-            privacy = if (keepPendingPrivacy) {
-                cachedProfile.privacy
-            } else remote.privacy?.let {
-                ProfilePrivacySettings(
-                    currentMusicVisibility = it.currentMusicVisibility,
-                    listeningInsightsEnabled = it.listeningInsightsEnabled,
-                    listeningInsightsVisibility = it.listeningInsightsVisibility,
-                    exchangeInsightsVisibility = it.exchangeInsightsVisibility,
-                    bubblePresenceVisibility = it.bubblePresenceVisibility,
-                )
-            } ?: current.profile.privacy,
-            melodyNotes = remoteAlias?.notes ?: current.profile.melodyNotes,
-            melodyAliasId = remoteAlias?.id ?: current.profile.melodyAliasId,
-            melodyAliasTone = remoteAlias?.tone ?: current.profile.melodyAliasTone,
-            melodyAliasMood = remoteAlias?.mood ?: current.profile.melodyAliasMood,
-            melodyAliasTempo = remoteAlias?.tempo ?: current.profile.melodyAliasTempo,
-            discoverable = current.discoverabilityScope != "HIDDEN",
-            musicVisibilityLabel = when (current.musicVisibility) {
-                "MUTUALS" -> "맞팔에게만 공개"
-                "HIDDEN" -> "비공개"
-                else -> "제목과 아티스트 공개"
-            },
-        ),
-            verifiedOfflineExchangeCount = stats.verifiedExchangeCount,
-            offlineExchangeGenres = fingerprint.genres.map(TasteMetric::label),
-            offlineExchangeMoods = fingerprint.moods.map(TasteMetric::label),
-            feedbackMessage = feedback ?: current.feedbackMessage,
-        ) }
+            val resolvedAvatar = AvatarProfileResolver.resolve(
+                remoteSeed = remote.avatarSeed,
+                remoteUrl = remote.avatarUrl,
+                stableIdentity = remote.profileHandle ?: remote.displayName,
+                fallbackSeed = cachedProfile.avatarSeed,
+            )
+            current.copy(
+                profileSaving = false,
+                profile = current.profile.copy(
+                    accountAlias = remote.displayName,
+                    nearbyDisplayAlias = remote.displayName,
+                    colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
+                    bio = remote.bio.orEmpty(),
+                    avatarSeed = resolvedAvatar.seed,
+                    avatarUrl = resolvedAvatar.url,
+                    genres = remote.genres.orEmpty(),
+                    moods = remote.moods.orEmpty(),
+                    profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
+                    offlineExchangeEnabled = remote.offlineExchangeEnabled ?: current.profile.offlineExchangeEnabled,
+                    stats = stats,
+                    tasteFingerprint = fingerprint,
+                    profileRevision = if (keepPendingCuration) cachedProfile.profileRevision else remote.profileRevision,
+                    signatureTracks = if (keepPendingCuration) {
+                        cachedProfile.signatureTracks
+                    } else remote.signatureTracks.orEmpty().map { it.toDomain() },
+                    favoriteArtists = if (keepPendingCuration) {
+                        cachedProfile.favoriteArtists
+                    } else remote.favoriteArtists.orEmpty().map { it.toDomain() },
+                    privacy = if (keepPendingPrivacy) {
+                        cachedProfile.privacy
+                    } else remote.privacy?.let {
+                        ProfilePrivacySettings(
+                            currentMusicVisibility = it.currentMusicVisibility,
+                            listeningInsightsEnabled = it.listeningInsightsEnabled,
+                            listeningInsightsVisibility = it.listeningInsightsVisibility,
+                            exchangeInsightsVisibility = it.exchangeInsightsVisibility,
+                            bubblePresenceVisibility = it.bubblePresenceVisibility,
+                        )
+                    } ?: current.profile.privacy,
+                    melodyNotes = remoteAlias?.notes ?: current.profile.melodyNotes,
+                    melodyAliasId = remoteAlias?.id ?: current.profile.melodyAliasId,
+                    melodyAliasTone = remoteAlias?.tone ?: current.profile.melodyAliasTone,
+                    melodyAliasMood = remoteAlias?.mood ?: current.profile.melodyAliasMood,
+                    melodyAliasTempo = remoteAlias?.tempo ?: current.profile.melodyAliasTempo,
+                    discoverable = current.discoverabilityScope != "HIDDEN",
+                    musicVisibilityLabel = when (current.musicVisibility) {
+                        "MUTUALS" -> "맞팔에게만 공개"
+                        "HIDDEN" -> "비공개"
+                        else -> "제목과 아티스트 공개"
+                    },
+                ),
+                verifiedOfflineExchangeCount = stats.verifiedExchangeCount,
+                offlineExchangeGenres = fingerprint.genres.map(TasteMetric::label),
+                offlineExchangeMoods = fingerprint.moods.map(TasteMetric::label),
+                feedbackMessage = feedback ?: current.feedbackMessage,
+            )
+        }
         persistProfile(_state.value.profile)
     }
 
@@ -1671,6 +1682,7 @@ class DemoMelodyRepository(
                     _state.update { current ->
                         current.copy(popularTracks = tracks.map { it.toDomain() })
                     }
+                    resolveMissingPopularArtwork()
                 }
             // Popular-track aggregation is supplementary. A failed refresh must not downgrade an
             // otherwise healthy nearby-presence connection.
@@ -1716,26 +1728,46 @@ class DemoMelodyRepository(
         }
     }
 
-    private fun RemoteNearbyBubble.toDomain() = com.example.myapplication.core.model.NearbyListener(
-        nearbyHandle = nearbyHandle,
-        profileHandle = profileHandle,
-        displayAlias = displayAlias,
-        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
-        displayPosition = com.example.myapplication.core.model.DisplayPosition(displayPosition.x, displayPosition.y),
-        matchScore = matchScore,
-        proximity = com.example.myapplication.core.model.Proximity.fromWire(proximity),
-        isPlaying = track != null,
-        currentTrack = track?.let { Track(id = "remote-$nearbyHandle", title = it.title, artist = it.artist, platform = "REMOTE") },
-        commonGenres = emptyList(),
-        relationship = relationship?.let {
-            runCatching { RelationshipStatus.valueOf(it) }.getOrDefault(RelationshipStatus.NONE)
-        } ?: RelationshipStatus.NONE,
-        canReact = canReact ?: true,
-    )
+    private fun RemoteNearbyBubble.toDomain(): com.example.myapplication.core.model.NearbyListener {
+        val resolvedAvatar = AvatarProfileResolver.resolve(
+            remoteSeed = avatarSeed,
+            remoteUrl = avatarUrl,
+            stableIdentity = profileHandle ?: nearbyHandle,
+            fallbackSeed = displayAlias,
+        )
+        return com.example.myapplication.core.model.NearbyListener(
+            nearbyHandle = nearbyHandle,
+            profileHandle = profileHandle,
+            displayAlias = displayAlias,
+            colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+            displayPosition = com.example.myapplication.core.model.DisplayPosition(displayPosition.x, displayPosition.y),
+            matchScore = matchScore,
+            proximity = com.example.myapplication.core.model.Proximity.fromWire(proximity),
+            isPlaying = track != null,
+            currentTrack = track?.let {
+                Track(
+                    id = "remote-$nearbyHandle",
+                    title = it.title,
+                    artist = it.artist,
+                    artworkUrl = it.albumArtUrl,
+                    platform = "REMOTE",
+                )
+            },
+            commonGenres = emptyList(),
+            relationship = relationship?.let {
+                runCatching { RelationshipStatus.valueOf(it) }.getOrDefault(RelationshipStatus.NONE)
+            } ?: RelationshipStatus.NONE,
+            canReact = canReact ?: true,
+            avatarUrl = resolvedAvatar.url,
+        )
+    }
 
     private fun applyFollowResponse(handle: String, response: RemoteFollowResponse) {
         val relationship = runCatching { RelationshipStatus.valueOf(response.relationship) }
             .getOrDefault(RelationshipStatus.NONE)
+        response.roomId?.takeIf { response.mutual }?.let { roomId ->
+            persistChatRoomHidden(roomId, hidden = false)
+        }
         _state.update { current ->
             val peer = current.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
             val listeners = current.nearbyListeners.map {
@@ -1752,6 +1784,7 @@ class DemoMelodyRepository(
                     relativeTime = "방금",
                     unreadCount = 0,
                     relationship = RelationshipStatus.MUTUAL,
+                    hasMessages = false,
                 )
             }
             val chatsWithoutPeer = current.chats.filterNot { it.peerHandle == handle }
@@ -1865,10 +1898,13 @@ class DemoMelodyRepository(
                         lastMessage = delivered.content,
                         relativeTime = "방금",
                         unreadCount = if (isMine || active) 0 else chat.unreadCount + 1,
+                        hasMessages = true,
+                        isHidden = false,
                     )
                 },
             )
         }
+        if (payload.isMine != true) persistChatRoomHidden(roomId, hidden = false)
         if (shouldRefreshRooms) loadChatRooms()
         if (shouldMarkRead) markChatRoomRead(roomId)
     }
@@ -1913,10 +1949,13 @@ class DemoMelodyRepository(
                         relativeTime = if (payload.lastMessageAt == null) chat.relativeTime else "방금",
                         unreadCount = if (activeChatRoomId == roomId) 0
                         else payload.unreadCount?.coerceAtLeast(0) ?: chat.unreadCount,
+                        hasMessages = chat.hasMessages || payload.lastMessageContent != null,
+                        isHidden = if ((payload.unreadCount ?: 0) > 0) false else chat.isHidden,
                     )
                 }
             )
         }
+        if ((payload.unreadCount ?: 0) > 0) persistChatRoomHidden(roomId, hidden = false)
         if (!found) loadChatRooms()
     }
 
@@ -1937,7 +1976,11 @@ class DemoMelodyRepository(
             actorColorHex = actorColor,
             actorProfileHandle = payload.senderProfileHandle?.takeIf(String::isNotBlank),
             preview = preview,
-            relativeTime = "방금",
+            relativeTime = notificationRelativeTime(
+                payload.createdAt.toServerEpochMillis()
+                    ?: event.envelope.timestamp.toServerEpochMillis()
+                    ?: System.currentTimeMillis(),
+            ),
         )
         _state.update { current ->
             current.copy(
@@ -1958,6 +2001,7 @@ class DemoMelodyRepository(
                 id = "remote-${handle}-${title.hashCode()}-${artist.hashCode()}",
                 title = title,
                 artist = artist,
+                artworkUrl = payload.track?.albumArtUrl,
                 platform = "REMOTE",
             )
         } else null
@@ -2001,6 +2045,7 @@ class DemoMelodyRepository(
                     id = "popular-${title.hashCode()}-${artist.hashCode()}",
                     title = title,
                     artist = artist,
+                    artworkUrl = remote.artworkUrl,
                     platform = "SERVER_AGGREGATE",
                 ),
                 listenerCount = remote.listenerCount?.coerceAtLeast(0) ?: 0,
@@ -2008,6 +2053,53 @@ class DemoMelodyRepository(
             )
         }
         _state.update { it.copy(popularTracks = tracks) }
+        resolveMissingPopularArtwork()
+    }
+
+    private fun resolveMissingPopularArtwork() {
+        _state.value.popularTracks
+            .filter { it.track.artworkUrl.isNullOrBlank() }
+            .forEach { popularTrack ->
+                scope.launch {
+                    val resolvedUrl = runCatching {
+                        musicSearchRepository.trackArtwork(
+                            popularTrack.track.title,
+                            popularTrack.track.artist,
+                        )
+                    }.getOrNull() ?: return@launch
+                    _state.update { current ->
+                        current.copy(
+                            popularTracks = current.popularTracks.map { currentTrack ->
+                                if (currentTrack.track.id == popularTrack.track.id &&
+                                    currentTrack.track.artworkUrl.isNullOrBlank()
+                                ) {
+                                    currentTrack.copy(track = currentTrack.track.copy(artworkUrl = resolvedUrl))
+                                } else currentTrack
+                            },
+                        )
+                    }
+                }
+            }
+    }
+
+    private fun resolvePublicProfileArtwork(profile: PublicProfile) {
+        val nowPlaying = profile.nowPlaying?.takeIf { it.artworkUrl.isNullOrBlank() } ?: return
+        scope.launch {
+            val resolvedUrl = runCatching {
+                musicSearchRepository.trackArtwork(nowPlaying.title, nowPlaying.artist)
+            }.getOrNull() ?: return@launch
+            _state.update { current ->
+                val selected = current.selectedPublicProfile
+                if (selected?.profileHandle != profile.profileHandle ||
+                    selected.nowPlaying?.title != nowPlaying.title ||
+                    selected.nowPlaying.artist != nowPlaying.artist
+                ) current else current.copy(
+                    selectedPublicProfile = selected.copy(
+                        nowPlaying = selected.nowPlaying.copy(artworkUrl = resolvedUrl),
+                    ),
+                )
+            }
+        }
     }
 
     private fun applyNotificationCreated(event: RealtimeEvent.NotificationCreated) {
@@ -2092,6 +2184,8 @@ class DemoMelodyRepository(
                             senderProfileHandle = reaction.senderProfileHandle,
                             reactionType = reaction.reactionType,
                             trackTitle = reaction.trackTitle,
+                            createdAtEpochMillis = reaction.createdAt.toServerEpochMillis()
+                                ?: System.currentTimeMillis(),
                         )
                     }
                     val remoteNotifications = reactions.map { reaction ->
@@ -2105,7 +2199,10 @@ class DemoMelodyRepository(
                             preview = reaction.trackTitle?.takeIf(String::isNotBlank)?.let {
                                 "$label · ‘$it’"
                             } ?: label,
-                            relativeTime = "최근",
+                            relativeTime = notificationRelativeTime(
+                                reaction.createdAt.toServerEpochMillis()
+                                    ?: System.currentTimeMillis(),
+                            ),
                         )
                     }
                     val durable = realtimeInboxStore?.load() ?: remoteNotifications
@@ -2140,7 +2237,16 @@ class DemoMelodyRepository(
             runCatching { socialApi.chatRooms("Bearer $token") }
                 .onSuccess { rooms ->
                     if (!isCurrentSession(token)) return@onSuccess
-                    val remoteRooms = rooms.map { room -> room.toDomain() }
+                    val storedHiddenIds = hiddenChatRoomIds()
+                    val newlyActiveRoomIds = rooms
+                        .filter { it.unreadCount > 0 }
+                        .map(RemoteChatSummary::roomId)
+                        .toSet()
+                    val activeHiddenIds = storedHiddenIds - newlyActiveRoomIds
+                    if (activeHiddenIds != storedHiddenIds) persistHiddenChatRoomIds(activeHiddenIds)
+                    val remoteRooms = rooms.map { room ->
+                        room.toDomain(isHidden = room.roomId in activeHiddenIds)
+                    }
                     _state.update { current ->
                         val realtimeAdvanced = chatRealtimeVersion.get() != realtimeVersionAtRequest
                         if (!realtimeAdvanced) {
@@ -2205,15 +2311,17 @@ class DemoMelodyRepository(
         }
     }
 
-    private fun RemoteChatSummary.toDomain() = ChatPreview(
+    private fun RemoteChatSummary.toDomain(isHidden: Boolean = false) = ChatPreview(
         roomId = roomId,
         peerHandle = peerHandle ?: "chat-$roomId",
         peerAlias = peerAlias,
         peerColorHex = peerColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
-        lastMessage = lastMessage ?: "서로 팔로우했어요",
+        lastMessage = lastMessage.orEmpty(),
         relativeTime = if (lastMessageAt == null) "새 대화" else "최근",
         unreadCount = unreadCount,
         relationship = RelationshipStatus.MUTUAL,
+        hasMessages = lastMessage != null,
+        isHidden = isHidden,
     )
 
     private fun com.example.myapplication.data.remote.RemoteBlockedUser.toDomain() = BlockedUser(
@@ -2223,16 +2331,24 @@ class DemoMelodyRepository(
         blockedAt = blockedAt,
     )
 
-    private fun RemoteSocialConnection.toDomain() = SocialConnection(
-        relationshipId = relationshipId,
-        profileHandle = profileHandle,
-        displayAlias = displayAlias,
-        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
-        avatarUrl = avatarUrl,
-        bio = bio,
-        mutual = mutual,
-        followedAt = followedAt,
-    )
+    private fun RemoteSocialConnection.toDomain(): SocialConnection {
+        val resolvedAvatar = AvatarProfileResolver.resolve(
+            remoteSeed = null,
+            remoteUrl = avatarUrl,
+            stableIdentity = profileHandle,
+            fallbackSeed = displayAlias,
+        )
+        return SocialConnection(
+            relationshipId = relationshipId,
+            profileHandle = profileHandle,
+            displayAlias = displayAlias,
+            colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+            avatarUrl = resolvedAvatar.url,
+            bio = bio,
+            mutual = mutual,
+            followedAt = followedAt,
+        )
+    }
 
     private fun RemoteProfileStats.toDomain() = ProfileStats(
         followingCount = followingCount,
@@ -2291,58 +2407,67 @@ class DemoMelodyRepository(
         genreTags = genreTags,
     )
 
-    private fun RemotePublicProfile.toDomain() = PublicProfile(
-        profileHandle = profileHandle,
-        isSelf = relationship == "SELF",
-        displayName = displayName,
-        colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
-        bio = bio.orEmpty(),
-        avatarSeed = avatarSeed,
-        avatarUrl = avatarUrl,
-        genres = genres.orEmpty(),
-        moods = moods.orEmpty(),
-        melodyAlias = melodyAlias?.toDomain(),
-        stats = stats.toDomain(),
-        tasteFingerprint = tasteFingerprint?.toDomain() ?: TasteFingerprint(),
-        relationship = runCatching { RelationshipStatus.valueOf(relationship) }.getOrDefault(RelationshipStatus.NONE),
-        following = following,
-        mutual = mutual,
-        sharedVerifiedExchangeCount = sharedVerifiedExchangeCount,
-        signatureTracks = signatureTracks.orEmpty().map { it.toDomain() },
-        favoriteArtists = favoriteArtists.orEmpty().map { it.toDomain() },
-        nowPlaying = nowPlaying?.let {
-            ProfileNowPlaying(
-                title = it.title,
-                artist = it.artist,
-                album = it.album,
-                artworkUrl = it.artworkUrl,
-                isPlaying = it.isPlaying,
-                durationMs = it.durationMs,
-                positionMs = it.positionMs,
-                positionObservedAt = it.positionObservedAt,
-                observedAt = it.observedAt,
-                expiresAt = it.expiresAt,
-            )
-        },
-        commonTaste = commonTaste?.let { taste ->
-            CommonTasteSummary(
-                score = taste.score,
-                metrics = taste.metrics.orEmpty().map {
-                    CommonTasteMetric(it.label, it.type, it.score, it.evidenceCount)
-                },
-                algorithmVersion = taste.algorithmVersion,
-                sampleSize = taste.sampleSize,
-                calculatedAt = taste.calculatedAt,
-            )
-        },
-        sectionStates = sectionStates.orEmpty(),
-    )
+    private fun RemotePublicProfile.toDomain(): PublicProfile {
+        val resolvedAvatar = AvatarProfileResolver.resolve(
+            remoteSeed = avatarSeed,
+            remoteUrl = avatarUrl,
+            stableIdentity = profileHandle,
+            fallbackSeed = displayName,
+        )
+        return PublicProfile(
+            profileHandle = profileHandle,
+            isSelf = relationship == "SELF",
+            displayName = displayName,
+            colorHex = profileColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+            bio = bio.orEmpty(),
+            avatarSeed = resolvedAvatar.seed,
+            avatarUrl = resolvedAvatar.url,
+            genres = genres.orEmpty(),
+            moods = moods.orEmpty(),
+            melodyAlias = melodyAlias?.toDomain(),
+            stats = stats.toDomain(),
+            tasteFingerprint = tasteFingerprint?.toDomain() ?: TasteFingerprint(),
+            relationship = runCatching { RelationshipStatus.valueOf(relationship) }.getOrDefault(RelationshipStatus.NONE),
+            following = following,
+            mutual = mutual,
+            sharedVerifiedExchangeCount = sharedVerifiedExchangeCount,
+            signatureTracks = signatureTracks.orEmpty().map { it.toDomain() },
+            favoriteArtists = favoriteArtists.orEmpty().map { it.toDomain() },
+            nowPlaying = nowPlaying?.let {
+                ProfileNowPlaying(
+                    title = it.title,
+                    artist = it.artist,
+                    album = it.album,
+                    artworkUrl = it.artworkUrl,
+                    isPlaying = it.isPlaying,
+                    durationMs = it.durationMs,
+                    positionMs = it.positionMs,
+                    positionObservedAt = it.positionObservedAt,
+                    observedAt = it.observedAt,
+                    expiresAt = it.expiresAt,
+                )
+            },
+            commonTaste = commonTaste?.let { taste ->
+                CommonTasteSummary(
+                    score = taste.score,
+                    metrics = taste.metrics.orEmpty().map {
+                        CommonTasteMetric(it.label, it.type, it.score, it.evidenceCount)
+                    },
+                    algorithmVersion = taste.algorithmVersion,
+                    sampleSize = taste.sampleSize,
+                    calculatedAt = taste.calculatedAt,
+                )
+            },
+            sectionStates = sectionStates.orEmpty(),
+        )
+    }
 
     private fun RemotePopularTrack.toDomain() = PopularTrack(
         track = Track(
             id = "popular-${title.hashCode()}-${artist.hashCode()}",
             title = title,
             artist = artist,
+            artworkUrl = artworkUrl,
             platform = "SERVER_AGGREGATE",
         ),
         listenerCount = listenerCount.coerceAtLeast(0),
@@ -2438,19 +2563,6 @@ class DemoMelodyRepository(
 
     private fun profileScopedKey(base: String): String =
         activeOwnerId?.let { owner -> "$base::$owner" } ?: base
-
-    private fun MelodyAliasCandidateEntity.toDomain() = MelodyAliasCandidate(
-        id = id,
-        name = name,
-        mood = mood,
-        tone = tone,
-        tempo = tempo,
-        energy = energy,
-        notes = notesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() },
-        rhythm = rhythmCsv.split(",").mapNotNull { it.trim().toIntOrNull() },
-        toneJsPreset = toneJsPreset,
-        melodyId = melodyId
-    )
 
     private data class LocationFix(
         val latitude: Double,

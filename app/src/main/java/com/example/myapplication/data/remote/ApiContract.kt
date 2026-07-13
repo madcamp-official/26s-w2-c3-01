@@ -21,7 +21,6 @@ object MelodyApiContract {
         const val REFRESH = "/api/v1/auth/refresh"
         const val ME = "/api/v1/me"
         const val PRIVACY = "/api/v1/me/privacy"
-        const val MELODY_ALIAS = "/api/v1/me/melody-alias"
         const val PUBLIC_PROFILE = "/api/v1/profiles/{profileHandle}"
         const val EXCHANGE_PROFILE = "/api/v1/profiles/exchange/{exchangeId}"
         const val NEARBY_SNAPSHOT = "/api/v1/nearby/snapshot"
@@ -39,7 +38,6 @@ object MelodyApiContract {
         const val OFFLINE_EXCHANGE_BATCH = "/api/v1/offline-exchanges/batch"
         const val OFFLINE_EXCHANGE_HISTORY = "/api/v1/offline-exchanges"
         const val OFFLINE_EXCHANGE_DELETE = "/api/v1/offline-exchanges/{exchangeId}"
-        const val MELODY_ALIAS_GENERATE = "/api/v1/melody-alias/generate"
     }
 
     object Send {

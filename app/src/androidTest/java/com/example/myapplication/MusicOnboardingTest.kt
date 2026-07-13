@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.example.myapplication.core.model.MusicSearchResult
+import com.example.myapplication.ui.GenreCatalogUiState
 import com.example.myapplication.ui.MusicSearchUiState
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.theme.MelodyBubbleTheme
@@ -39,6 +40,8 @@ class MusicOnboardingTest {
             MelodyBubbleTheme {
                 OnboardingScreen(
                     musicSearchState = MusicSearchUiState.Success("아이유", listOf(result)),
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onComplete = { _, _, artists, tracks ->
@@ -52,6 +55,7 @@ class MusicOnboardingTest {
         composeRule.onNodeWithTag("onboarding_terms_checkbox").performClick()
         composeRule.onNodeWithText("계속").performClick()
         composeRule.onNodeWithText("좋아하는 장르를 골라요").assertIsDisplayed()
+        composeRule.onNodeWithText("K-Pop").performClick()
         composeRule.onNodeWithText("계속").performClick()
         composeRule.onNodeWithText("아이유").performClick()
         composeRule.onNodeWithText("계속").performClick()

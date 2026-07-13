@@ -7,7 +7,6 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.ConnectionState
-import com.example.myapplication.core.model.MelodyAliasCandidate
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SessionMode
@@ -15,7 +14,6 @@ import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.ProfilePrivacySettings
 import com.example.myapplication.core.model.ProfileTrack
-import com.example.myapplication.audio.MelodyAliasPreviewPlayer
 import com.example.myapplication.audio.MusicPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.MelodyApplication
@@ -30,8 +28,6 @@ import com.example.myapplication.data.remote.BuildingLoungeRepository
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
 import com.example.myapplication.data.remote.CreateLoungeCardRequestDto
 import com.example.myapplication.data.remote.SubLoungeSnapshotDto
-import com.example.myapplication.data.remote.MelodyAliasGenerateRequest
-import com.example.myapplication.data.remote.MelodyAliasRepository
 import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
 import com.example.myapplication.data.remote.TokenResponse
@@ -92,13 +88,6 @@ sealed interface EmailAvailabilityUiState {
     data class Error(val message: String) : EmailAvailabilityUiState
 }
 
-sealed interface MelodyAliasGenerationState {
-    data object Idle : MelodyAliasGenerationState
-    data object Loading : MelodyAliasGenerationState
-    data class Success(val candidates: List<MelodyAliasCandidate>) : MelodyAliasGenerationState
-    data class Error(val message: String) : MelodyAliasGenerationState
-}
-
 sealed interface MusicSearchUiState {
     data object Idle : MusicSearchUiState
     data class Loading(val query: String) : MusicSearchUiState
@@ -108,6 +97,12 @@ sealed interface MusicSearchUiState {
     ) : MusicSearchUiState
     data class Error(val query: String, val message: String) : MusicSearchUiState
 }
+
+data class GenreCatalogUiState(
+    val genres: List<String> = emptyList(),
+    val loading: Boolean = false,
+    val errorMessage: String? = null,
+)
 
 data class UserMapLocation(
     val latitude: Double,
@@ -134,8 +129,6 @@ data class BuildingLoungeUiState(
 class MelodyViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: MelodyRepository = DemoMelodyRepository(application)
     private val authRepository by lazy { AuthRepository() }
-    private val melodyAliasPreviewPlayer = MelodyAliasPreviewPlayer()
-    private val melodyAliasRepository by lazy { MelodyAliasRepository() }
     private val musicSearchRepository by lazy { MusicSearchRepository() }
     private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
     private val realtimeClient = (application as MelodyApplication).realtimeClient
@@ -168,9 +161,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             repository.saveOfflineExchange(result, credential.credentialId)
         }
     }
-    private val _melodyAliasGenerationState = MutableStateFlow<MelodyAliasGenerationState>(MelodyAliasGenerationState.Idle)
     private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
     private val _musicSearchState = MutableStateFlow<MusicSearchUiState>(MusicSearchUiState.Idle)
+    private val _genreCatalogState = MutableStateFlow(GenreCatalogUiState())
     private var musicSearchJob: Job? = null
     private var nowPlayingPreviewJob: Job? = null
     private var previewLookupJob: Job? = null
@@ -181,13 +174,14 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     val loginState = _loginState.asStateFlow()
     val sessionState = _sessionState.asStateFlow()
     val emailAvailabilityState = _emailAvailabilityState.asStateFlow()
-    val melodyAliasGenerationState = _melodyAliasGenerationState.asStateFlow()
     val buildingLoungeState = _buildingLoungeState.asStateFlow()
     val musicSearchState = _musicSearchState.asStateFlow()
+    val genreCatalogState = _genreCatalogState.asStateFlow()
     val previewPlaybackState = musicPreviewPlayer.state
     val exchangeState = nearbyExchangeManager.state
 
     init {
+        loadGenreCatalog()
         connectivityManager.registerDefaultNetworkCallback(connectivityCallback)
         removeAccessTokenListener = ApiClient.addAccessTokenListener { refreshedToken ->
             viewModelScope.launch {
@@ -251,7 +245,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     displayAlias = state.profile.accountAlias,
                     avatarUrl = state.profile.avatarUrl,
                     colorHex = state.profile.colorHex,
-                    melodyAlias = state.profile.melodyNotes.joinToString(" · "),
+                    melodyAlias = "",
                     musicCard = state.toExchangeMusicCard(),
                 ))
                 val credential = existing.offlineCredential
@@ -341,6 +335,28 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+        }
+    }
+
+    fun loadGenreCatalog() {
+        if (_genreCatalogState.value.loading) return
+        viewModelScope.launch {
+            _genreCatalogState.value = _genreCatalogState.value.copy(loading = true, errorMessage = null)
+            runCatching { musicSearchRepository.genres() }
+                .onSuccess { genres ->
+                    _genreCatalogState.value = if (genres.isEmpty()) {
+                        GenreCatalogUiState(errorMessage = "장르 목록이 비어 있어요. 다시 불러와 주세요.")
+                    } else {
+                        GenreCatalogUiState(genres = genres)
+                    }
+                }
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _genreCatalogState.value = GenreCatalogUiState(
+                        genres = _genreCatalogState.value.genres,
+                        errorMessage = "Apple Music 장르 목록을 불러오지 못했어요.",
+                    )
+                }
         }
     }
 
@@ -598,7 +614,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     displayAlias = credential.displayAlias,
                     avatarUrl = state.profile.avatarUrl,
                     colorHex = state.profile.colorHex,
-                    melodyAlias = state.profile.melodyNotes.joinToString(" · "),
+                    melodyAlias = "",
                     musicCard = state.toExchangeMusicCard(),
                     lastAuthenticatedAt = System.currentTimeMillis(),
                     offlineCredential = credential,
@@ -624,7 +640,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         displayAlias = profile.accountAlias,
         trackTitle = currentTrack.title,
         trackArtist = currentTrack.artist,
-        melodyAlias = profile.melodyNotes.joinToString(" · "),
+        melodyAlias = "",
         genreTags = currentTrack.genreTags.ifEmpty { profile.genres },
         moodTags = currentTrack.moodTags.ifEmpty { profile.moods },
     )
@@ -686,7 +702,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         clearFollowedNearbyPreview()
         nowPlayingPreviewJob?.cancel()
         musicPreviewPlayer.stop()
-        melodyAliasPreviewPlayer.stop()
         val nowPlaying = profile?.nowPlaying
             ?.takeIf { !profile.isSelf && it.isPlaying }
             ?: return
@@ -737,6 +752,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun exitBubbleMode() = repository.exitBubbleMode()
     fun openChat(roomId: String) = repository.openChat(roomId)
     fun closeChat(roomId: String) = repository.closeChat(roomId)
+    fun leaveChat(roomId: String) = repository.leaveChat(roomId)
     fun startSharing() = repository.startSharing()
     fun stopSharing() = repository.stopSharing()
     fun sharingPermissionRequired() = repository.setSharingPermissionRequired()
@@ -772,41 +788,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         repository.updateProfileCuration(signatureTracks, favoriteArtists)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings) =
         repository.updateProfilePrivacy(settings)
-    fun selectMelodyAlias(candidateId: String) = repository.selectMelodyAlias(candidateId)
-    fun selectGeneratedMelodyAlias(candidate: MelodyAliasCandidate) = repository.selectGeneratedMelodyAlias(candidate)
-
-    fun generateMelodyAliases(mood: String, tone: String, pitch: String, tempoRange: String) {
-        if (_melodyAliasGenerationState.value == MelodyAliasGenerationState.Loading) return
-        val token = accessToken
-        if (token.isNullOrBlank()) {
-            _melodyAliasGenerationState.value = MelodyAliasGenerationState.Error("로그인 후 AI 멜로디를 생성할 수 있어요.")
-            return
-        }
-        viewModelScope.launch {
-            _melodyAliasGenerationState.value = MelodyAliasGenerationState.Loading
-            melodyAliasRepository.generate(
-                token,
-                MelodyAliasGenerateRequest(
-                    mood = mood,
-                    tone = tone,
-                    pitch = pitch,
-                    tempoRange = tempoRange,
-                    count = 3
-                )
-            ).onSuccess { candidates ->
-                _melodyAliasGenerationState.value = MelodyAliasGenerationState.Success(candidates)
-            }.onFailure {
-                _melodyAliasGenerationState.value = MelodyAliasGenerationState.Error(
-                    "멜로디를 만들지 못했어요. 서버 연결과 OpenAI 설정을 확인한 뒤 다시 시도해 주세요."
-                )
-            }
-        }
-    }
-
-    fun resetMelodyAliasGeneration() {
-        _melodyAliasGenerationState.value = MelodyAliasGenerationState.Idle
-    }
-
     fun playMusicPreview(
         title: String,
         artist: String,
@@ -862,9 +843,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private fun previewFollowKey(title: String, artist: String): String =
         "${title.trim().lowercase()}\u0000${artist.trim().lowercase()}"
 
-    fun stopMelodyAudio() {
+    fun stopProfileAudio() {
         stopNowPlayingPreview()
-        melodyAliasPreviewPlayer.stop()
     }
 
     private fun stopNowPlayingPreview() {
@@ -1257,8 +1237,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun previewMelodyAlias(candidate: MelodyAliasCandidate) = melodyAliasPreviewPlayer.play(candidate)
-    fun previewMelodyTone(tone: String) = melodyAliasPreviewPlayer.playToneSample(tone)
     fun syncExchange(exchangeId: String) = repository.syncExchange(exchangeId)
     fun deleteExchange(exchangeId: String) = repository.deleteExchange(exchangeId)
     fun clearFeedback() = repository.clearFeedback()
@@ -1268,7 +1246,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         loungeSnapshotJob?.cancel()
         removeAccessTokenListener?.invoke()
         removeAccessTokenListener = null
-        melodyAliasPreviewPlayer.release()
         musicPreviewPlayer.release()
         nearbyExchangeManager.stop()
         runCatching { connectivityManager.unregisterNetworkCallback(connectivityCallback) }

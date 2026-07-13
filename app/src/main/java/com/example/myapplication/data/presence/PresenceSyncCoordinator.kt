@@ -5,6 +5,7 @@ import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.local.SecureTokenStore
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.MusicUpdateRequest
+import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.NearbyApi
 import com.example.myapplication.data.remote.BuildingLoungeApi
 import com.example.myapplication.data.remote.UpdateLoungeListeningRequestDto
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
@@ -52,6 +54,7 @@ class PresenceSyncCoordinator private constructor(
         Context.MODE_PRIVATE,
     )
     private val tokenStore = SecureTokenStore(applicationContext)
+    private val musicSearchRepository = MusicSearchRepository()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _detectedPlayback = MutableStateFlow(readPersistedPlayback())
     private val syncSignals = Channel<Unit>(Channel.CONFLATED)
@@ -66,6 +69,9 @@ class PresenceSyncCoordinator private constructor(
 
     @Volatile
     private var activeSubLoungeId: String? = null
+
+    private var artworkLookupJob: Job? = null
+    private var artworkLookupKey: String? = null
 
     init {
         scope.launch { syncWorker() }
@@ -109,6 +115,7 @@ class PresenceSyncCoordinator private constructor(
             return
         }
         val safeSource = source.toSafeMetadata(MAX_SOURCE_LENGTH) ?: DEFAULT_SOURCE_TYPE
+        val safeArtworkUrl = artworkUrl?.takeIf { it.startsWith("https://") }?.take(MAX_URL_LENGTH)
         updatePlayback(
             DetectedPlaybackState(
                 track = Track(
@@ -116,19 +123,54 @@ class PresenceSyncCoordinator private constructor(
                     title = safeTitle,
                     artist = safeArtist,
                     album = album.toSafeMetadata(MAX_ALBUM_LENGTH),
+                    artworkUrl = safeArtworkUrl,
                     platform = safeSource,
                 ),
                 isPlaying = true,
-                artworkUrl = artworkUrl?.takeIf { it.startsWith("https://") }?.take(MAX_URL_LENGTH),
+                artworkUrl = safeArtworkUrl,
                 durationMs = durationMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
                 positionMs = positionMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
                 positionObservedAtEpochMs = positionObservedAtEpochMs,
             )
         )
+        if (safeArtworkUrl == null) {
+            resolveArtwork(safeTitle, safeArtist)
+        } else {
+            artworkLookupJob?.cancel()
+            artworkLookupJob = null
+            artworkLookupKey = null
+        }
     }
 
     fun onPlaybackStopped() {
+        artworkLookupJob?.cancel()
+        artworkLookupJob = null
+        artworkLookupKey = null
         updatePlayback(DetectedPlaybackState())
+    }
+
+    private fun resolveArtwork(title: String, artist: String) {
+        val key = "${title.lowercase()}\u0000${artist.lowercase()}"
+        if (artworkLookupKey == key && artworkLookupJob?.isActive == true) return
+        artworkLookupJob?.cancel()
+        artworkLookupKey = key
+        artworkLookupJob = scope.launch {
+            val resolvedUrl = runCatching { musicSearchRepository.trackArtwork(title, artist) }
+                .getOrNull()
+                ?: return@launch
+            val current = _detectedPlayback.value
+            val currentTrack = current.track ?: return@launch
+            if (!current.isPlaying ||
+                currentTrack.title != title ||
+                currentTrack.artist != artist
+            ) return@launch
+            updatePlayback(
+                current.copy(
+                    track = currentTrack.copy(artworkUrl = resolvedUrl),
+                    artworkUrl = resolvedUrl,
+                )
+            )
+        }
     }
 
     fun activateSubLounge(subLoungeId: String) {
@@ -278,7 +320,8 @@ class PresenceSyncCoordinator private constructor(
 
     private fun DetectedPlaybackState.fingerprint(): String =
         "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.album.orEmpty()}\u001F" +
-            "${track?.platform.orEmpty()}\u001F${durationMs ?: -1}\u001F${positionMs ?: -1}\u001F" +
+            "${track?.artworkUrl.orEmpty()}\u001F${track?.platform.orEmpty()}\u001F${artworkUrl.orEmpty()}\u001F" +
+            "${durationMs ?: -1}\u001F${positionMs ?: -1}\u001F" +
             "$isPlaying\u001F$verifiedInCurrentProcess\u001F${activeSubLoungeId.orEmpty()}"
 
     companion object {
@@ -316,7 +359,7 @@ internal fun DetectedPlaybackState.toMusicUpdateRequest(): MusicUpdateRequest {
         title = detected?.title.orEmpty(),
         artist = detected?.artist.orEmpty(),
         album = detected?.album,
-        artworkUrl = artworkUrl.takeIf { detected != null },
+        artworkUrl = (artworkUrl ?: detected?.artworkUrl).takeIf { detected != null },
         sourceType = detected?.platform.toRemoteSourceType(),
         isPlaying = detected != null,
         durationMs = durationMs.takeIf { detected != null },

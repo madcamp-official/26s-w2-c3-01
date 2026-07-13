@@ -76,6 +76,7 @@ data class NearbyReactionCreatedPayload(
 data class RealtimeTrackPayload(
     val title: String? = null,
     val artist: String? = null,
+    val albumArtUrl: String? = null,
 )
 
 data class NearbyMusicUpdatedPayload(
@@ -87,6 +88,7 @@ data class NearbyMusicUpdatedPayload(
 data class PopularTrackPayload(
     val title: String? = null,
     val artist: String? = null,
+    val artworkUrl: String? = null,
     val listenerCount: Int? = null,
     val reactionCount: Int? = null,
 )

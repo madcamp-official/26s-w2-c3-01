@@ -9,6 +9,8 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 /** Private, account-scoped persistence for realtime inbox items that arrive without an Activity. */
 class RealtimeInboxStore(context: Context) {
@@ -86,7 +88,7 @@ class RealtimeInboxStore(context: Context) {
             actorColorHex = null,
             actorProfileHandle = item.actorProfileHandle,
             preview = item.preview,
-            relativeTime = "최근",
+            relativeTime = notificationRelativeTime(item.createdAtEpochMillis),
             isRead = item.isRead,
         )
     }
@@ -142,7 +144,9 @@ class RealtimeInboxStore(context: Context) {
                 actorAlias = alias,
                 actorProfileHandle = payload.senderProfileHandle.safeText(80),
                 preview = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
-                createdAtEpochMillis = System.currentTimeMillis(),
+                createdAtEpochMillis = payload.createdAt.toServerEpochMillis()
+                    ?: envelope.timestamp.toServerEpochMillis()
+                    ?: System.currentTimeMillis(),
             )
         }
         is RealtimeEvent.NotificationCreated -> {
@@ -153,7 +157,9 @@ class RealtimeInboxStore(context: Context) {
                 type = notificationType(payload.type).name,
                 actorAlias = null,
                 preview = preview,
-                createdAtEpochMillis = System.currentTimeMillis(),
+                createdAtEpochMillis = payload.createdAt.toServerEpochMillis()
+                    ?: envelope.timestamp.toServerEpochMillis()
+                    ?: System.currentTimeMillis(),
             )
         }
         else -> null
@@ -206,5 +212,32 @@ class RealtimeInboxStore(context: Context) {
         private const val KEY_ITEMS = "items"
         private const val MAX_ITEMS = 100
         private val CONTROL_CHARACTERS = Regex("[\\p{Cc}\\p{Cf}]+")
+    }
+}
+
+internal fun notificationRelativeTime(
+    createdAtEpochMillis: Long,
+    nowEpochMillis: Long = System.currentTimeMillis(),
+): String {
+    val ageMillis = (nowEpochMillis - createdAtEpochMillis).coerceAtLeast(0L)
+    val hours = ageMillis / 3_600_000L
+    if (hours < 1L) return "최근"
+    val days = hours / 24L
+    return if (days < 1L) "${hours}시간 전" else "${days}일 전"
+}
+
+internal fun String?.toServerEpochMillis(): Long? {
+    val source = this?.trim()?.takeIf(String::isNotEmpty) ?: return null
+    val normalized = source.replace(
+        Regex("(\\.\\d{3})\\d+(?=Z$|[+-]\\d{2}:?\\d{2}$)"),
+        "$1",
+    )
+    return listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+    ).firstNotNullOfOrNull { pattern ->
+        runCatching {
+            SimpleDateFormat(pattern, Locale.US).apply { isLenient = false }.parse(normalized)?.time
+        }.getOrNull()
     }
 }

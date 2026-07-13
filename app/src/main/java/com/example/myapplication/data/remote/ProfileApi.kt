@@ -90,8 +90,8 @@ data class RemoteProfile(
     val displayName: String,
     val profileColor: String,
     val bio: String?,
-    val avatarSeed: String,
-    val avatarUrl: String,
+    val avatarSeed: String? = null,
+    val avatarUrl: String? = null,
     val genres: List<String>?,
     val moods: List<String>?,
     val discoverable: Boolean,
@@ -114,8 +114,8 @@ data class RemotePublicProfile(
     val displayName: String,
     val profileColor: String,
     val bio: String?,
-    val avatarSeed: String,
-    val avatarUrl: String,
+    val avatarSeed: String? = null,
+    val avatarUrl: String? = null,
     val genres: List<String>?,
     val moods: List<String>?,
     val melodyAlias: RemoteProfileMelodyAlias?,
@@ -155,14 +155,6 @@ data class ProfilePrivacyUpdateRequest(
     val exchangeInsightsVisibility: String,
     val bubblePresenceVisibility: String,
 )
-data class MelodyAliasUpdateRequest(
-    val id: String,
-    val notes: List<String>,
-    val tone: String,
-    val mood: String,
-    val tempo: Int,
-)
-
 interface ProfileApi {
     @GET("api/v1/me") suspend fun me(@Header("Authorization") authorization: String): RemoteProfile
     @PATCH("api/v1/me") suspend fun update(
@@ -183,10 +175,6 @@ interface ProfileApi {
     @PUT("api/v1/me/profile-privacy") suspend fun updateProfilePrivacy(
         @Header("Authorization") authorization: String,
         @Body request: ProfilePrivacyUpdateRequest,
-    ): RemoteProfile
-    @PUT("api/v1/me/melody-alias") suspend fun setMelodyAlias(
-        @Header("Authorization") authorization: String,
-        @Body request: MelodyAliasUpdateRequest,
     ): RemoteProfile
     @GET("api/v1/profiles/{profileHandle}") suspend fun publicProfile(
         @Header("Authorization") authorization: String,

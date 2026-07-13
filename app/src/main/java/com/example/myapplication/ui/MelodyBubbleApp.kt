@@ -76,7 +76,6 @@ import com.example.myapplication.ui.screens.BuildingLoungeMapScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
-import com.example.myapplication.ui.screens.MelodyAliasScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
@@ -94,7 +93,6 @@ private object Route {
     const val MAIN = "main"
     const val USER_DETAIL = "user-detail"
     const val CHAT = "chat/{roomId}"
-    const val MELODY_ALIAS = "melody-alias"
     const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
@@ -119,6 +117,7 @@ fun MelodyBubbleApp(
     val loginState by viewModel.loginState.collectAsState()
     val emailAvailabilityState by viewModel.emailAvailabilityState.collectAsState()
     val musicSearchState by viewModel.musicSearchState.collectAsState()
+    val genreCatalogState by viewModel.genreCatalogState.collectAsState()
     val previewPlaybackState by viewModel.previewPlaybackState.collectAsState()
     val buildingLoungeState by viewModel.buildingLoungeState.collectAsState()
     val exchangeState by viewModel.exchangeState.collectAsState()
@@ -254,6 +253,8 @@ fun MelodyBubbleApp(
     if (!state.isOnboardingComplete) {
         OnboardingScreen(
             musicSearchState = musicSearchState,
+            genreCatalogState = genreCatalogState,
+            onRetryGenreCatalog = viewModel::loadGenreCatalog,
             onSearchMusic = viewModel::searchMusic,
             onClearMusicSearch = viewModel::clearMusicSearch,
             onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
@@ -279,14 +280,16 @@ fun MelodyBubbleApp(
         containerColor = Ink,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            MelodyBottomNavigationBar(
-                selectedTab = state.selectedTab,
-                unreadCount = state.unreadChatCount,
-                onTabSelected = { tab ->
-                    viewModel.selectTab(tab)
-                    navController.popBackStack(Route.MAIN, inclusive = false)
-                },
-            )
+            if (!isChatScreen) {
+                MelodyBottomNavigationBar(
+                    selectedTab = state.selectedTab,
+                    unreadCount = state.unreadChatCount,
+                    onTabSelected = { tab ->
+                        viewModel.selectTab(tab)
+                        navController.popBackStack(Route.MAIN, inclusive = false)
+                    },
+                )
+            }
         },
     ) { appPadding ->
       Box(modifier = Modifier.fillMaxSize().padding(appPadding)) {
@@ -301,6 +304,7 @@ fun MelodyBubbleApp(
                 MainShell(
                     state = state,
                     musicSearchState = musicSearchState,
+                    genreCatalogState = genreCatalogState,
                     buildingLoungeState = buildingLoungeState,
                     viewModel = viewModel,
                     onStartSharing = ::requestSharingStart,
@@ -314,7 +318,6 @@ fun MelodyBubbleApp(
                     },
                     onOpenChat = { navController.navigate(Route.chat(it)) },
                     onOpenNotifications = { navController.navigate(Route.NOTIFICATIONS) },
-                    onOpenMelodyAlias = { navController.navigate(Route.MELODY_ALIAS) },
                     onOpenSettings = { navController.navigate(Route.SETTINGS) },
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
                     onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
@@ -328,7 +331,7 @@ fun MelodyBubbleApp(
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
                     DisposableEffect(listener.nearbyHandle) {
-                        onDispose { viewModel.stopMelodyAudio() }
+                        onDispose { viewModel.stopProfileAudio() }
                     }
                     var reactionSheetVisible by rememberSaveable { mutableStateOf(false) }
                     UserDetailScreen(
@@ -447,7 +450,7 @@ fun MelodyBubbleApp(
                     }
                     DisposableEffect(profileHandle) {
                         onDispose {
-                            viewModel.stopMelodyAudio()
+                            viewModel.stopProfileAudio()
                             viewModel.clearPublicProfile()
                         }
                     }
@@ -506,7 +509,7 @@ fun MelodyBubbleApp(
                     }
                     DisposableEffect(exchangeId) {
                         onDispose {
-                            viewModel.stopMelodyAudio()
+                            viewModel.stopProfileAudio()
                             viewModel.clearPublicProfile()
                         }
                     }
@@ -576,24 +579,6 @@ fun MelodyBubbleApp(
                     )
                 }
             }
-            composable(Route.MELODY_ALIAS) {
-                val generationState by viewModel.melodyAliasGenerationState.collectAsState()
-                DisposableEffect(Unit) {
-                    onDispose { viewModel.stopMelodyAudio() }
-                }
-                MelodyAliasScreen(
-                    profile = state.profile,
-                    candidates = state.melodyAliasCandidates,
-                    onBack = { navController.popBackStack() },
-                    onPreview = viewModel::previewMelodyAlias,
-                    onPreviewTone = viewModel::previewMelodyTone,
-                    generationState = generationState,
-                    onGenerate = viewModel::generateMelodyAliases,
-                    onResetGeneration = viewModel::resetMelodyAliasGeneration,
-                    onSelect = viewModel::selectGeneratedMelodyAlias,
-                    modifier = Modifier.statusBarsPadding()
-                )
-            }
             composable(Route.OFFLINE_EXCHANGE) {
                 DisposableEffect(Unit) {
                     viewModel.enterBubbleMode()
@@ -605,7 +590,7 @@ fun MelodyBubbleApp(
                         displayAlias = state.profile.accountAlias,
                         trackTitle = state.currentTrack.title,
                         trackArtist = state.currentTrack.artist,
-                        melodyAlias = state.profile.melodyNotes.joinToString(" · "),
+                        melodyAlias = "",
                         genreTags = state.currentTrack.genreTags.ifEmpty { state.profile.genres },
                         moodTags = state.currentTrack.moodTags.ifEmpty { state.profile.moods },
                     ),
@@ -683,6 +668,7 @@ fun MelodyBubbleApp(
 private fun MainShell(
     state: MelodyUiState,
     musicSearchState: MusicSearchUiState,
+    genreCatalogState: GenreCatalogUiState,
     buildingLoungeState: BuildingLoungeUiState,
     viewModel: MelodyViewModel,
     onStartSharing: () -> Unit,
@@ -690,7 +676,6 @@ private fun MainShell(
     onOpenUser: (String) -> Unit,
     onOpenChat: (String) -> Unit,
     onOpenNotifications: () -> Unit,
-    onOpenMelodyAlias: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
@@ -727,7 +712,7 @@ private fun MainShell(
     }
 
     val contentModifier = Modifier.fillMaxSize()
-        when (state.selectedTab) {
+    when (state.selectedTab) {
             MainTab.HOME -> HomeScreen(
                 state = state,
                 modifier = contentModifier,
@@ -808,6 +793,7 @@ private fun MainShell(
             } else InboxScreen(
                 chats = state.chats,
                 onOpenChat = onOpenChat,
+                onLeaveChat = viewModel::leaveChat,
                 modifier = contentModifier.statusBarsPadding()
             )
             MainTab.MY -> MyScreen(
@@ -830,10 +816,11 @@ private fun MainShell(
                 onRandomizeAvatar = viewModel::randomizeAvatar,
                 onProfileCurationUpdate = viewModel::updateProfileCuration,
                 musicSearchState = musicSearchState,
+                genreCatalogState = genreCatalogState,
+                onRetryGenreCatalog = viewModel::loadGenreCatalog,
                 onSearchMusic = viewModel::searchMusic,
                 onClearMusicSearch = viewModel::clearMusicSearch,
                 onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
-                onOpenMelodyAlias = onOpenMelodyAlias,
                 modifier = contentModifier.statusBarsPadding()
             )
     }

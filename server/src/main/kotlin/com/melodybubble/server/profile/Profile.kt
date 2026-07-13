@@ -171,14 +171,6 @@ data class ProfilePrivacyUpdate(
     val exchangeInsightsVisibility: String = "EXCHANGED",
     val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
 )
-data class MelodyAliasUpdate(
-    val id: String,
-    val notes: List<String>,
-    val tone: String,
-    val mood: String,
-    val tempo: Int,
-)
-
 private data class StoredProfile(
     val userId: UUID,
     val profileHandle: String,
@@ -810,24 +802,6 @@ class ProfileController(
             currentMusic.toLegacyMusicVisibility(), currentMusic != "PRIVATE",
         )
         nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
-        return profiles.me(userId)
-    }
-
-    @PutMapping("/melody-alias")
-    fun setMelodyAlias(principal: Principal, @RequestBody request: MelodyAliasUpdate): ProfileResponse {
-        val userId = principal.userId()
-        val id = request.id.trim().take(80)
-        val notes = request.notes.map(String::trim).filter(String::isNotBlank).take(16)
-        require(id.isNotBlank() && notes.isNotEmpty()) { "Melody alias id and notes are required" }
-        require(request.tempo in 40..240) { "Melody alias tempo must be between 40 and 240" }
-        val notesJson = notes.joinToString(prefix = "[", postfix = "]") { note ->
-            "\"${note.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-        }
-        jdbc.update(
-            """update users set melody_alias_id=?,melody_alias_notes=cast(? as jsonb),melody_alias_tone=?,
-               melody_alias_mood=?,melody_alias_tempo=?,updated_at=now() where id=?""",
-            id, notesJson, request.tone.trim().take(40), request.mood.trim().take(40), request.tempo, userId,
-        )
         return profiles.me(userId)
     }
 
