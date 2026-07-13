@@ -55,6 +55,7 @@ class SecurityConfig(
                 "/error",
                 "/api/v1/auth/login",
                 "/api/v1/auth/signup",
+                "/api/v1/auth/email-availability",
                 "/api/v1/auth/google",
                 "/api/v1/auth/refresh",
                 "/ws/**",

@@ -29,6 +29,7 @@ data class TrackSummary(val title: String, val artist: String, val albumArtUrl: 
 data class AbstractPosition(val x: Float, val y: Float)
 data class NearbyBubble(
     val nearbyHandle: String,
+    val profileHandle: String,
     val displayAlias: String,
     val profileColor: String,
     val displayPosition: AbstractPosition,
@@ -55,8 +56,14 @@ data class LocationUpdate(
 data class MusicUpdate(
     val title: String = "",
     val artist: String = "",
+    val album: String? = null,
+    val artworkUrl: String? = null,
     val sourceType: String = "ANDROID_MEDIA_SESSION",
     val isPlaying: Boolean = true,
+    val durationMs: Long? = null,
+    val positionMs: Long? = null,
+    val positionObservedAt: Instant? = null,
+    val observedAt: Instant? = null,
 )
 data class PopularTrack(
     val title: String,
@@ -98,6 +105,7 @@ class NearbyService(
             SELECT DISTINCT ON (session.user_id)
               session.user_id,
               session.nearby_handle,
+              person.profile_handle,
               person.display_name,
               person.profile_color,
               CASE WHEN status.is_playing AND privacy.share_music AND (
@@ -164,6 +172,7 @@ class NearbyService(
             val handle = rs.getString("nearby_handle")
             NearbyBubble(
                 nearbyHandle = handle,
+                profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
                 profileColor = rs.getString("profile_color"),
                 displayPosition = position(handle),
@@ -232,20 +241,46 @@ class NearbyService(
         val expiresAt = Timestamp.from(Instant.now().plusSeconds(presenceTtlSeconds.coerceIn(30, 300)))
         val normalizedTitle = title.take(160)
         val normalizedArtist = artist.take(160)
+        val normalizedAlbum = update.album?.trim()?.take(160)?.ifBlank { null }
+        val normalizedArtwork = update.artworkUrl?.trim()?.take(2_000)?.ifBlank { null }?.also {
+            if (!it.startsWith("https://")) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "앨범 이미지는 HTTPS 주소여야 합니다.")
+            }
+        }
+        val durationMs = update.durationMs?.also {
+            if (it !in 0..86_400_000) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "재생 시간이 올바르지 않습니다.")
+        }
+        val positionMs = update.positionMs?.also {
+            if (it !in 0..86_400_000) throw ResponseStatusException(HttpStatus.BAD_REQUEST, "재생 위치가 올바르지 않습니다.")
+        }
+        val observedAt = update.observedAt?.takeUnless { it.isAfter(Instant.now().plusSeconds(60)) } ?: Instant.now()
+        val positionObservedAt = update.positionObservedAt ?: observedAt
         val sourceType = update.sourceType.trim().take(32).ifBlank { "ANDROID_MEDIA_SESSION" }
         jdbc.update(
             """
-            INSERT INTO music_statuses(id,user_id,track_title,artist_name,source_type,is_playing,expires_at)
-            VALUES (gen_random_uuid(),?,?,?,?,true,?)
+            INSERT INTO music_statuses(
+              id,user_id,track_title,artist_name,album_name,album_art_url,source_type,is_playing,
+              duration_ms,position_ms,position_observed_at,observed_at,expires_at
+            )
+            VALUES (gen_random_uuid(),?,?,?,?,?,?,true,?,?,?,?,?)
             ON CONFLICT(user_id) DO UPDATE SET
               track_title=excluded.track_title,artist_name=excluded.artist_name,
-              source_type=excluded.source_type,is_playing=true,
+              album_name=excluded.album_name,album_art_url=excluded.album_art_url,
+              source_type=excluded.source_type,is_playing=true,duration_ms=excluded.duration_ms,
+              position_ms=excluded.position_ms,position_observed_at=excluded.position_observed_at,
+              observed_at=excluded.observed_at,
               expires_at=excluded.expires_at,updated_at=now()
             """.trimIndent(),
             userId,
             normalizedTitle,
             normalizedArtist,
+            normalizedAlbum,
+            normalizedArtwork,
             sourceType,
+            durationMs,
+            positionMs,
+            Timestamp.from(positionObservedAt),
+            Timestamp.from(observedAt),
             expiresAt,
         )
         val changed = previous == null || previous.title != normalizedTitle || previous.artist != normalizedArtist

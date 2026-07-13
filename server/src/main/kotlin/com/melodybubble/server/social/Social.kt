@@ -1,6 +1,7 @@
 package com.melodybubble.server.social
 
 import com.melodybubble.server.chat.ChatService
+import com.melodybubble.server.profile.ProfileMediaStorage
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -38,21 +39,44 @@ data class BlockedUser(
     val blockedAt: Instant,
 )
 
+data class SocialConnection(
+    val relationshipId: UUID?,
+    val profileHandle: String,
+    val displayAlias: String,
+    val profileColor: String,
+    val avatarUrl: String?,
+    val bio: String,
+    val mutual: Boolean,
+    val followedAt: Instant,
+)
+
 data class ReportRequest(val requestId: String, val reason: String, val description: String? = null)
 data class ReportResponse(val reportId: UUID, val status: String = "SUBMITTED", val submittedAt: Instant = Instant.now())
 
-private data class Peer(val id: UUID, val alias: String, val color: String)
+private data class Peer(val id: UUID, val profileHandle: String, val alias: String, val color: String)
 
 @Service
 class SocialService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val chat: ChatService,
+    private val media: ProfileMediaStorage,
 ) {
     @Transactional
     fun follow(userId: UUID, handle: String): FollowResponse {
         rateLimiter.enforce(userId, "FOLLOW", 20, Duration.ofMinutes(1))
         val peer = resolveActivePeer(userId, handle)
+        return followPeer(userId, peer)
+    }
+
+    @Transactional
+    fun followProfile(userId: UUID, profileHandle: String): FollowResponse {
+        rateLimiter.enforce(userId, "FOLLOW", 20, Duration.ofMinutes(1))
+        val peer = resolveProfilePeer(userId, profileHandle)
+        return followPeer(userId, peer)
+    }
+
+    private fun followPeer(userId: UUID, peer: Peer): FollowResponse {
         ensureNotBlocked(userId, peer.id)
         jdbc.update(
             "insert into user_follows(follower_id,followed_id) values (?,?) on conflict do nothing",
@@ -66,6 +90,17 @@ class SocialService(
     fun unfollow(userId: UUID, handle: String): FollowResponse {
         rateLimiter.enforce(userId, "FOLLOW", 20, Duration.ofMinutes(1))
         val peer = resolveActivePeer(userId, handle)
+        return unfollowPeer(userId, peer)
+    }
+
+    @Transactional
+    fun unfollowProfile(userId: UUID, profileHandle: String): FollowResponse {
+        rateLimiter.enforce(userId, "FOLLOW", 20, Duration.ofMinutes(1))
+        val peer = resolveProfilePeer(userId, profileHandle)
+        return unfollowPeer(userId, peer)
+    }
+
+    private fun unfollowPeer(userId: UUID, peer: Peer): FollowResponse {
         jdbc.update("delete from user_follows where follower_id=? and followed_id=?", userId, peer.id)
         return followState(userId, peer)
     }
@@ -111,6 +146,47 @@ class SocialService(
         },
         userId,
     )
+
+    fun following(userId: UUID): List<SocialConnection> = jdbc.query(
+        """
+        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_data_url,u.avatar_object_key,u.bio,
+          exists(select 1 from user_follows back where back.follower_id=u.id and back.followed_id=?),
+          mine.created_at
+        from user_follows mine join users u on u.id=mine.followed_id
+        where mine.follower_id=?
+          and not exists(select 1 from user_blocks b where
+            (b.blocker_id=? and b.blocked_id=u.id) or (b.blocker_id=u.id and b.blocked_id=?))
+        order by mine.created_at desc
+        """.trimIndent(),
+        ::connection,
+        userId, userId, userId, userId,
+    )
+
+    fun followers(userId: UUID): List<SocialConnection> = jdbc.query(
+        """
+        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_data_url,u.avatar_object_key,u.bio,
+          (mine.id is not null),incoming.created_at
+        from user_follows incoming join users u on u.id=incoming.follower_id
+        left join user_follows mine on mine.follower_id=? and mine.followed_id=u.id
+        where incoming.followed_id=?
+          and not exists(select 1 from user_blocks b where
+            (b.blocker_id=? and b.blocked_id=u.id) or (b.blocker_id=u.id and b.blocked_id=?))
+        order by incoming.created_at desc
+        """.trimIndent(),
+        ::connection,
+        userId, userId, userId, userId,
+    )
+
+    @Transactional
+    fun unfollowRelationship(userId: UUID, relationshipId: UUID) {
+        rateLimiter.enforce(userId, "FOLLOW", 20, Duration.ofMinutes(1))
+        val deleted = jdbc.update(
+            "delete from user_follows where id=? and follower_id=?",
+            relationshipId,
+            userId,
+        )
+        if (deleted == 0) throw ResponseStatusException(HttpStatus.NOT_FOUND, "팔로우 관계를 찾을 수 없습니다.")
+    }
 
     @Transactional
     fun unblock(userId: UUID, blockId: UUID) {
@@ -215,19 +291,43 @@ class SocialService(
         }
         return jdbc.query(
             """
-            select u.id,u.display_name,u.profile_color
+            select u.id,u.profile_handle,u.display_name,u.profile_color
             from presence_sessions ps join users u on u.id=ps.user_id
             where ps.nearby_handle=? and ps.expires_at>now() and ps.user_id<>?
             """.trimIndent(),
-            { rs, _ -> Peer(UUID.fromString(rs.getString(1)), rs.getString(2), rs.getString(3)) },
+            { rs, _ -> Peer(UUID.fromString(rs.getString(1)), rs.getString(2), rs.getString(3), rs.getString(4)) },
             handle,
             userId,
         ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "주변 사용자가 더 이상 활성 상태가 아닙니다.")
     }
 
+    private fun resolveProfilePeer(userId: UUID, profileHandle: String): Peer {
+        if (!profileHandle.matches(Regex("[a-z0-9_]{3,32}"))) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+        }
+        return jdbc.query(
+            """select id,profile_handle,display_name,profile_color from users
+               where lower(profile_handle)=lower(?) and id<>?""",
+            { rs, _ -> Peer(UUID.fromString(rs.getString(1)), rs.getString(2), rs.getString(3), rs.getString(4)) },
+            profileHandle,
+            userId,
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+    }
+
     private fun blockedUser(userId: UUID, blockId: UUID): BlockedUser = blocks(userId)
         .firstOrNull { it.blockId == blockId }
         ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "차단 내역을 찾을 수 없습니다.")
+
+    private fun connection(rs: java.sql.ResultSet, @Suppress("UNUSED_PARAMETER") row: Int) = SocialConnection(
+        relationshipId = rs.getString(1)?.let(UUID::fromString),
+        profileHandle = rs.getString(2),
+        displayAlias = rs.getString(3),
+        profileColor = rs.getString(4),
+        avatarUrl = media.signedUrl(rs.getString(6)) ?: rs.getString(5),
+        bio = rs.getString(7).orEmpty(),
+        mutual = rs.getBoolean(8),
+        followedAt = rs.getTimestamp(9).toInstant(),
+    )
 
     companion object {
         private val REPORT_REASONS = setOf(
@@ -246,6 +346,24 @@ class SocialController(private val social: SocialService) {
     @DeleteMapping("/nearby/{handle}/follow")
     fun unfollow(principal: Principal, @PathVariable handle: String) =
         social.unfollow(UUID.fromString(principal.name), handle)
+
+    @PutMapping("/profiles/{profileHandle}/follow")
+    fun followProfile(principal: Principal, @PathVariable profileHandle: String) =
+        social.followProfile(UUID.fromString(principal.name), profileHandle)
+
+    @DeleteMapping("/profiles/{profileHandle}/follow")
+    fun unfollowProfile(principal: Principal, @PathVariable profileHandle: String) =
+        social.unfollowProfile(UUID.fromString(principal.name), profileHandle)
+
+    @GetMapping("/me/following")
+    fun following(principal: Principal) = social.following(UUID.fromString(principal.name))
+
+    @GetMapping("/me/followers")
+    fun followers(principal: Principal) = social.followers(UUID.fromString(principal.name))
+
+    @DeleteMapping("/me/following/{relationshipId}")
+    fun unfollowRelationship(principal: Principal, @PathVariable relationshipId: UUID) =
+        social.unfollowRelationship(UUID.fromString(principal.name), relationshipId)
 
     @PutMapping("/nearby/{handle}/block")
     fun block(principal: Principal, @PathVariable handle: String) =

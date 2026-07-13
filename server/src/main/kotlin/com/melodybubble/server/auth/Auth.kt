@@ -15,9 +15,11 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.DeleteMapping
+import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.server.ResponseStatusException
 import java.nio.charset.StandardCharsets
@@ -34,7 +36,13 @@ import com.melodybubble.server.realtime.RealtimeSessionPolicy
 import com.melodybubble.server.profile.ProfileMediaStorage
 
 data class LoginRequest(val email: String, val password: String)
-data class SignupRequest(val email: String, val password: String, val displayName: String)
+data class SignupRequest(
+    val email: String,
+    val password: String,
+    val passwordConfirmation: String,
+    val displayName: String,
+)
+data class EmailAvailabilityResponse(val email: String, val available: Boolean)
 data class GoogleLoginRequest(val idToken: String)
 data class RefreshRequest(val refreshToken: String)
 data class LogoutRequest(val refreshToken: String?)
@@ -135,7 +143,11 @@ class AuthService(
             isNewUser = isNewUser, onboardingComplete = completed)
     }
     fun login(request: LoginRequest): TokenResponse {
-        val row = jdbc.query("select id, password_hash from users where email = ?", { rs, _ -> UUID.fromString(rs.getString("id")) to rs.getString("password_hash") }, request.email).firstOrNull()
+        val email = normalizedEmail(request.email)
+        if (!validEmail(email) || request.password.isBlank() || request.password.length > 72) {
+            throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password")
+        }
+        val row = jdbc.query("select id, password_hash from users where email = ?", { rs, _ -> UUID.fromString(rs.getString("id")) to rs.getString("password_hash") }, email).firstOrNull()
             ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password")
         if (row.second == null || !encoder.matches(request.password, row.second)) throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid email or password")
         return issueSession(row.first)
@@ -143,10 +155,19 @@ class AuthService(
 
     @Transactional
     fun signup(request: SignupRequest): TokenResponse {
-        val email = request.email.trim().lowercase()
+        val email = normalizedEmail(request.email)
         val displayName = request.displayName.trim()
-        if (email.isBlank() || request.password.length < 6 || displayName.length !in 2..40) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Email, password (6+), and display name are required")
+        if (!validEmail(email)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "올바른 이메일 주소를 입력해 주세요.")
+        }
+        if (!validPassword(request.password)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "비밀번호는 영문과 숫자를 포함한 8~72자여야 합니다.")
+        }
+        if (request.password != request.passwordConfirmation) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "비밀번호 확인이 일치하지 않습니다.")
+        }
+        if (displayName.length !in 2..40) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "프로필 이름은 2~40자로 입력해 주세요.")
         }
         val userId = UUID.randomUUID()
         val inserted = jdbc.update(
@@ -157,6 +178,24 @@ class AuthService(
         jdbc.update("insert into user_privacy_settings(user_id) values (?)", userId)
         return issueSession(userId, isNewUser = true)
     }
+
+    fun emailAvailability(rawEmail: String): EmailAvailabilityResponse {
+        val email = normalizedEmail(rawEmail)
+        if (!validEmail(email)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "올바른 이메일 주소를 입력해 주세요.")
+        }
+        val exists = jdbc.queryForObject(
+            "select exists(select 1 from users where email=?)",
+            Boolean::class.java,
+            email,
+        ) == true
+        return EmailAvailabilityResponse(email, !exists)
+    }
+
+    private fun normalizedEmail(email: String) = email.trim().lowercase()
+    private fun validEmail(email: String) = email.length <= 254 && EMAIL.matches(email)
+    private fun validPassword(password: String) = password.length in 8..72 &&
+        password.any(Char::isLetter) && password.any(Char::isDigit)
 
     @Transactional
     fun googleLogin(request: GoogleLoginRequest): TokenResponse {
@@ -259,6 +298,8 @@ class AuthService(
 @RestController
 @RequestMapping("/api/v1/auth")
 class AuthController(private val authService: AuthService) {
+    @GetMapping("/email-availability")
+    fun emailAvailability(@RequestParam email: String) = authService.emailAvailability(email)
     @PostMapping("/login") fun login(@RequestBody request: LoginRequest) = authService.login(request)
     @PostMapping("/signup") fun signup(@RequestBody request: SignupRequest) = authService.signup(request)
     @PostMapping("/google") fun googleLogin(@RequestBody request: GoogleLoginRequest) = authService.googleLogin(request)
@@ -280,3 +321,5 @@ class AuthController(private val authService: AuthService) {
     @DeleteMapping("/account") fun deleteAccount(principal: Principal) =
         authService.deleteAccount(UUID.fromString(principal.name))
 }
+
+private val EMAIL = Regex("^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+$")

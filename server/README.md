@@ -26,6 +26,11 @@ Apple Silicon에서는 공식 PostGIS 이미지가 amd64만 제공하므로 Comp
 - STOMP `/ws`: `Authorization: Bearer {accessToken}` CONNECT 인증, 10초 heartbeat
 - 개인 queue: `/user/queue/chat|reactions|nearby|notifications|errors|ack`
 - Flyway 기반 PostGIS 스키마: 사용자, 개인정보 설정, 최신 위치 TTL, 음악 상태, 채팅, 라운지·투표
+- 오프라인 기기 인증서 발급과 서명 검증: `POST /api/v1/offline-credentials`
+- 교환 기록 batch 동기화·조회·삭제: `/api/v1/offline-exchanges/**`
+- 양쪽 기록 일치 검증(`UNCONFIRMED → VERIFIED`)과 검증된 교환 기반 프로필 통계
+- 안정적인 `profileHandle`, 멜로디 별칭, 취향 지문과 `GET /api/v1/profiles/{profileHandle}` 공개 프로필
+- 주변 세션과 무관한 프로필 팔로우 및 검증된 교환에서 상대 프로필 해석
 
 `current_locations`에는 세션당 최신 위치만 유지하며 90초 TTL 뒤 주변 조회에서 제외됩니다. `displayPosition`은 `nearbyHandle`에서 결정되는 추상 좌표로, 실제 위치와 방향을 표현하지 않습니다.
 
@@ -80,4 +85,10 @@ ORDER BY installed_rank;
 
 ## Android Room 확인
 
-앱을 debug로 실행한 뒤 Android Studio의 `View → Tool Windows → App Inspection → Database Inspector`에서 `offline_exchange_local`, `sync_outbox`를 확인합니다. 이 데이터는 서버 PostgreSQL과 별개입니다.
+앱을 debug로 실행한 뒤 Android Studio의 `View → Tool Windows → App Inspection → Database Inspector`에서 `offline_exchange_local`, `sync_outbox`를 확인합니다. 두 테이블은 계정별 로컬 원본과 미전송 작업을 보관하며, 인터넷 복구 후 서버 PostgreSQL의 `offline_exchange_events`로 동기화됩니다. 좌표·JWT·주변 사용자 목록은 Room에 저장하지 않습니다.
+
+서버를 실행한 상태에서 오프라인 교환 API 전체 흐름은 다음 명령으로 검증합니다.
+
+```bash
+./scripts/test-offline-exchange.sh
+```

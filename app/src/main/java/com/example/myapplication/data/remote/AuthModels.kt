@@ -4,7 +4,13 @@ data class LoginRequest(
     val email: String,
     val password: String,
 )
-data class SignupRequest(val email: String, val password: String, val displayName: String)
+data class SignupRequest(
+    val email: String,
+    val password: String,
+    val passwordConfirmation: String,
+    val displayName: String,
+)
+data class EmailAvailabilityResponse(val email: String, val available: Boolean)
 
 data class GoogleLoginRequest(val idToken: String)
 data class RefreshRequest(val refreshToken: String)

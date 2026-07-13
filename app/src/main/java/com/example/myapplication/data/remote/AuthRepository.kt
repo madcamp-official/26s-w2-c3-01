@@ -6,8 +6,17 @@ class AuthRepository(
     suspend fun login(email: String, password: String): Result<TokenResponse> = runCatching {
         authApi.login(LoginRequest(email = email.trim(), password = password))
     }
-    suspend fun signup(email: String, password: String, displayName: String): Result<TokenResponse> = runCatching {
-        authApi.signup(SignupRequest(email.trim(), password, displayName.trim()))
+    suspend fun emailAvailability(email: String): Result<EmailAvailabilityResponse> = runCatching {
+        authApi.emailAvailability(email.trim().lowercase())
+    }
+
+    suspend fun signup(
+        email: String,
+        password: String,
+        passwordConfirmation: String,
+        displayName: String,
+    ): Result<TokenResponse> = runCatching {
+        authApi.signup(SignupRequest(email.trim().lowercase(), password, passwordConfirmation, displayName.trim()))
     }
 
     suspend fun googleLogin(idToken: String): Result<TokenResponse> = runCatching {
