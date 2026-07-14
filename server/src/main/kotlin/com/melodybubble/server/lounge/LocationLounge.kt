@@ -139,17 +139,31 @@ class LocationLoungeService(
 
     private fun reconcilePopulation(disk: LoungeDisk) {
         val distances = activeUserDistances(disk.id)
+        val now = Instant.now()
         val stableRadius = LocationLoungePolicy.effectiveRadius(
             currentRadius = disk.radiusMeters,
             distancesMeters = distances.values,
             createdAt = disk.createdAt,
-            now = Instant.now(),
+            now = now,
         )
-        val users = distances.filterValues { it <= stableRadius + DISTANCE_EPSILON }.keys
-        val previous = jdbc.query(
-            "SELECT user_id FROM location_lounge_presence_cache WHERE lounge_id=?",
-            { rs, _ -> UUID.fromString(rs.getString(1)) }, disk.id,
-        ).toSet()
+        val insideUsers = distances.filterValues { it <= stableRadius + DISTANCE_EPSILON }.keys
+        val previousPresence = jdbc.query(
+            "SELECT user_id,outside_since FROM location_lounge_presence_cache WHERE lounge_id=?",
+            { rs, _ ->
+                UUID.fromString(rs.getString("user_id")) to
+                    rs.getTimestamp("outside_since")?.toInstant()
+            },
+            disk.id,
+        ).toMap()
+        val outsideSinceByUser = previousPresence.mapNotNull { (userId, outsideSince) ->
+            if (userId in insideUsers) return@mapNotNull null
+            val startedAt = outsideSince ?: now
+            userId.takeIf {
+                LocationLoungePolicy.shouldRetainPresence(false, startedAt, now)
+            }?.let { it to startedAt }
+        }.toMap()
+        val users = insideUsers + outsideSinceByUser.keys
+        val previous = previousPresence.keys
         val previousCount = jdbc.queryForObject(
             "SELECT current_user_count FROM location_lounges WHERE id=?", Int::class.java, disk.id,
         ) ?: 0
@@ -175,9 +189,17 @@ class LocationLoungeService(
             publish(RealtimeEventTypes.USER_LEFT_LOUNGE, mapOf("loungeId" to disk.id, "userId" to userId))
         }
         jdbc.update("DELETE FROM location_lounge_presence_cache WHERE lounge_id=?", disk.id)
-        users.forEach { userId ->
+        insideUsers.forEach { userId ->
             jdbc.update(
                 "INSERT INTO location_lounge_presence_cache(lounge_id,user_id) VALUES (?,?)", disk.id, userId,
+            )
+        }
+        outsideSinceByUser.forEach { (userId, outsideSince) ->
+            jdbc.update(
+                "INSERT INTO location_lounge_presence_cache(lounge_id,user_id,outside_since) VALUES (?,?,?)",
+                disk.id,
+                userId,
+                java.sql.Timestamp.from(outsideSince),
             )
         }
     }
@@ -327,6 +349,84 @@ class LocationLoungeService(
         publish(RealtimeEventTypes.CHAT_ROOM_DELETED, mapOf("chatRoomId" to roomId))
     }
 
+    @Transactional(readOnly = true)
+    fun cards(userId: UUID, roomId: UUID): List<LoungeRecommendationCard> {
+        val loungeId = loungeIdForRoom(roomId)
+        requireInside(userId, loungeId)
+        requireJoined(userId, roomId)
+        return cardsUnchecked(userId, roomId)
+    }
+
+    @Transactional
+    fun addCard(userId: UUID, roomId: UUID, request: CreateLoungeCardRequest): LoungeRecommendationCard {
+        val loungeId = loungeIdForRoom(roomId)
+        requireInside(userId, loungeId)
+        requireJoined(userId, roomId)
+        val clientCardId = runCatching { UUID.fromString(request.clientCardId) }.getOrElse {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "유효한 clientCardId가 필요합니다.")
+        }
+        val title = request.trackTitle.trim().take(160)
+        val artist = request.artistName.trim().take(160)
+        if (title.isBlank() || artist.isBlank()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "곡 제목과 아티스트가 필요합니다.")
+        }
+        jdbc.update(
+            """
+            INSERT INTO location_lounge_recommendation_cards(
+              chat_room_id,sender_id,client_card_id,track_title,artist_name,message
+            ) VALUES (?,?,?,?,?,?) ON CONFLICT(sender_id,client_card_id) DO NOTHING
+            """.trimIndent(),
+            roomId,
+            userId,
+            clientCardId,
+            title,
+            artist,
+            request.message?.trim()?.take(240)?.ifBlank { null },
+        )
+        val card = cardsUnchecked(userId, roomId).firstOrNull { it.clientCardId == clientCardId }
+            ?: throw ResponseStatusException(HttpStatus.CONFLICT, "추천 카드를 저장하지 못했습니다.")
+        publish(RealtimeEventTypes.RECOMMENDATION_CARD_CREATED, card)
+        return card
+    }
+
+    @Transactional
+    fun reactToCard(userId: UUID, cardId: UUID, request: ReactionRequest): LoungeRecommendationCard {
+        val roomId = cardRoom(cardId)
+        val loungeId = loungeIdForRoom(roomId)
+        requireInside(userId, loungeId)
+        requireJoined(userId, roomId)
+        val type = request.reactionType.trim().uppercase()
+        if (type !in LOCATION_CARD_REACTION_TYPES) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 리액션입니다.")
+        }
+        jdbc.update(
+            """
+            INSERT INTO location_lounge_card_reactions(card_id,user_id,reaction_type)
+            VALUES (?,?,?) ON CONFLICT(card_id,user_id,reaction_type) DO NOTHING
+            """.trimIndent(),
+            cardId,
+            userId,
+            type,
+        )
+        return cardsUnchecked(userId, roomId).first { it.id == cardId }
+    }
+
+    @Transactional
+    fun deleteCard(userId: UUID, cardId: UUID) {
+        val card = jdbc.query(
+            "SELECT chat_room_id,sender_id FROM location_lounge_recommendation_cards WHERE id=?",
+            { rs, _ -> UUID.fromString(rs.getString(1)) to UUID.fromString(rs.getString(2)) },
+            cardId,
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "추천 카드를 찾을 수 없습니다.")
+        val (roomId, senderId) = card
+        requireJoined(userId, roomId)
+        if (senderId != userId) {
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "내가 추천한 곡만 삭제할 수 있습니다.")
+        }
+        jdbc.update("DELETE FROM location_lounge_recommendation_cards WHERE id=?", cardId)
+        publish(RealtimeEventTypes.RECOMMENDATION_CARD_DELETED, RecommendationCardDeletedPayload(cardId, roomId))
+    }
+
     @Transactional
     fun sendMessage(userId: UUID, roomId: UUID, request: SendLoungeChatMessageRequest): LoungeChatMessage {
         val loungeId = loungeIdForRoom(roomId)
@@ -428,10 +528,17 @@ class LocationLoungeService(
                 ORDER BY location.updated_at DESC LIMIT 1
               ) current ON true
               WHERE lounge.id=? AND lounge.status='ACTIVE'
-                AND ST_DWithin(current.point::geography,lounge.center::geography,lounge.radius_m)
+                AND (
+                  ST_DWithin(current.point::geography,lounge.center::geography,lounge.radius_m)
+                  OR EXISTS (
+                    SELECT 1 FROM location_lounge_presence_cache cache
+                    WHERE cache.lounge_id=lounge.id AND cache.user_id=?
+                      AND (cache.outside_since IS NULL OR cache.outside_since>now()-interval '1 minute')
+                  )
+                )
             )
             """.trimIndent(),
-            Boolean::class.java, userId, loungeId,
+            Boolean::class.java, userId, loungeId, userId,
         ) == true
         if (!inside) throw ResponseStatusException(HttpStatus.FORBIDDEN, "현재 라운지 반경 안에서만 이용할 수 있습니다.")
     }
@@ -448,6 +555,47 @@ class LocationLoungeService(
         "SELECT lounge_id FROM location_lounge_chat_rooms WHERE id=? AND status='ACTIVE'",
         { rs, _ -> UUID.fromString(rs.getString(1)) }, roomId,
     ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "채팅방을 찾을 수 없습니다.")
+
+    private fun cardRoom(cardId: UUID): UUID = jdbc.query(
+        "SELECT chat_room_id FROM location_lounge_recommendation_cards WHERE id=?",
+        { rs, _ -> UUID.fromString(rs.getString(1)) },
+        cardId,
+    ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "추천 카드를 찾을 수 없습니다.")
+
+    private fun cardsUnchecked(userId: UUID, roomId: UUID): List<LoungeRecommendationCard> = jdbc.query(
+        """
+        SELECT card.id,card.client_card_id,sender.display_name,sender.profile_handle,
+               card.track_title,card.artist_name,card.message,card.created_at,
+               count(reaction.user_id) reaction_count,
+               bool_or(reaction.user_id=?) reacted_by_me,
+               card.sender_id=? can_delete
+        FROM location_lounge_recommendation_cards card
+        JOIN users sender ON sender.id=card.sender_id
+        LEFT JOIN location_lounge_card_reactions reaction ON reaction.card_id=card.id
+        WHERE card.chat_room_id=?
+        GROUP BY card.id,sender.display_name,sender.profile_handle
+        ORDER BY card.created_at DESC LIMIT 50
+        """.trimIndent(),
+        { rs, _ ->
+            LoungeRecommendationCard(
+                id = UUID.fromString(rs.getString("id")),
+                subLoungeId = roomId,
+                clientCardId = UUID.fromString(rs.getString("client_card_id")),
+                senderAlias = rs.getString("display_name"),
+                trackTitle = rs.getString("track_title"),
+                artistName = rs.getString("artist_name"),
+                message = rs.getString("message"),
+                reactionCount = rs.getInt("reaction_count"),
+                reactedByMe = rs.getBoolean("reacted_by_me"),
+                canDelete = rs.getBoolean("can_delete"),
+                createdAt = rs.getTimestamp("created_at").toInstant(),
+                senderProfileHandle = rs.getString("profile_handle"),
+            )
+        },
+        userId,
+        userId,
+        roomId,
+    )
 
     private fun requireActiveLounge(id: UUID) {
         val active = jdbc.queryForObject(
@@ -496,6 +644,7 @@ class LocationLoungeService(
         private const val GLOBAL_RECONCILE_LOCK = "location-lounges:reconcile"
         private const val MAX_MERGES_PER_PASS = 64
         private const val DISTANCE_EPSILON = 0.05
+        private val LOCATION_CARD_REACTION_TYPES = setOf("LIKE", "LOVE", "FIRE", "SAME_TASTE")
     }
 }
 
@@ -534,6 +683,28 @@ class LocationLoungeController(private val service: LocationLoungeService) {
     @DeleteMapping("/chat-rooms/{roomId}")
     fun delete(principal: Principal, @PathVariable roomId: UUID) =
         service.deleteChatRoom(UUID.fromString(principal.name), roomId)
+
+    @GetMapping("/chat-rooms/{roomId}/cards")
+    fun cards(principal: Principal, @PathVariable roomId: UUID) =
+        service.cards(UUID.fromString(principal.name), roomId)
+
+    @PostMapping("/chat-rooms/{roomId}/cards")
+    fun addCard(
+        principal: Principal,
+        @PathVariable roomId: UUID,
+        @RequestBody request: CreateLoungeCardRequest,
+    ) = service.addCard(UUID.fromString(principal.name), roomId, request)
+
+    @PostMapping("/cards/{cardId}/reactions")
+    fun reactToCard(
+        principal: Principal,
+        @PathVariable cardId: UUID,
+        @RequestBody request: ReactionRequest,
+    ) = service.reactToCard(UUID.fromString(principal.name), cardId, request)
+
+    @DeleteMapping("/cards/{cardId}")
+    fun deleteCard(principal: Principal, @PathVariable cardId: UUID) =
+        service.deleteCard(UUID.fromString(principal.name), cardId)
 
     @GetMapping("/chat-rooms/{roomId}/messages")
     fun messages(principal: Principal, @PathVariable roomId: UUID) =
