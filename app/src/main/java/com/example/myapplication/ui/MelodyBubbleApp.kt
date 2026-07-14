@@ -63,14 +63,17 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyUiState
+import com.example.myapplication.core.model.PreviewPlaybackState
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.Track
+import com.example.myapplication.data.remote.LoungeMemberProfileDto
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.ui.components.MelodyBottomNavigationBar
 import com.example.myapplication.ui.screens.ChatScreen
 import com.example.myapplication.ui.screens.BlockedUsersScreen
 import com.example.myapplication.ui.screens.BuildingLoungeMapScreen
+import com.example.myapplication.ui.screens.LoungeMembersScreen
 import com.example.myapplication.ui.screens.HomeScreen
 import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
@@ -97,9 +100,23 @@ private object Route {
     const val FOLLOWING = "social-connections/following"
     const val FOLLOWERS = "social-connections/followers"
     const val PUBLIC_PROFILE = "profile/{profileHandle}"
+    const val LOUNGE_MEMBERS = "lounge-members"
 
     fun chat(roomId: String) = "chat/$roomId"
     fun publicProfile(profileHandle: String) = "profile/$profileHandle"
+}
+
+private fun MelodyUiState.loungeProfileHandlesByAlias(): Map<String, String> = buildMap {
+    profile.profileHandle.takeIf(String::isNotBlank)?.let { handle ->
+        put(profile.accountAlias, handle)
+        put(profile.nearbyDisplayAlias, handle)
+    }
+    nearbyListeners.forEach { listener ->
+        listener.profileHandle?.takeIf(String::isNotBlank)?.let { put(listener.displayAlias, it) }
+    }
+    (following + followers).forEach { connection ->
+        connection.profileHandle?.takeIf(String::isNotBlank)?.let { put(connection.displayAlias, it) }
+    }
 }
 
 @Composable
@@ -299,6 +316,7 @@ fun MelodyBubbleApp(
             composable(Route.MAIN) {
                 MainShell(
                     state = state,
+                    previewPlaybackState = previewPlaybackState,
                     musicSearchState = musicSearchState,
                     genreCatalogState = genreCatalogState,
                     buildingLoungeState = buildingLoungeState,
@@ -318,6 +336,8 @@ fun MelodyBubbleApp(
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
                     onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
                     onOpenTrack = ::openTrackOnDevice,
+                    onOpenProfile = { navController.navigate(Route.publicProfile(it)) },
+                    onOpenLoungeMembers = { navController.navigate(Route.LOUNGE_MEMBERS) },
                 )
             }
             composable(Route.USER_DETAIL) {
@@ -325,9 +345,6 @@ fun MelodyBubbleApp(
                 if (listener == null) {
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
-                    DisposableEffect(listener.nearbyHandle) {
-                        onDispose { viewModel.stopProfileAudio() }
-                    }
                     var reactionSheetVisible by rememberSaveable { mutableStateOf(false) }
                     UserDetailScreen(
                         listener = listener,
@@ -421,6 +438,18 @@ fun MelodyBubbleApp(
                     modifier = Modifier.statusBarsPadding(),
                 )
             }
+            composable(Route.LOUNGE_MEMBERS) {
+                LoungeMembersScreen(
+                    snapshot = buildingLoungeState.subLoungeSnapshot,
+                    selfMember = state.profile.profileHandle.takeIf(String::isNotBlank)?.let { handle ->
+                        LoungeMemberProfileDto(handle, state.profile.accountAlias, "#6750A4")
+                    },
+                    profileHandlesByAlias = state.loungeProfileHandlesByAlias(),
+                    onBack = { navController.popBackStack() },
+                    onOpenProfile = { navController.navigate(Route.publicProfile(it)) },
+                    modifier = Modifier.statusBarsPadding(),
+                )
+            }
             composable(
                 route = Route.PUBLIC_PROFILE,
                 arguments = listOf(navArgument("profileHandle") { type = NavType.StringType }),
@@ -442,7 +471,6 @@ fun MelodyBubbleApp(
                     }
                     DisposableEffect(profileHandle) {
                         onDispose {
-                            viewModel.stopProfileAudio()
                             viewModel.clearPublicProfile()
                         }
                     }
@@ -566,6 +594,7 @@ fun MelodyBubbleApp(
 @Composable
 private fun MainShell(
     state: MelodyUiState,
+    previewPlaybackState: PreviewPlaybackState,
     musicSearchState: MusicSearchUiState,
     genreCatalogState: GenreCatalogUiState,
     buildingLoungeState: BuildingLoungeUiState,
@@ -579,6 +608,8 @@ private fun MainShell(
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
     onOpenTrack: (Track) -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onOpenLoungeMembers: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -664,22 +695,26 @@ private fun MainShell(
             )
             MainTab.LOUNGE -> BuildingLoungeMapScreen(
                 state = buildingLoungeState,
+                previewPlaybackState = previewPlaybackState,
                 onLocationUpdate = viewModel::refreshBuildingLounges,
                 onLocationUnavailable = viewModel::setBuildingLoungeLocationUnavailable,
                 onHeartbeat = viewModel::heartbeatBuildingLounge,
+                onCreateLounge = viewModel::createLocationLounge,
                 onEnter = viewModel::enterBuildingLounge,
                 onLeave = viewModel::leaveBuildingLounge,
                 onCreateSubLounge = viewModel::createBuildingSubLounge,
                 onOpenSubLounge = viewModel::openSubLounge,
                 onLeaveSubLounge = viewModel::leaveSubLounge,
                 onDeleteSubLounge = viewModel::deleteSubLounge,
-                onSendTrack = viewModel::sendDetectedTrackToLounge,
                 onSearchTracks = viewModel::searchLoungeTracks,
                 onSendSearchedTrack = viewModel::sendSearchedTrackToLounge,
                 onDeleteCard = viewModel::deleteLoungeCard,
                 onReactToCard = viewModel::reactToLoungeCard,
                 onVote = viewModel::voteInSubLounge,
                 onRefreshSubLounge = viewModel::refreshSubLounge,
+                onOpenProfile = onOpenProfile,
+                onOpenMembers = onOpenLoungeMembers,
+                profileHandlesByAlias = state.loungeProfileHandlesByAlias(),
                 modifier = contentModifier
             )
             MainTab.INBOX -> InboxScreen(

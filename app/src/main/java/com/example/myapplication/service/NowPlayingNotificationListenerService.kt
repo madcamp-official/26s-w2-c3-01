@@ -92,17 +92,22 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
     }
 
     private fun refreshDetectedPlayback() {
-        val playing = activeControllers
+        val observed = activeControllers
             .asSequence()
             .mapNotNull { controller ->
                 val state = runCatching { controller.playbackState }.getOrNull() ?: return@mapNotNull null
-                if (state.state !in ACTIVE_PLAYBACK_STATES) return@mapNotNull null
-                controller.mediaText(state)?.let { DetectedPlayback(state.lastPositionUpdateTime, it) }
+                controller.mediaText(state)?.let {
+                    ObservedPlayback(
+                        positionUpdatedAt = state.lastPositionUpdateTime,
+                        text = it,
+                        isPlaying = state.state in ACTIVE_PLAYBACK_STATES,
+                    )
+                }
             }
-            .maxByOrNull(DetectedPlayback::positionUpdatedAt)
+            .maxByOrNull(ObservedPlayback::positionUpdatedAt)
 
         when {
-            playing != null -> persist(playing.text, SOURCE_MEDIA_SESSION)
+            observed != null -> publish(observed.text, SOURCE_MEDIA_SESSION, observed.isPlaying)
             activeControllers.isNotEmpty() -> persistStopped()
             else -> refreshFromActiveTransportNotifications()
         }
@@ -175,7 +180,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
 
     private fun publish(text: NowPlayingText?, source: String, isPlaying: Boolean) {
         val coordinator = PresenceSyncCoordinator.get(this)
-        if (isPlaying && text != null) {
+        if (text != null) {
             coordinator.onPlaybackDetected(
                 title = text.title,
                 artist = text.artist,
@@ -185,6 +190,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
                 durationMs = text.durationMs,
                 positionMs = text.positionMs,
                 positionObservedAtEpochMs = text.positionObservedAtEpochMs,
+                isPlaying = isPlaying,
             )
         } else {
             coordinator.onPlaybackStopped()
@@ -218,7 +224,11 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         val positionMs: Long? = null,
         val positionObservedAtEpochMs: Long? = null,
     )
-    private data class DetectedPlayback(val positionUpdatedAt: Long, val text: NowPlayingText)
+    private data class ObservedPlayback(
+        val positionUpdatedAt: Long,
+        val text: NowPlayingText,
+        val isPlaying: Boolean,
+    )
     private data class TimestampedFallback(val postTime: Long, val text: NowPlayingText)
 
     companion object {

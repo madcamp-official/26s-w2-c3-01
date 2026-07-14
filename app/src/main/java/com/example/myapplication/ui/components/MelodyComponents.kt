@@ -86,7 +86,7 @@ fun PreviewNowPlayingBar(
         border = BorderStroke(1.dp, MelodyBubbleColors.BorderStrong),
     ) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-            EqualizerBars(active = state.isPlaying)
+            PreviewEqualizerBars(active = state.isPlaying)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(state.title.ifBlank { "미리듣기 준비 중" }, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -110,10 +110,10 @@ fun PreviewNowPlayingBar(
 }
 
 @Composable
-private fun EqualizerBars(active: Boolean) {
+fun PreviewEqualizerBars(active: Boolean, modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "preview equalizer")
     Row(
-        modifier = Modifier.size(width = 28.dp, height = 22.dp),
+        modifier = modifier.size(width = 28.dp, height = 22.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.Bottom,
     ) {

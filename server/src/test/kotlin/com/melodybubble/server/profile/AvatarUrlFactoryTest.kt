@@ -7,9 +7,9 @@ class AvatarUrlFactoryTest {
     private val factory = AvatarUrlFactory()
 
     @Test
-    fun `creates stable thumbs avatar url`() {
+    fun `creates stable lorelei neutral avatar url`() {
         assertEquals(
-            "https://api.dicebear.com/10.x/thumbs/svg?seed=user-seed",
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=user-seed",
             factory.create("user-seed"),
         )
     }
@@ -17,7 +17,7 @@ class AvatarUrlFactoryTest {
     @Test
     fun `encodes seed before adding it to url`() {
         assertEquals(
-            "https://api.dicebear.com/10.x/thumbs/svg?seed=user+seed%2F1",
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=user+seed%2F1",
             factory.create("user seed/1"),
         )
     }

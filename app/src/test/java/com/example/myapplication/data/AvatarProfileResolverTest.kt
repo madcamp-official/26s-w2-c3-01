@@ -15,7 +15,7 @@ class AvatarProfileResolverTest {
 
         assertEquals("listener one", avatar.seed)
         assertEquals(
-            "https://api.dicebear.com/10.x/thumbs/svg?seed=listener%20one",
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=listener%20one",
             avatar.url,
         )
     }
@@ -34,6 +34,38 @@ class AvatarProfileResolverTest {
     }
 
     @Test
+    fun legacyDiceBearAvatarIsRestyledWithTheResolvedSeed() {
+        val avatar = AvatarProfileResolver.resolve(
+            remoteSeed = "server-seed",
+            remoteUrl = "https://api.dicebear.com/10.x/thumbs/svg?seed=old-seed",
+            stableIdentity = "listener-one",
+            fallbackSeed = "cached-seed",
+        )
+
+        assertEquals("server-seed", avatar.seed)
+        assertEquals(
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=server-seed",
+            avatar.url,
+        )
+    }
+
+    @Test
+    fun diceBearUrlSeedIsPreservedWhenTheCallerOnlyHasTheUrl() {
+        val avatar = AvatarProfileResolver.resolve(
+            remoteSeed = null,
+            remoteUrl = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=fresh%20avatar",
+            stableIdentity = null,
+            fallbackSeed = "profile-name",
+        )
+
+        assertEquals("fresh avatar", avatar.seed)
+        assertEquals(
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=fresh%20avatar",
+            avatar.url,
+        )
+    }
+
+    @Test
     fun blankRemoteValuesUseCachedSeed() {
         val avatar = AvatarProfileResolver.resolve(
             remoteSeed = " ",
@@ -44,7 +76,7 @@ class AvatarProfileResolverTest {
 
         assertEquals("cached-seed", avatar.seed)
         assertEquals(
-            "https://api.dicebear.com/10.x/thumbs/svg?seed=cached-seed",
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=cached-seed",
             avatar.url,
         )
     }

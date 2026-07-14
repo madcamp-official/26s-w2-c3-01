@@ -107,6 +107,7 @@ class PresenceSyncCoordinator private constructor(
         durationMs: Long? = null,
         positionMs: Long? = null,
         positionObservedAtEpochMs: Long? = null,
+        isPlaying: Boolean = true,
     ) {
         val safeTitle = title.toSafeMetadata(MAX_TITLE_LENGTH)
         val safeArtist = artist.toSafeMetadata(MAX_ARTIST_LENGTH)
@@ -126,7 +127,7 @@ class PresenceSyncCoordinator private constructor(
                     artworkUrl = safeArtworkUrl,
                     platform = safeSource,
                 ),
-                isPlaying = true,
+                isPlaying = isPlaying,
                 artworkUrl = safeArtworkUrl,
                 durationMs = durationMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
                 positionMs = positionMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
@@ -146,7 +147,15 @@ class PresenceSyncCoordinator private constructor(
         artworkLookupJob?.cancel()
         artworkLookupJob = null
         artworkLookupKey = null
-        updatePlayback(DetectedPlaybackState())
+        // Keep the last verified track available for explicit recommendation UI while paused.
+        // isPlaying=false still removes it from nearby/listening presence synchronization.
+        val current = _detectedPlayback.value
+        updatePlayback(
+            current.copy(
+                isPlaying = false,
+                observedAtEpochMs = System.currentTimeMillis(),
+            )
+        )
     }
 
     private fun resolveArtwork(title: String, artist: String) {

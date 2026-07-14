@@ -30,6 +30,7 @@ data class LoungeListeningStatus(
     val albumArtUrl: String?,
     val isPlaying: Boolean,
     val updatedAt: Instant,
+    val listenerProfileHandle: String? = null,
 )
 
 data class LoungeRecommendationCard(
@@ -44,6 +45,13 @@ data class LoungeRecommendationCard(
     val reactedByMe: Boolean,
     val canDelete: Boolean,
     val createdAt: Instant,
+    val senderProfileHandle: String? = null,
+)
+
+data class LoungeMemberProfile(
+    val profileHandle: String,
+    val displayName: String,
+    val profileColor: String,
 )
 
 data class RecommendationCardDeletedPayload(val cardId: UUID, val subLoungeId: UUID)
@@ -62,6 +70,7 @@ data class SubLoungeSnapshot(
     val listeningStatuses: List<LoungeListeningStatus>,
     val cards: List<LoungeRecommendationCard>,
     val poll: LoungePollState,
+    val members: List<LoungeMemberProfile> = emptyList(),
     val generatedAt: Instant = Instant.now(),
 )
 
@@ -398,14 +407,14 @@ class SubLoungeRealtimeService(
         requireMember(userId, subLoungeId)
         return jdbc.query(
             """
-            select card.id,card.client_card_id,sender.display_name,card.track_title,card.artist_name,
+            select card.id,card.client_card_id,sender.display_name,sender.profile_handle,card.track_title,card.artist_name,
               card.message,card.created_at,count(reaction.user_id) reaction_count,
               bool_or(reaction.user_id=?) reacted_by_me,card.sender_id=? can_delete
             from sub_lounge_recommendation_cards card
             join users sender on sender.id=card.sender_id
             left join sub_lounge_card_reactions reaction on reaction.card_id=card.id
             where card.sub_lounge_id=?
-            group by card.id,sender.display_name
+            group by card.id,sender.display_name,sender.profile_handle
             order by card.created_at desc limit 50
             """.trimIndent(),
             { rs, _ ->
@@ -421,6 +430,7 @@ class SubLoungeRealtimeService(
                     reactedByMe = rs.getBoolean("reacted_by_me"),
                     canDelete = rs.getBoolean("can_delete"),
                     createdAt = rs.getTimestamp("created_at").toInstant(),
+                    senderProfileHandle = rs.getString("profile_handle"),
                 )
             },
             userId,
@@ -449,12 +459,29 @@ class SubLoungeRealtimeService(
             listeningStatuses = listeningStatuses(subLoungeId),
             cards = cards(userId, subLoungeId),
             poll = poll(userId, subLoungeId),
+            members = members(subLoungeId),
         )
     }
 
+    private fun members(subLoungeId: UUID): List<LoungeMemberProfile> = jdbc.query(
+        """
+        select person.profile_handle,person.display_name,person.profile_color
+        from sub_lounge_members member
+        join users person on person.id=member.user_id
+        join sub_lounges room on room.id=member.sub_lounge_id
+        join building_lounge_sessions session on session.user_id=member.user_id
+          and session.building_lounge_id=room.building_lounge_id
+        where member.sub_lounge_id=? and member.active=true
+          and session.active=true and session.expires_at>now()
+        order by member.joined_at
+        """.trimIndent(),
+        { rs, _ -> LoungeMemberProfile(rs.getString("profile_handle"), rs.getString("display_name"), rs.getString("profile_color")) },
+        subLoungeId,
+    )
+
     private fun listeningStatuses(subLoungeId: UUID): List<LoungeListeningStatus> = jdbc.query(
         """
-        select person.display_name,status.track_title,status.artist_name,status.album_art_url,
+        select person.display_name,person.profile_handle,status.track_title,status.artist_name,status.album_art_url,
           status.is_playing,status.updated_at
         from sub_lounge_listening_statuses status
         join users person on person.id=status.user_id
@@ -471,6 +498,7 @@ class SubLoungeRealtimeService(
                 albumArtUrl = rs.getString("album_art_url"),
                 isPlaying = rs.getBoolean("is_playing"),
                 updatedAt = rs.getTimestamp("updated_at").toInstant(),
+                listenerProfileHandle = rs.getString("profile_handle"),
             )
         },
         subLoungeId,
@@ -553,6 +581,7 @@ class SubLoungeRealtimeService(
         albumArtUrl = request.albumArtUrl,
         isPlaying = request.isPlaying,
         updatedAt = Instant.now(),
+        listenerProfileHandle = jdbc.queryForObject("select profile_handle from users where id=?", String::class.java, userId),
     )
 
     private fun cardByClientId(userId: UUID, clientCardId: UUID): LoungeRecommendationCard {

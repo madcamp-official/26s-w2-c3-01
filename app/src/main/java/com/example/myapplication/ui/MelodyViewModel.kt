@@ -24,6 +24,7 @@ import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.BuildingLoungeRepository
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
 import com.example.myapplication.data.remote.CreateLoungeCardRequestDto
+import com.example.myapplication.data.remote.LoungeRecommendationCardDto
 import com.example.myapplication.data.remote.SubLoungeSnapshotDto
 import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
@@ -97,7 +98,9 @@ data class BuildingLoungeUiState(
     val subLoungeSnapshot: SubLoungeSnapshotDto? = null,
     val detailLoading: Boolean = false,
     val trackSearchLoading: Boolean = false,
+    val cardSubmitting: Boolean = false,
     val trackSearchResults: List<LoungeMusicSearchResultDto> = emptyList(),
+    val currentDetectedTrack: Track? = null,
     val realtimeState: ConnectionState = ConnectionState.DISCONNECTED,
     val message: String? = null
 )
@@ -107,6 +110,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val authRepository by lazy { AuthRepository() }
     private val musicSearchRepository by lazy { MusicSearchRepository() }
     private val buildingLoungeRepository by lazy { BuildingLoungeRepository() }
+    private val locationLoungeRepository by lazy { com.example.myapplication.data.remote.LocationLoungeRepository() }
     private val realtimeClient = (application as MelodyApplication).realtimeClient
     private val presenceCoordinator = PresenceSyncCoordinator.get(application)
     private val musicPreviewPlayer = MusicPreviewPlayer(application)
@@ -119,6 +123,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var loungeFallbackJob: Job? = null
     private var loungeSnapshotJob: Job? = null
     private var latestSubLoungeSnapshotAt: String? = null
+    private var pendingAutoPlaySubLoungeId: String? = null
     private val tokenStore = SecureTokenStore(application)
     private val sessionProfileApi by lazy { ApiClient.createProfileApi() }
     private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
@@ -169,6 +174,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         viewModelScope.launch {
+            presenceCoordinator.detectedPlayback.collect { playback ->
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    currentDetectedTrack = playback.track,
+                )
+            }
+        }
+        viewModelScope.launch {
             repository.state.collect { state ->
                 val handle = followedNearbyHandle ?: return@collect
                 val track = state.nearbyListeners
@@ -193,6 +205,11 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             realtimeClient.events.collect { event ->
+                if (event is RealtimeEvent.LocationLoungeUpdated) {
+                    _buildingLoungeState.value.userLocation?.let { location ->
+                        refreshBuildingLounges(location.latitude, location.longitude, location.accuracyMeters)
+                    }
+                }
                 if (event is RealtimeEvent.SubLoungeUpdated &&
                     event.destination == _buildingLoungeState.value.selectedSubLoungeId
                         ?.let(RealtimeDestinations::subLounge)
@@ -602,43 +619,14 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private fun previewFollowKey(title: String, artist: String): String =
         "${title.trim().lowercase()}\u0000${artist.trim().lowercase()}"
 
-    fun stopProfileAudio() {
-        stopNowPlayingPreview()
-    }
-
-    private fun stopNowPlayingPreview() {
-        nowPlayingPreviewJob?.cancel()
-        nowPlayingPreviewJob = null
-        musicPreviewPlayer.stop()
-    }
-
     fun refreshBuildingLounges(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
         val token = accessToken
         if (token.isNullOrBlank()) {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
-                message = "로그인 후 실제 건물 라운지를 확인할 수 있어요."
+                message = "로그인 후 위치 라운지를 확인할 수 있어요."
             )
             return
-        }
-        val wifi = when (val result = WifiFingerprintProvider.currentResult(getApplication())) {
-            is WifiIdentityResult.Available -> result.identity
-            WifiIdentityResult.NotConnected -> {
-                _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                    userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
-                    lounges = emptyList(),
-                    message = "Wi-Fi에 연결한 뒤 라운지를 다시 찾아주세요."
-                )
-                return
-            }
-            WifiIdentityResult.SsidUnavailable -> {
-                _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                    userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
-                    lounges = emptyList(),
-                    message = "Wi-Fi 이름(SSID)을 확인하지 못했어요. Wi-Fi 연결을 껐다 켠 뒤 다시 시도해 주세요."
-                )
-                return
-            }
         }
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
@@ -647,13 +635,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
                 message = null
             )
-            buildingLoungeRepository.nearby(token, latitude, longitude, wifi.fingerprint, wifi.displayName)
+            locationLoungeRepository.snapshot(token, latitude, longitude)
                 .onSuccess { lounges ->
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         loading = false,
                         loadFailed = false,
                         lounges = lounges,
-                        message = if (lounges.isEmpty()) "주변에 이용 가능한 실제 건물 라운지가 없어요." else null
+                        message = if (lounges.isEmpty()) "주변에 생성된 위치 라운지가 없어요." else null
                     )
                 }
                 .onFailure {
@@ -661,7 +649,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         loading = false,
                         loadFailed = true,
                         lounges = emptyList(),
-                        message = "주변 건물 라운지를 불러오지 못했어요."
+                        message = "위치 라운지를 불러오지 못했어요."
                     )
                 }
         }
@@ -726,6 +714,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         message = if (response.forcedExit) "건물 반경을 벗어나 자동 퇴장했어요." else null
                     )
                 }
+                .onFailure {
+                    clearSelectedSubLounge()
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        enteredLoungeId = null,
+                        subLounges = emptyList(),
+                        selectedSubLoungeId = null,
+                        subLoungeSnapshot = null,
+                        message = "라운지가 병합되었거나 닫혔어요. 새 라운지를 확인해 주세요.",
+                    )
+                    refreshBuildingLounges(latitude, longitude, accuracyMeters)
+                }
         }
     }
 
@@ -776,6 +775,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     realtimeClient.subscribeTopic(RealtimeDestinations.subLounge(subLoungeId))
                     presenceCoordinator.activateSubLounge(subLoungeId)
+                    pendingAutoPlaySubLoungeId = subLoungeId
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         selectedSubLoungeId = subLoungeId,
                         detailLoading = true,
@@ -794,6 +794,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun leaveSubLounge() {
         val token = accessToken ?: return
         val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        stopMusicPreview()
         viewModelScope.launch {
             presenceCoordinator.deactivateSubLounge(subLoungeId)
             buildingLoungeRepository.leaveSubLounge(token, subLoungeId)
@@ -849,7 +850,22 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(trackSearchLoading = true, message = null)
-            buildingLoungeRepository.searchMusic(token, normalized)
+            runCatching {
+                val serverResults = buildingLoungeRepository.searchMusic(token, normalized).getOrNull()
+                if (!serverResults.isNullOrEmpty()) {
+                    serverResults
+                } else {
+                    musicSearchRepository.search(normalized).map { track ->
+                        LoungeMusicSearchResultDto(
+                            id = track.id.toString(),
+                            title = track.title,
+                            artistName = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            storeUrl = track.appleMusicUrl,
+                        )
+                    }
+                }
+            }
                 .onSuccess { results ->
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         trackSearchLoading = false,
@@ -867,14 +883,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun sendSearchedTrackToLounge(track: LoungeMusicSearchResultDto, message: String?) {
-        sendTrackToLounge(track.title, track.artistName, message)
+    fun sendSearchedTrackToLounge(track: LoungeMusicSearchResultDto) {
+        sendTrackToLounge(track.title, track.artistName, null)
     }
 
     private fun sendTrackToLounge(trackTitle: String, artistName: String, message: String?) {
         val token = accessToken ?: return
         val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
         viewModelScope.launch {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(cardSubmitting = true, message = null)
             buildingLoungeRepository.addCard(
                 token,
                 subLoungeId,
@@ -884,11 +901,24 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     artistName = artistName,
                     message = message,
                 ),
-            ).onSuccess {
-                _buildingLoungeState.value = _buildingLoungeState.value.copy(trackSearchResults = emptyList())
+            ).onSuccess { createdCard ->
+                _buildingLoungeState.value = _buildingLoungeState.value.let { current ->
+                    val snapshot = current.subLoungeSnapshot
+                    current.copy(
+                        cardSubmitting = false,
+                        trackSearchResults = emptyList(),
+                        subLoungeSnapshot = snapshot?.copy(
+                            cards = (snapshot.cards.filterNot { it.id == createdCard.id } + createdCard),
+                        ),
+                        message = "추천 음악을 등록했어요.",
+                    )
+                }
                 refreshSelectedSubLounge(silent = true)
             }.onFailure {
-                _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 보내지 못했어요.")
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    cardSubmitting = false,
+                    message = "추천 카드를 보내지 못했어요.",
+                )
             }
         }
     }
@@ -943,13 +973,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     if (_buildingLoungeState.value.selectedSubLoungeId != subLoungeId) return@onSuccess
                     if (latestSubLoungeSnapshotAt?.let { snapshot.generatedAt < it } == true) return@onSuccess
                     latestSubLoungeSnapshotAt = snapshot.generatedAt
+                    val shouldAutoPlay = pendingAutoPlaySubLoungeId == subLoungeId
+                    if (shouldAutoPlay) pendingAutoPlaySubLoungeId = null
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         detailLoading = false,
                         subLoungeSnapshot = snapshot,
                     )
+                    if (shouldAutoPlay) playLatestLoungeRecommendation(snapshot)
                 }
                 .onFailure {
                     if (_buildingLoungeState.value.selectedSubLoungeId == subLoungeId) {
+                        if (pendingAutoPlaySubLoungeId == subLoungeId) pendingAutoPlaySubLoungeId = null
                         _buildingLoungeState.value = _buildingLoungeState.value.copy(
                             detailLoading = false,
                             message = "라운지 상태를 불러오지 못했어요.",
@@ -960,6 +994,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun clearSelectedSubLounge() {
+        stopMusicPreview()
         _buildingLoungeState.value.selectedSubLoungeId?.let { id ->
             realtimeClient.unsubscribeTopic(RealtimeDestinations.subLounge(id))
             presenceCoordinator.deactivateSubLounge(id)
@@ -969,9 +1004,34 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             subLoungeSnapshot = null,
             detailLoading = false,
             trackSearchLoading = false,
+            cardSubmitting = false,
             trackSearchResults = emptyList(),
         )
         latestSubLoungeSnapshotAt = null
+        pendingAutoPlaySubLoungeId = null
+    }
+
+    private fun playLatestLoungeRecommendation(snapshot: SubLoungeSnapshotDto) {
+        snapshot.cards.latestRecommendation()?.let { card ->
+            playMusicPreview(title = card.trackTitle, artist = card.artistName)
+        }
+    }
+
+    fun createLocationLounge() {
+        val token = accessToken ?: return
+        val location = _buildingLoungeState.value.userLocation ?: return
+        viewModelScope.launch {
+            locationLoungeRepository.create(token)
+                .onSuccess {
+                    refreshBuildingLounges(location.latitude, location.longitude, location.accuracyMeters)
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "현재 위치에 라운지를 만들었어요.")
+                }
+                .onFailure { error ->
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        message = locationLoungeErrorMessage(error, "라운지를 만들지 못했어요."),
+                    )
+                }
+        }
     }
 
     private fun restoreSubLoungeSession(token: String) {
@@ -992,6 +1052,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         selectedSubLoungeId = snapshot.id,
                         subLoungeSnapshot = snapshot,
                     )
+                    playLatestLoungeRecommendation(snapshot)
                 }
         }
     }
@@ -1017,6 +1078,25 @@ internal fun List<MusicSearchResult>.matchingPreviewUrl(title: String, artist: S
             result.artist.normalizedMusicIdentity() == normalizedArtist &&
             result.previewUrl?.startsWith("https://") == true
     }?.previewUrl
+}
+
+internal fun List<LoungeRecommendationCardDto>.latestRecommendation(): LoungeRecommendationCardDto? =
+    maxWithOrNull(compareBy<LoungeRecommendationCardDto>({ it.createdAt }, { it.id }))
+
+internal fun locationLoungeErrorMessage(error: Throwable, fallback: String): String = when {
+    error is IOException || error.cause is IOException ->
+        "네트워크에 연결할 수 없어요. 연결 상태를 확인하고 다시 시도해 주세요."
+    error is HttpException && error.code() == 409 ->
+        "다른 라운지 반경 안에서는 새 라운지를 만들 수 없어요."
+    error is HttpException && error.code() == 401 ->
+        "로그인 세션이 만료됐어요. 다시 로그인해 주세요."
+    error is HttpException && error.code() == 404 ->
+        "배포 서버가 새 라운지 기능을 아직 지원하지 않아요."
+    error is HttpException && error.code() == 429 ->
+        "요청이 너무 많아요. 잠시 후 다시 시도해 주세요."
+    error is HttpException && error.code() >= 500 ->
+        "서버 오류로 라운지를 처리하지 못했어요. 잠시 후 다시 시도해 주세요."
+    else -> fallback
 }
 
 private fun String.normalizedMusicIdentity(): String =

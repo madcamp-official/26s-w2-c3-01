@@ -10,6 +10,6 @@ class AvatarUrlFactory {
         "$DICEBEAR_BASE_URL?seed=${URLEncoder.encode(seed, StandardCharsets.UTF_8)}"
 
     private companion object {
-        const val DICEBEAR_BASE_URL = "https://api.dicebear.com/10.x/thumbs/svg"
+        const val DICEBEAR_BASE_URL = "https://api.dicebear.com/10.x/lorelei-neutral/svg"
     }
 }

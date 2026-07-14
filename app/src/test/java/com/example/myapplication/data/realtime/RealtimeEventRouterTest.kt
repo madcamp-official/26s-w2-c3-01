@@ -138,6 +138,23 @@ class RealtimeEventRouterTest {
     }
 
     @Test
+    fun locationLoungeTopicEventTriggersMapSpecificHandling() {
+        val event = router.route(
+            RealtimeDestinations.LOCATION_LOUNGES,
+            """{
+              "eventId":"location-lounge-event-1",
+              "type":"LOUNGE_RADIUS_CHANGED",
+              "version":1,
+              "timestamp":"2026-07-14T01:00:00Z",
+              "payload":{"loungeId":"11111111-1111-4111-8111-111111111111","radius":10}
+            }""".trimIndent(),
+        )
+
+        assertTrue(event is RealtimeEvent.LocationLoungeUpdated)
+        assertEquals(RealtimeDestinations.LOCATION_LOUNGES, event.destination)
+    }
+
+    @Test
     fun retryScheduleUsesRequiredBackoffAndCapsAtThirtySeconds() {
         assertEquals(1_000L, StompRealtimeClient.retryDelay(1))
         assertEquals(2_000L, StompRealtimeClient.retryDelay(2))
