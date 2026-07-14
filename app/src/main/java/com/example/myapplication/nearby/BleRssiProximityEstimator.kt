@@ -25,16 +25,14 @@ class BleRssiProximityEstimator(
             (measuredPowerAtOneMeter - medianRssi) / (10.0 * pathLossExponent)
         )
         val proximity = when {
-            distanceMeters <= 5.0 -> Proximity.WITHIN_5M
             distanceMeters <= 10.0 -> Proximity.WITHIN_10M
-            distanceMeters <= 15.0 -> Proximity.WITHIN_15M
+            distanceMeters <= 20.0 -> Proximity.WITHIN_20M
             else -> return null
         }
         val spread = (sorted.last() - sorted.first()).toDouble()
         val boundaryGap = minOf(
-            kotlin.math.abs(distanceMeters - 5.0),
             kotlin.math.abs(distanceMeters - 10.0),
-            kotlin.math.abs(distanceMeters - 15.0),
+            kotlin.math.abs(distanceMeters - 20.0),
         )
         val confidence = if (spread <= MAX_HIGH_CONFIDENCE_SPREAD_DB && boundaryGap >= 1.0) {
             NearbyProximityConfidence.HIGH

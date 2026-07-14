@@ -18,9 +18,8 @@ object AndroidRangingMapper {
         val distanceMeasurement = data.distance ?: return null
         val distance = distanceMeasurement.measurement
         val proximity = when {
-            distance <= 5.0 -> Proximity.WITHIN_5M
             distance <= 10.0 -> Proximity.WITHIN_10M
-            distance <= 15.0 -> Proximity.WITHIN_15M
+            distance <= 20.0 -> Proximity.WITHIN_20M
             else -> return null
         }
         val confidence = if (

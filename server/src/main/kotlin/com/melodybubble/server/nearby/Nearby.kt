@@ -29,12 +29,17 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
-internal const val NEARBY_RADIUS_METERS = 15
+internal const val NEARBY_RADIUS_METERS = 20
 
 internal enum class ProximityBand {
-    WITHIN_5M,
     WITHIN_10M,
-    WITHIN_15M,
+    WITHIN_20M,
+}
+
+internal fun proximityBandFromWire(value: String?): ProximityBand? = when (value?.trim()?.uppercase()) {
+    "WITHIN_5M", "WITHIN_10M", "VERY_CLOSE", "CLOSE" -> ProximityBand.WITHIN_10M
+    "WITHIN_15M", "WITHIN_20M", "AROUND" -> ProximityBand.WITHIN_20M
+    else -> null
 }
 
 internal enum class DistanceConfidence {
@@ -45,9 +50,8 @@ internal enum class DistanceConfidence {
 
 internal fun proximityBand(distanceMeters: Double): ProximityBand? = when {
     distanceMeters < 0.0 || !distanceMeters.isFinite() -> null
-    distanceMeters <= 5.0 -> ProximityBand.WITHIN_5M
     distanceMeters <= 10.0 -> ProximityBand.WITHIN_10M
-    distanceMeters <= NEARBY_RADIUS_METERS.toDouble() -> ProximityBand.WITHIN_15M
+    distanceMeters <= NEARBY_RADIUS_METERS.toDouble() -> ProximityBand.WITHIN_20M
     else -> null
 }
 
@@ -78,15 +82,14 @@ internal fun distanceConfidence(
 
 /**
  * Produces a stable drawing coordinate whose angle is unrelated to physical bearing.
- * The radial annulus communicates only the 5 m, 10 m, or 15 m proximity band.
+ * The radial annulus communicates only the 10 m or 10-20 m proximity band.
  */
 internal fun abstractPosition(handle: String, band: ProximityBand): AbstractPosition {
     val angle = stableHash(handle, 360) * PI / 180.0
     val jitter = stableHash("radius:$handle", 1_000) / 1_000f
     val radius = when (band) {
-        ProximityBand.WITHIN_5M -> 0.05f + jitter * 0.08f
-        ProximityBand.WITHIN_10M -> 0.16f + jitter * 0.11f
-        ProximityBand.WITHIN_15M -> 0.30f + jitter * 0.11f
+        ProximityBand.WITHIN_10M -> 0.05f + jitter * 0.15f
+        ProximityBand.WITHIN_20M -> 0.27f + jitter * 0.14f
     }
     return AbstractPosition(
         x = (0.5 + cos(angle) * radius).toFloat(),
@@ -167,7 +170,7 @@ class NearbyService(
     private val realtime: RealtimePublisher,
     private val locationLounges: LocationLoungeService,
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
-    @Value("\${app.nearby.max-radius-meters:15}") private val maxRadiusMeters: Int,
+    @Value("\${app.nearby.max-radius-meters:20}") private val maxRadiusMeters: Int,
 ) {
     fun directBubble(viewerId: UUID, targetId: UUID): NearbyBubble? = jdbc.query(
         """
@@ -209,9 +212,9 @@ class NearbyService(
                 avatarSeed = rs.getString("avatar_seed"),
                 avatarUrl = rs.getString("avatar_data_url"),
                 profileColor = rs.getString("profile_color"),
-                displayPosition = abstractPosition(handle, ProximityBand.WITHIN_5M),
+                displayPosition = abstractPosition(handle, ProximityBand.WITHIN_10M),
                 matchScore = 65 + stable(handle, 31),
-                proximity = ProximityBand.WITHIN_5M.name,
+                proximity = ProximityBand.WITHIN_10M.name,
                 relationship = rs.getString("relationship"),
                 canReact = rs.getBoolean("allow_reactions"),
                 track = rs.getString("track_title")?.let {
@@ -244,7 +247,7 @@ class NearbyService(
             """.trimIndent(),
             { rs, _ ->
                 UUID.fromString(rs.getString("target_user_id")) to Pair(
-                    ProximityBand.valueOf(rs.getString("proximity")),
+                    proximityBandFromWire(rs.getString("proximity")) ?: ProximityBand.WITHIN_20M,
                     DistanceConfidence.valueOf(rs.getString("confidence")),
                 )
             },
@@ -342,7 +345,7 @@ class NearbyService(
             val targetAccuracy = rs.getDouble("target_accuracy_meters").takeUnless { rs.wasNull() }
             val combinedAccuracy = combinedHorizontalAccuracyMeters(viewerAccuracy, targetAccuracy)
             val band = direct?.first ?: proximityBand(distanceMeters)
-                ?: ProximityBand.WITHIN_15M
+                ?: ProximityBand.WITHIN_20M
             NearbyBubble(
                 nearbyHandle = handle,
                 profileHandle = rs.getString("profile_handle"),
@@ -685,7 +688,7 @@ class NearbyService(
         where ST_DWithin(
             source.point::geography,
             recipient_location.point::geography,
-            least(recipient_privacy.discovery_radius_meters, 15)
+            least(recipient_privacy.discovery_radius_meters, 20)
           )
           and source_privacy.discoverable=true
           and source_privacy.share_music=true
@@ -811,7 +814,7 @@ class NearbyService(
     }
 
     private fun discoveryRadius(userId: UUID): Int = (jdbc.queryForObject(
-        "select coalesce(discovery_radius_meters,15) from user_privacy_settings where user_id=?",
+        "select coalesce(discovery_radius_meters,20) from user_privacy_settings where user_id=?",
         Int::class.java,
         userId,
     ) ?: NEARBY_RADIUS_METERS).coerceIn(1, minOf(NEARBY_RADIUS_METERS, maxRadiusMeters.coerceAtLeast(1)))

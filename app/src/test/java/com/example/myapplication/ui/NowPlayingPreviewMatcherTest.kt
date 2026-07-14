@@ -35,6 +35,27 @@ class NowPlayingPreviewMatcherTest {
         assertNull(insecureUrl.matchingPreviewUrl("Blue Night", "Wave to Earth"))
     }
 
+    @Test
+    fun removesMelonLocalizedArtistQualifierFromSearchAndMatching() {
+        val officialPreview = "https://audio.example/meow.m4a"
+        val results = listOf(
+            result("MEOW", "MEOVV", officialPreview),
+            result(
+                "TOXIC (By MEOVV(미야오)) [Melody Karaoke Version]",
+                "ZZang KARAOKE",
+                "https://audio.example/karaoke.m4a",
+            ),
+        )
+
+        assertEquals("MEOW MEOVV", musicPreviewSearchTerm("MEOW", "MEOVV (미야오)"))
+        assertEquals(officialPreview, results.matchingPreviewUrl("MEOW", "MEOVV (미야오)"))
+    }
+
+    @Test
+    fun supportsFullWidthParenthesesFromLocalizedMetadata() {
+        assertEquals("ILLIT", "ILLIT（아일릿）".withoutParentheticalQualifier())
+    }
+
     private fun result(title: String, artist: String, previewUrl: String?) = MusicSearchResult(
         id = 1L,
         artistId = 2L,

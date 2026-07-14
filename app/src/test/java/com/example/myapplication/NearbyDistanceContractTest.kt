@@ -9,7 +9,9 @@ import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NearbyRingFractions
 import com.example.myapplication.core.model.Proximity
 import com.example.myapplication.core.model.abstractDisplayPosition
+import com.example.myapplication.core.model.nearbyMapMarkers
 import com.example.myapplication.core.model.radiusFromCenter
+import com.example.myapplication.core.model.shouldZoomNearbyMap
 import com.example.myapplication.data.keepSettledDuringRefresh
 import com.example.myapplication.data.DirectNearbyCandidate
 import com.example.myapplication.data.preferDirectNearbyUsers
@@ -30,48 +32,48 @@ import org.junit.Test
 class NearbyDistanceContractTest {
     @Test
     fun wireContractSupportsNewBandsAndOneReleaseOfLegacyValues() {
-        assertEquals(Proximity.WITHIN_5M, Proximity.fromWire("WITHIN_5M"))
+        assertEquals(Proximity.WITHIN_10M, Proximity.fromWire("WITHIN_5M"))
         assertEquals(Proximity.WITHIN_10M, Proximity.fromWire("WITHIN_10M"))
-        assertEquals(Proximity.WITHIN_15M, Proximity.fromWire("WITHIN_15M"))
-        assertEquals(Proximity.WITHIN_5M, Proximity.fromWire("VERY_CLOSE"))
+        assertEquals(Proximity.WITHIN_20M, Proximity.fromWire("WITHIN_15M"))
+        assertEquals(Proximity.WITHIN_20M, Proximity.fromWire("WITHIN_20M"))
+        assertEquals(Proximity.WITHIN_10M, Proximity.fromWire("VERY_CLOSE"))
         assertEquals(Proximity.WITHIN_10M, Proximity.fromWire("CLOSE"))
-        assertEquals(Proximity.WITHIN_15M, Proximity.fromWire("AROUND"))
+        assertEquals(Proximity.WITHIN_20M, Proximity.fromWire("AROUND"))
     }
 
     @Test
-    fun ringsScaleInFiveMeterStepsAndAbstractDotsStayInsideTheirAnnulus() {
-        assertEquals(listOf(0.143f, 0.286f, 0.429f), NearbyRingFractions)
-        assertTrue(abstractDisplayPosition("mint", Proximity.WITHIN_5M).radiusFromCenter() in 0.05f..0.13f)
-        assertTrue(abstractDisplayPosition("mint", Proximity.WITHIN_10M).radiusFromCenter() in 0.16f..0.27f)
-        assertTrue(abstractDisplayPosition("mint", Proximity.WITHIN_15M).radiusFromCenter() in 0.30f..0.41f)
+    fun ringsUseTenAndTwentyMetersAndAbstractDotsStayInsideTheirAnnulus() {
+        assertEquals(listOf(0.22f, 0.44f), NearbyRingFractions)
+        assertTrue(abstractDisplayPosition("mint", Proximity.WITHIN_10M).radiusFromCenter() in 0.05f..0.20f)
+        assertTrue(abstractDisplayPosition("mint", Proximity.WITHIN_20M).radiusFromCenter() in 0.27f..0.41f)
     }
 
     @Test
     fun existingBubbleNeedsTwoMatchingSnapshotsBeforeChangingRings() {
         val stabilizer = NearbyProximityStabilizer()
-        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
-        val incoming = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.70f, 0.5f)))
+        val current = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)))
+        val incoming = listOf(listener(Proximity.WITHIN_20M, DisplayPosition(0.80f, 0.5f)))
 
         val first = stabilizer.stabilize(current, incoming)
         val second = stabilizer.stabilize(first, incoming)
 
-        assertEquals(Proximity.WITHIN_5M, first.single().proximity)
+        assertEquals(Proximity.WITHIN_10M, first.single().proximity)
         assertEquals(current.single().displayPosition, first.single().displayPosition)
-        assertEquals(Proximity.WITHIN_10M, second.single().proximity)
+        assertEquals(Proximity.WITHIN_20M, second.single().proximity)
         assertEquals(incoming.single().displayPosition, second.single().displayPosition)
     }
 
     @Test
     fun lowConfidenceDistanceDoesNotMoveAnExistingBubble() {
         val stabilizer = NearbyProximityStabilizer(confirmationsRequired = 1)
-        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
-        val noisy = listener(Proximity.WITHIN_15M, DisplayPosition(0.85f, 0.5f)).copy(
+        val current = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)))
+        val noisy = listener(Proximity.WITHIN_20M, DisplayPosition(0.85f, 0.5f)).copy(
             proximityConfidence = NearbyProximityConfidence.LOW,
         )
 
         val result = stabilizer.stabilize(current, listOf(noisy)).single()
 
-        assertEquals(Proximity.WITHIN_5M, result.proximity)
+        assertEquals(Proximity.WITHIN_10M, result.proximity)
         assertEquals(current.single().displayPosition, result.displayPosition)
     }
 
@@ -83,7 +85,7 @@ class NearbyDistanceContractTest {
             missingRetentionMillis = 15_000L,
             nowMillis = { now },
         )
-        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+        val current = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)))
 
         assertEquals(current, stabilizer.stabilize(current, emptyList()))
         now += 14_999L
@@ -102,7 +104,7 @@ class NearbyDistanceContractTest {
             missingRetentionMillis = 15_000L,
             nowMillis = { now },
         )
-        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+        val current = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)))
 
         stabilizer.stabilize(current, emptyList())
         now += 10_000L
@@ -213,14 +215,44 @@ class NearbyDistanceContractTest {
             outer.add("outer", -83, it.toLong())
         }
 
-        assertEquals(Proximity.WITHIN_5M, near.add("near", -65, 6L)?.proximity)
+        assertEquals(Proximity.WITHIN_10M, near.add("near", -65, 6L)?.proximity)
         assertEquals(Proximity.WITHIN_10M, middle.add("middle", -78, 6L)?.proximity)
-        assertEquals(Proximity.WITHIN_15M, outer.add("outer", -83, 6L)?.proximity)
+        assertEquals(Proximity.WITHIN_20M, outer.add("outer", -83, 6L)?.proximity)
+    }
+
+    @Test
+    fun mapZoomsWhenEveryoneIsInsideTenMetersAndKeepsListenersSeparate() {
+        val listeners = listOf(
+            listener(Proximity.WITHIN_10M, DisplayPosition(0.53f, 0.50f), "one"),
+            listener(Proximity.WITHIN_10M, DisplayPosition(0.54f, 0.50f), "two"),
+        )
+
+        assertTrue(shouldZoomNearbyMap(listeners))
+        val markers = nearbyMapMarkers(listeners)
+        assertEquals(2, markers.size)
+        assertTrue(markers.none { it.isCluster })
+        assertEquals(0.56f, markers.first { it.listeners.single().nearbyHandle == "one" }.position.x, 0.001f)
+    }
+
+    @Test
+    fun fullMapClustersOverlappingInnerListenersAndKeepsOuterListenersSeparate() {
+        val listeners = listOf(
+            listener(Proximity.WITHIN_10M, DisplayPosition(0.50f, 0.50f), "one"),
+            listener(Proximity.WITHIN_10M, DisplayPosition(0.54f, 0.50f), "two"),
+            listener(Proximity.WITHIN_10M, DisplayPosition(0.58f, 0.50f), "three"),
+            listener(Proximity.WITHIN_20M, DisplayPosition(0.85f, 0.50f), "outer"),
+        )
+
+        assertFalse(shouldZoomNearbyMap(listeners))
+        val markers = nearbyMapMarkers(listeners)
+        assertEquals(2, markers.size)
+        assertEquals(3, markers.single { it.isCluster }.listeners.size)
+        assertEquals("outer", markers.single { !it.isCluster }.listeners.single().nearbyHandle)
     }
 
     @Test
     fun rotatingBeaconKeepsTheNewestMeasuredCandidateForTheSameUser() {
-        val base = listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f))
+        val base = listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f))
         val measured = base.copy(
             proximity = Proximity.WITHIN_10M,
             displayPosition = DisplayPosition(0.7f, 0.5f),
@@ -249,9 +281,9 @@ class NearbyDistanceContractTest {
 
     @Test
     fun lowConfidenceDirectBandDoesNotMoveAnExistingUser() {
-        val current = listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f))
+        val current = listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f))
         val noisy = current.copy(
-            proximity = Proximity.WITHIN_15M,
+            proximity = Proximity.WITHIN_20M,
             proximityConfidence = NearbyProximityConfidence.LOW,
             displayPosition = DisplayPosition(0.85f, 0.5f),
             isDirectlyDetected = true,
@@ -263,7 +295,7 @@ class NearbyDistanceContractTest {
                     noisy,
                     PeerProximityMeasurement(
                         beaconId = "beacon",
-                        proximity = Proximity.WITHIN_15M,
+                        proximity = Proximity.WITHIN_20M,
                         confidence = NearbyProximityConfidence.LOW,
                         method = NearbyMeasurementMethod.BLUETOOTH,
                         observedAtEpochMillis = 2_000L,
@@ -322,8 +354,12 @@ class NearbyDistanceContractTest {
         source = "gps",
     )
 
-    private fun listener(proximity: Proximity, position: DisplayPosition) = NearbyListener(
-        nearbyHandle = "nearby-test",
+    private fun listener(
+        proximity: Proximity,
+        position: DisplayPosition,
+        handle: String = "nearby-test",
+    ) = NearbyListener(
+        nearbyHandle = handle,
         displayAlias = "Test",
         colorHex = 0xFF25C76FL,
         displayPosition = position,

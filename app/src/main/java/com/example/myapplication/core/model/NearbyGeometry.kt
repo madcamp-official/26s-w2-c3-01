@@ -5,7 +5,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-const val MAX_NEARBY_RADIUS_METERS = 15
+const val MAX_NEARBY_RADIUS_METERS = 20
 
 val NearbyRingFractions = Proximity.entries.map(Proximity::outerRadiusFraction)
 
@@ -14,9 +14,8 @@ fun abstractDisplayPosition(handle: String, proximity: Proximity): DisplayPositi
     val angle = stableHash(handle, 360) * PI / 180.0
     val jitter = stableHash("radius:$handle", 1_000) / 1_000f
     val radius = when (proximity) {
-        Proximity.WITHIN_5M -> 0.05f + jitter * 0.08f
-        Proximity.WITHIN_10M -> 0.16f + jitter * 0.11f
-        Proximity.WITHIN_15M -> 0.30f + jitter * 0.11f
+        Proximity.WITHIN_10M -> 0.05f + jitter * 0.15f
+        Proximity.WITHIN_20M -> 0.27f + jitter * 0.14f
     }
     return DisplayPosition(
         x = (0.5 + cos(angle) * radius).toFloat(),

@@ -99,6 +99,8 @@ import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NearbyRingFractions
+import com.example.myapplication.core.model.nearbyMapMarkers
+import com.example.myapplication.core.model.shouldZoomNearbyMap
 import com.example.myapplication.core.model.PopularTrack
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.SharingState
@@ -201,8 +203,9 @@ fun HomeScreen(
 }
 
 /**
- * Nearby discovery. [displayPosition] is a server-provided drawing coordinate: its radius carries
- * only the 5 m, 10 m, or 15 m band while its angle never represents physical bearing.
+ * Nearby discovery. [com.example.myapplication.core.model.DisplayPosition] is a server-provided
+ * drawing coordinate: its radius carries only the 10 m or 10-20 m band while its angle never
+ * represents physical bearing.
  */
 @Composable
 fun NearbyScreen(
@@ -231,6 +234,11 @@ fun NearbyScreen(
     val selected = filteredListeners.firstOrNull {
         it.nearbyHandle == state.selectedNearbyHandle
     }
+    val selectedClusterHandles = remember { mutableStateOf(emptyList<String>()) }
+    val selectedCluster = selectedClusterHandles.value.mapNotNull { handle ->
+        filteredListeners.firstOrNull { it.nearbyHandle == handle }
+    }.takeIf { it.size > 1 }.orEmpty()
+    val selectedListeners = selectedCluster.ifEmpty { listOfNotNull(selected) }
 
     LazyColumn(
         modifier = modifier
@@ -279,7 +287,12 @@ fun NearbyScreen(
                 listeners = filteredListeners,
                 selectedHandle = selected?.nearbyHandle,
                 currentTrack = currentTrack,
-                onSelectListener = onSelectListener
+                onSelectListeners = { listeners ->
+                    selectedClusterHandles.value = if (listeners.size > 1) {
+                        listeners.map(NearbyListener::nearbyHandle)
+                    } else emptyList()
+                    listeners.firstOrNull()?.let(onSelectListener)
+                }
             )
         }
         item {
@@ -289,13 +302,14 @@ fun NearbyScreen(
                     !isSharingActive -> "위치 공유를 켜야 주변 리스너를 확인할 수 있어요"
                     state.nearbyLoadState == NearbyLoadState.ERROR -> "서버 연결을 확인한 뒤 다시 시도해 주세요"
                     filteredListeners.isEmpty() -> "조건에 맞는 주변 리스너가 없어요"
-                    selected == null -> "레이더의 이름을 눌러 상세를 확인하세요"
+                    selectedListeners.isEmpty() -> "레이더의 이름을 눌러 상세를 확인하세요"
+                    selectedListeners.size > 1 -> "겹쳐 있던 리스너 ${selectedListeners.size}명 · 가로로 넘겨 확인하세요"
                     else -> null
                 }
             )
         }
         item {
-            if (selected == null) {
+            if (selectedListeners.isEmpty()) {
                 NoListenerResult(
                     threshold = similarityThreshold,
                     message = when {
@@ -306,14 +320,14 @@ fun NearbyScreen(
                     }
                 )
             } else {
-                SelectedListenerCard(
-                    listener = selected,
-                    onOpenDetail = { onOpenListenerDetail(selected) },
-                    onPlayPreview = { selected.currentTrack?.let { onPlayPreview(selected, it) } },
-                    onSearchInMusicApp = { selected.currentTrack?.let(onSearchInMusicApp) },
-                    onOpenTrack = { selected.currentTrack?.let(onOpenTrack) },
-                    onReact = { reactionTarget.value = selected },
-                    onFollow = { onFollow(selected) }
+                SelectedListenerCarousel(
+                    listeners = selectedListeners,
+                    onOpenDetail = onOpenListenerDetail,
+                    onPlayPreview = onPlayPreview,
+                    onSearchInMusicApp = onSearchInMusicApp,
+                    onOpenTrack = onOpenTrack,
+                    onReact = { reactionTarget.value = it },
+                    onFollow = onFollow,
                 )
             }
         }
@@ -633,6 +647,8 @@ private fun CompactRadar(
     listeners: List<NearbyListener>,
     onOpenNearby: () -> Unit
 ) {
+    val zoomed = shouldZoomNearbyMap(listeners)
+    val markers = nearbyMapMarkers(listeners, zoomed)
     MelodyCard(
         onClick = onOpenNearby,
         onClickLabel = "근처 화면 열기",
@@ -647,11 +663,15 @@ private fun CompactRadar(
                 modifier = Modifier
                     .fillMaxSize()
                     .semantics {
-                        contentDescription = "15미터 이내 추상 주변 레이더, 리스너 ${listeners.size}명. 원은 5미터, 10미터, 15미터 구간이며 버블 방향은 실제 방향이 아님"
+                        contentDescription = if (zoomed) {
+                            "10미터 안으로 확대된 추상 주변 레이더, 리스너 ${listeners.size}명"
+                        } else {
+                            "20미터 이내 추상 주변 레이더, 리스너 ${listeners.size}명. 원은 10미터와 20미터 구간이며 버블 방향은 실제 방향이 아님"
+                        }
                     }
             ) {
                 val center = Offset(size.width * 0.5f, size.height * 0.5f)
-                NearbyRingFractions.forEach { scale ->
+                (if (zoomed) listOf(NearbyRingFractions.last()) else NearbyRingFractions).forEach { scale ->
                     drawCircle(
                         color = MelodyBubbleColors.Border.copy(alpha = 0.82f),
                         radius = size.minDimension * scale,
@@ -659,11 +679,11 @@ private fun CompactRadar(
                         style = Stroke(width = 1.dp.toPx())
                     )
                 }
-                listeners.take(6).forEach { listener ->
-                    val position = listener.displayPosition.safePosition()
+                markers.take(6).forEach { marker ->
+                    val position = marker.position.safePosition()
                     drawCircle(
                         color = MelodyBubbleColors.Text,
-                        radius = 7.dp.toPx(),
+                        radius = (if (marker.isCluster) 11.dp else 7.dp).toPx(),
                         center = Offset(size.width * position.x, size.height * position.y)
                     )
                 }
@@ -687,14 +707,18 @@ private fun CompactRadar(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "정확한 거리·방향을 숨긴 15m 이내 추상 분포",
+                    text = if (zoomed) {
+                        "모두 가까이 있어 10m 안을 확대했어요"
+                    } else {
+                        "정확한 방향을 숨긴 20m 이내 추상 분포"
+                    },
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "링 5m · 10m · 15m",
+                    text = if (zoomed) "10m로 확대됨" else "링 10m · 20m",
                     color = MelodyBubbleColors.Primary,
                     style = MaterialTheme.typography.labelSmall,
                 )
@@ -1132,8 +1156,10 @@ private fun AbstractNearbyMap(
     listeners: List<NearbyListener>,
     selectedHandle: String?,
     currentTrack: Track,
-    onSelectListener: (NearbyListener) -> Unit
+    onSelectListeners: (List<NearbyListener>) -> Unit
 ) {
+    val zoomed = shouldZoomNearbyMap(listeners)
+    val markers = nearbyMapMarkers(listeners, zoomed)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -1147,11 +1173,15 @@ private fun AbstractNearbyMap(
                 modifier = Modifier
                     .fillMaxSize()
                     .semantics {
-                        contentDescription = "15미터 이내 추상 근처 버블맵. 원은 5미터, 10미터, 15미터 구간이며 버블 방향은 실제 방향이 아님"
+                        contentDescription = if (zoomed) {
+                            "10미터 안으로 확대된 추상 근처 버블맵"
+                        } else {
+                            "20미터 이내 추상 근처 버블맵. 원은 10미터와 20미터 구간이며 버블 방향은 실제 방향이 아님"
+                        }
                     }
             ) {
                 val center = Offset(size.width / 2f, size.height / 2f)
-                NearbyRingFractions.forEach { factor ->
+                (if (zoomed) listOf(NearbyRingFractions.last()) else NearbyRingFractions).forEach { factor ->
                     drawCircle(
                         color = MelodyBubbleColors.Border,
                         radius = size.minDimension * factor,
@@ -1176,13 +1206,30 @@ private fun AbstractNearbyMap(
                 border = BorderStroke(2.dp, MelodyBubbleColors.Primary.copy(alpha = 0.20f))
             ) {}
 
-            listeners.forEach { listener ->
-                key(listener.nearbyHandle) {
-                    val selected = listener.nearbyHandle == selectedHandle
-                    val musicMatchLevel = listener.musicMatchLevel(currentTrack)
+            if (zoomed) {
+                Surface(
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                    shape = RoundedCornerShape(999.dp),
+                    color = MelodyBubbleColors.Primary.copy(alpha = 0.16f),
+                    border = BorderStroke(1.dp, MelodyBubbleColors.Primary.copy(alpha = 0.45f)),
+                ) {
+                    Text(
+                        text = "10m로 확대됨",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        color = MelodyBubbleColors.Primary,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            markers.forEach { marker ->
+                key(marker.stableKey) {
+                    val selected = marker.listeners.any { it.nearbyHandle == selectedHandle }
+                    val musicMatchLevel = marker.listeners.maxOf { it.musicMatchLevel(currentTrack) }
                     val pointSize = if (musicMatchLevel == MusicMatchLevel.SONG) 22.dp else 16.dp
-                    val labelWidth = 88.dp
-                    val position = listener.displayPosition.safePosition()
+                    val labelWidth = 96.dp
+                    val position = marker.position.safePosition()
                     val targetX = (maxWidth * position.x - labelWidth / 2)
                         .coerceIn(0.dp, maxWidth - labelWidth)
                     val targetY = (maxHeight * position.y - 19.dp)
@@ -1195,19 +1242,78 @@ private fun AbstractNearbyMap(
                         targetValue = targetY,
                         label = "nearby-bubble-y",
                     )
-                    ListenerMapBubble(
-                        listener = listener,
-                        selected = selected,
-                        musicMatchLevel = musicMatchLevel,
-                        pointSize = pointSize,
-                        modifier = Modifier
-                            .offset(x = animatedX, y = animatedY)
-                            .width(labelWidth),
-                        onClick = { onSelectListener(listener) }
-                    )
+                    val markerModifier = Modifier
+                        .offset(x = animatedX, y = animatedY)
+                        .width(labelWidth)
+                    if (marker.isCluster) {
+                        ListenerClusterMapBubble(
+                            listeners = marker.listeners,
+                            selected = selected,
+                            modifier = markerModifier,
+                            onClick = { onSelectListeners(marker.listeners) },
+                        )
+                    } else {
+                        val listener = marker.listeners.single()
+                        ListenerMapBubble(
+                            listener = listener,
+                            selected = selected,
+                            musicMatchLevel = musicMatchLevel,
+                            pointSize = pointSize,
+                            modifier = markerModifier,
+                            onClick = { onSelectListeners(listOf(listener)) }
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ListenerClusterMapBubble(
+    listeners: List<NearbyListener>,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                role = Role.Button,
+                onClickLabel = "겹친 리스너 ${listeners.size}명 선택",
+                onClick = onClick,
+            )
+            .semantics {
+                contentDescription = "10미터 안에 겹친 리스너 ${listeners.size}명" +
+                    if (selected) ", 선택됨" else ""
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Surface(
+            modifier = Modifier.size(42.dp),
+            shape = CircleShape,
+            color = if (selected) MelodyBubbleColors.Primary else MelodyBubbleColors.Text,
+            border = BorderStroke(3.dp, MelodyBubbleColors.PrimarySoft),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "+${listeners.size}",
+                    color = if (selected) MelodyBubbleColors.OnPrimary else MelodyBubbleColors.Background,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "${listeners.size}명 모임",
+            color = if (selected) MelodyBubbleColors.PrimarySoft else MelodyBubbleColors.Text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
     }
 }
 
@@ -1302,8 +1408,41 @@ private fun ListenerMapBubble(
 }
 
 @Composable
+private fun SelectedListenerCarousel(
+    listeners: List<NearbyListener>,
+    onOpenDetail: (NearbyListener) -> Unit,
+    onOpenTrack: (Track) -> Unit,
+    onReact: (NearbyListener) -> Unit,
+    onFollow: (NearbyListener) -> Unit,
+    onPlayPreview: (NearbyListener, Track) -> Unit,
+    onSearchInMusicApp: (Track) -> Unit,
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(end = if (listeners.size > 1) 24.dp else 0.dp),
+        ) {
+            items(listeners, key = NearbyListener::nearbyHandle) { listener ->
+                SelectedListenerCard(
+                    listener = listener,
+                    modifier = Modifier.width(maxWidth),
+                    onOpenDetail = { onOpenDetail(listener) },
+                    onPlayPreview = { listener.currentTrack?.let { onPlayPreview(listener, it) } },
+                    onSearchInMusicApp = { listener.currentTrack?.let(onSearchInMusicApp) },
+                    onOpenTrack = { listener.currentTrack?.let(onOpenTrack) },
+                    onReact = { onReact(listener) },
+                    onFollow = { onFollow(listener) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun SelectedListenerCard(
     listener: NearbyListener,
+    modifier: Modifier = Modifier,
     onOpenDetail: () -> Unit,
     onOpenTrack: () -> Unit,
     onReact: () -> Unit,
@@ -1312,6 +1451,7 @@ private fun SelectedListenerCard(
     onSearchInMusicApp: () -> Unit,
 ) {
     MelodyCard(
+        modifier = modifier,
         onClick = onOpenDetail,
         onClickLabel = "${listener.displayAlias} 상세 열기"
     ) {
