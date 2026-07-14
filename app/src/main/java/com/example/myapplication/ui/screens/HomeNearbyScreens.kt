@@ -53,6 +53,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -254,7 +255,7 @@ fun NearbyScreen(
             state.nearbyLoadState == NearbyLoadState.EMPTY
         ) {
             item {
-                NearbyResultState(
+                NearbyInlineStatus(
                     state = state.nearbyLoadState,
                     message = state.nearbyErrorMessage,
                     onRetry = onRetry,
@@ -329,6 +330,51 @@ fun NearbyScreen(
                 reactionTarget.value = null
             },
         )
+    }
+}
+
+@Composable
+private fun NearbyInlineStatus(
+    state: NearbyLoadState,
+    message: String?,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when (state) {
+            NearbyLoadState.LOADING -> CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+            )
+            NearbyLoadState.ERROR -> Icon(
+                Icons.Outlined.ReportGmailerrorred,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MelodyBubbleColors.Danger,
+            )
+            else -> Unit
+        }
+        Text(
+            text = message ?: when (state) {
+                NearbyLoadState.LOADING -> "주변 탐색 중"
+                NearbyLoadState.EMPTY -> "주변에 공개된 버블이 없어요"
+                NearbyLoadState.ERROR -> "주변 연결을 확인해 주세요"
+                else -> ""
+            },
+            modifier = Modifier.weight(1f),
+            color = if (state == NearbyLoadState.ERROR) {
+                MelodyBubbleColors.Danger
+            } else MelodyBubbleColors.TextMuted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (state == NearbyLoadState.ERROR) {
+            TextButton(onClick = onRetry) { Text("다시 연결") }
+        }
     }
 }
 
