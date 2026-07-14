@@ -69,6 +69,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -92,6 +94,8 @@ import com.example.myapplication.ui.theme.MossSurfaceHigh
 import com.example.myapplication.ui.theme.MutedMint
 import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
+import com.example.myapplication.core.model.PreviewPlaybackState
+import com.example.myapplication.ui.components.PreviewEqualizerBars
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
@@ -113,6 +117,7 @@ private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap 
 @Composable
 fun BuildingLoungeMapScreen(
     state: BuildingLoungeUiState,
+    previewPlaybackState: PreviewPlaybackState,
     onLocationUpdate: (Double, Double, Float?) -> Unit,
     onLocationUnavailable: () -> Unit,
     onHeartbeat: (Double, Double, Float?) -> Unit,
@@ -249,6 +254,7 @@ fun BuildingLoungeMapScreen(
     if (state.selectedSubLoungeId != null) {
         SubLoungeDetailSheet(
             state = state,
+            previewPlaybackState = previewPlaybackState,
             onDismiss = onLeaveSubLounge,
             onLeave = onLeaveSubLounge,
             onDeleteSubLounge = onDeleteSubLounge,
@@ -637,6 +643,7 @@ private fun SubLoungeList(
 @Composable
 private fun SubLoungeDetailSheet(
     state: BuildingLoungeUiState,
+    previewPlaybackState: PreviewPlaybackState,
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
     onDeleteSubLounge: () -> Unit,
@@ -725,60 +732,14 @@ private fun SubLoungeDetailSheet(
             }
 
             snapshot?.let { room ->
+                val latestCardId = room.cards.maxWithOrNull(
+                    compareBy({ it.createdAt }, { it.id }),
+                )?.id
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         MetricPanel("참여자", "${room.memberCount}명", Modifier.weight(1f), onClick = onOpenMembers)
                         MetricPanel("재생 중", "${room.listeningStatuses.count { it.isPlaying }}곡", Modifier.weight(1f))
                         MetricPanel("추천", "${room.cards.size}개", Modifier.weight(1f))
-                    }
-                }
-
-                item { SectionLabel("참여자") }
-                item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenMembers),
-                        shape = RoundedCornerShape(14.dp),
-                        color = MossSurfaceHigh,
-                        border = BorderStroke(1.dp, MossOutline),
-                    ) {
-                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.PeopleOutline, contentDescription = null, tint = SignalGreen)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("라운지 참여자 ${room.memberCount}명", fontWeight = FontWeight.Bold)
-                                Text("참여자 목록에서 프로필을 확인하고 팔로우할 수 있어요.", color = MutedMint, style = MaterialTheme.typography.bodySmall)
-                            }
-                            Text("전체 보기", color = SignalGreen, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                item { SectionLabel("지금 함께 듣는 음악") }
-                if (room.listeningStatuses.isEmpty()) {
-                    item { EmptyLoungePanel("아직 공유된 음악이 없어요", "음악을 재생하면 자동으로 이곳에 표시돼요.") }
-                } else {
-                    items(room.listeningStatuses, key = { "${it.listenerAlias}-${it.updatedAt}" }) { listening ->
-                        Surface(
-                            modifier = Modifier.clickable(enabled = listening.listenerProfileHandle != null) {
-                                listening.listenerProfileHandle?.let(onOpenProfile)
-                            },
-                            shape = RoundedCornerShape(14.dp),
-                            color = MossSurfaceHigh,
-                            border = BorderStroke(1.dp, MossOutline),
-                        ) {
-                            Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = SignalGreen)
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(listening.trackTitle ?: "재생을 멈췄어요", fontWeight = FontWeight.Bold)
-                                    Text(
-                                        listOfNotNull(listening.artistName, listening.listenerAlias).joinToString(" · "),
-                                        color = MutedMint,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
 
@@ -942,6 +903,9 @@ private fun SubLoungeDetailSheet(
                     item { EmptyLoungePanel("첫 추천을 기다리고 있어요", "좋아하는 곡으로 대화를 시작해 보세요.") }
                 } else {
                     items(room.cards, key = { it.id }) { card ->
+                        val previewActive = card.id == latestCardId &&
+                            previewPlaybackState.matches(card.trackTitle, card.artistName) &&
+                            (previewPlaybackState.isLoading || previewPlaybackState.isPlaying || previewPlaybackState.isPaused)
                         val senderHandle = card.senderProfileHandle
                             ?: room.members.orEmpty().firstOrNull { it.displayName == card.senderAlias }?.profileHandle
                             ?: profileHandlesByAlias[card.senderAlias]
@@ -958,6 +922,19 @@ private fun SubLoungeDetailSheet(
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.weight(1f),
                                     )
+                                    if (previewActive) {
+                                        PreviewEqualizerBars(
+                                            active = previewPlaybackState.isPlaying,
+                                            modifier = Modifier.semantics {
+                                                contentDescription = if (previewPlaybackState.isPlaying) {
+                                                    "추천곡 재생 중"
+                                                } else {
+                                                    "추천곡 재생 준비 또는 일시정지"
+                                                }
+                                            },
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
                                     if (card.canDelete) {
                                         IconButton(onClick = { onDeleteCard(card.id) }) {
                                             Icon(Icons.Outlined.DeleteOutline, contentDescription = "추천 삭제")
@@ -1150,6 +1127,10 @@ private fun MissingMapKeyPanel(modifier: Modifier = Modifier) {
         }
     }
 }
+
+private fun PreviewPlaybackState.matches(title: String, artist: String): Boolean =
+    this.title.trim().equals(title.trim(), ignoreCase = true) &&
+        this.artist.trim().equals(artist.trim(), ignoreCase = true)
 
 @Composable
 private fun rememberMapViewWithLifecycle(): MapView {

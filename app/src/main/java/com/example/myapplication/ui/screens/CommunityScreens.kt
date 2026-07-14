@@ -862,7 +862,7 @@ fun NotificationScreen(
                             .clickable(enabled = notifications.isNotEmpty() && !clearingAll) {
                                 clearingAll = true
                                 animationScope.launch {
-                                    notifications.forEachIndexed { index, notification ->
+                                    notifications.asReversed().forEachIndexed { index, notification ->
                                         if (index > 0) delay(45)
                                         removingIds = removingIds + notification.id
                                     }
@@ -883,8 +883,9 @@ fun NotificationScreen(
             }
             items(notifications, key = { it.id }) { notification ->
                 AnimatedVisibility(
+                    modifier = Modifier.fillMaxWidth(),
                     visible = notification.id !in removingIds,
-                    exit = slideOutHorizontally(targetOffsetX = { it }) +
+                    exit = slideOutHorizontally(targetOffsetX = { -it }) +
                         shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
                 ) {
                     val swipeState = rememberSwipeToDismissBoxState(
@@ -904,12 +905,14 @@ fun NotificationScreen(
                         },
                     )
                     SwipeToDismissBox(
+                        modifier = Modifier.fillMaxWidth(),
                         state = swipeState,
                         enableDismissFromStartToEnd = false,
                         backgroundContent = { Spacer(Modifier.fillMaxSize()) },
                     ) {
                         AppPanel(
                             color = if (notification.isRead) MossSurface else MossSurfaceHigh,
+                            contentPadding = 8.dp,
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
@@ -921,6 +924,7 @@ fun NotificationScreen(
                                     TrackGlyph(
                                         notification.actorAlias ?: "시스템",
                                         notification.actorColorHex ?: 0xFF2A4937L,
+                                        size = 36.dp,
                                     )
                                 }
                                 Spacer(Modifier.width(12.dp))
@@ -928,16 +932,25 @@ fun NotificationScreen(
                                     Text(
                                         notification.actorAlias ?: "Melody Bubble",
                                         fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.clickable(
                                             enabled = notification.actorProfileHandle != null,
                                             onClick = { notification.actorProfileHandle?.let(onOpenProfile) },
                                         ),
                                     )
-                                    Text(notification.preview, color = MutedMint)
+                                    Text(
+                                        notification.preview,
+                                        color = MutedMint,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                                 Text(
                                     notification.relativeTime,
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.labelSmall,
                                     color = MutedMint,
                                 )
                             }
@@ -2772,6 +2785,7 @@ private fun BackHeader(
 private fun AppPanel(
     modifier: Modifier = Modifier,
     color: Color = MossSurface,
+    contentPadding: androidx.compose.ui.unit.Dp = 16.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
@@ -2780,7 +2794,7 @@ private fun AppPanel(
         color = color,
         border = androidx.compose.foundation.BorderStroke(1.dp, MossOutline)
     ) {
-        Column(modifier = Modifier.padding(16.dp), content = content)
+        Column(modifier = Modifier.padding(contentPadding), content = content)
     }
 }
 
@@ -2826,10 +2840,10 @@ private fun LiveDot(live: Boolean) {
 }
 
 @Composable
-private fun TrackGlyph(label: String, colorSeed: Long) {
+private fun TrackGlyph(label: String, colorSeed: Long, size: androidx.compose.ui.unit.Dp = 46.dp) {
     val colors = listOf(0xFF25C76FL, 0xFF53D889L, 0xFF79A85BL, 0xFF2C9F65L)
     val color = Color(colors[(kotlin.math.abs(colorSeed) % colors.size).toInt()])
-    Surface(modifier = Modifier.size(46.dp), shape = CircleShape, color = color) {
+    Surface(modifier = Modifier.size(size), shape = CircleShape, color = color) {
         Box(contentAlignment = Alignment.Center) {
             Text(label.take(1).uppercase(), color = Color(0xFF00210B), fontWeight = FontWeight.Black)
         }

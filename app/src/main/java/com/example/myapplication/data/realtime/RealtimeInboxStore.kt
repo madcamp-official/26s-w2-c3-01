@@ -68,6 +68,7 @@ class RealtimeInboxStore(context: Context) {
     private fun record(item: StoredItem) {
         synchronized(lock) {
             if (activeOwner == null) return
+            if (item.id in dismissedIds()) return
             val current = readItems()
             if (current.any { it.id == item.id }) return
             val lastReadAt = preferences.getLong(KEY_LAST_READ_AT, 0L)
@@ -113,8 +114,9 @@ class RealtimeInboxStore(context: Context) {
         }
     }
 
-    fun deleteAll() = synchronized(lock) {
+    fun deleteAll(notificationIds: Collection<String> = emptyList()) = synchronized(lock) {
         if (activeOwner != null) {
+            addDismissedIds(readItems().map(StoredItem::id) + notificationIds)
             writeItems(emptyList())
             _notifications.value = emptyList()
         }
@@ -122,6 +124,7 @@ class RealtimeInboxStore(context: Context) {
 
     fun delete(notificationId: String) = synchronized(lock) {
         if (activeOwner != null) {
+            addDismissedIds(listOf(notificationId))
             val remaining = readItems().filterNot { it.id == notificationId }
             writeItems(remaining)
             _notifications.value = remaining.toNotifications()
@@ -143,6 +146,18 @@ class RealtimeInboxStore(context: Context) {
 
     private fun writeItems(items: List<StoredItem>) {
         preferences.edit().putString(KEY_ITEMS, gson.toJson(items)).apply()
+    }
+
+    private fun dismissedIds(): Set<String> =
+        preferences.getStringSet(KEY_DISMISSED_IDS, emptySet())?.toSet().orEmpty()
+
+    private fun addDismissedIds(ids: Collection<String>) {
+        if (ids.isEmpty()) return
+        val updated = (dismissedIds() + ids.filter(String::isNotBlank))
+            .toList()
+            .takeLast(MAX_DISMISSED_IDS)
+            .toSet()
+        preferences.edit().putStringSet(KEY_DISMISSED_IDS, updated).apply()
     }
 
     private fun RealtimeEvent.toStoredItem(): StoredItem? = when (this) {
@@ -224,7 +239,9 @@ class RealtimeInboxStore(context: Context) {
         private const val KEY_OWNER = "owner"
         private const val KEY_ITEMS = "items"
         private const val KEY_LAST_READ_AT = "last_read_at"
+        private const val KEY_DISMISSED_IDS = "dismissed_ids"
         private const val MAX_ITEMS = 100
+        private const val MAX_DISMISSED_IDS = 500
         private val CONTROL_CHARACTERS = Regex("[\\p{Cc}\\p{Cf}]+")
     }
 }

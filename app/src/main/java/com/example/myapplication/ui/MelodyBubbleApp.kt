@@ -66,6 +66,7 @@ import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.Track
+import com.example.myapplication.core.model.PreviewPlaybackState
 import com.example.myapplication.data.remote.LoungeMemberProfileDto
 import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.service.SharingForegroundService
@@ -332,6 +333,7 @@ fun MelodyBubbleApp(
             composable(Route.MAIN) {
                 MainShell(
                     state = state,
+                    previewPlaybackState = previewPlaybackState,
                     musicSearchState = musicSearchState,
                     genreCatalogState = genreCatalogState,
                     buildingLoungeState = buildingLoungeState,
@@ -725,6 +727,7 @@ fun MelodyBubbleApp(
 @Composable
 private fun MainShell(
     state: MelodyUiState,
+    previewPlaybackState: PreviewPlaybackState,
     musicSearchState: MusicSearchUiState,
     genreCatalogState: GenreCatalogUiState,
     buildingLoungeState: BuildingLoungeUiState,
@@ -830,6 +833,7 @@ private fun MainShell(
                 OfflineServerFeatureScreen("음악 라운지", onOpenOfflineExchange, contentModifier)
             } else BuildingLoungeMapScreen(
                 state = buildingLoungeState,
+                previewPlaybackState = previewPlaybackState,
                 onLocationUpdate = viewModel::refreshBuildingLounges,
                 onLocationUnavailable = viewModel::setBuildingLoungeLocationUnavailable,
                 onHeartbeat = viewModel::heartbeatBuildingLounge,

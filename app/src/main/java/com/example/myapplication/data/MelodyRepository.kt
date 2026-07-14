@@ -930,7 +930,7 @@ class DemoMelodyRepository(
     }
 
     override fun clearNotifications() {
-        realtimeInboxStore?.deleteAll()
+        realtimeInboxStore?.deleteAll(_state.value.notifications.map(InboxNotification::id))
         _state.update { it.copy(notifications = emptyList()) }
     }
 

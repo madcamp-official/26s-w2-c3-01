@@ -27,6 +27,7 @@ import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.BuildingLoungeRepository
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
 import com.example.myapplication.data.remote.CreateLoungeCardRequestDto
+import com.example.myapplication.data.remote.LoungeRecommendationCardDto
 import com.example.myapplication.data.remote.SubLoungeSnapshotDto
 import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
@@ -146,6 +147,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var loungeFallbackJob: Job? = null
     private var loungeSnapshotJob: Job? = null
     private var latestSubLoungeSnapshotAt: String? = null
+    private var pendingAutoPlaySubLoungeId: String? = null
     @Volatile private var offlineCredentialPreparing = false
     private val tokenStore = SecureTokenStore(application)
     private val offlineAccountStore = OfflineAccountStore(application)
@@ -1027,6 +1029,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     realtimeClient.subscribeTopic(RealtimeDestinations.subLounge(subLoungeId))
                     presenceCoordinator.activateSubLounge(subLoungeId)
+                    pendingAutoPlaySubLoungeId = subLoungeId
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         selectedSubLoungeId = subLoungeId,
                         detailLoading = true,
@@ -1045,6 +1048,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun leaveSubLounge() {
         val token = accessToken ?: return
         val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
+        stopMusicPreview()
         viewModelScope.launch {
             presenceCoordinator.deactivateSubLounge(subLoungeId)
             buildingLoungeRepository.leaveSubLounge(token, subLoungeId)
@@ -1223,13 +1227,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     if (_buildingLoungeState.value.selectedSubLoungeId != subLoungeId) return@onSuccess
                     if (latestSubLoungeSnapshotAt?.let { snapshot.generatedAt < it } == true) return@onSuccess
                     latestSubLoungeSnapshotAt = snapshot.generatedAt
+                    val shouldAutoPlay = pendingAutoPlaySubLoungeId == subLoungeId
+                    if (shouldAutoPlay) pendingAutoPlaySubLoungeId = null
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         detailLoading = false,
                         subLoungeSnapshot = snapshot,
                     )
+                    if (shouldAutoPlay) playLatestLoungeRecommendation(snapshot)
                 }
                 .onFailure {
                     if (_buildingLoungeState.value.selectedSubLoungeId == subLoungeId) {
+                        if (pendingAutoPlaySubLoungeId == subLoungeId) pendingAutoPlaySubLoungeId = null
                         _buildingLoungeState.value = _buildingLoungeState.value.copy(
                             detailLoading = false,
                             message = "라운지 상태를 불러오지 못했어요.",
@@ -1240,6 +1248,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun clearSelectedSubLounge() {
+        stopMusicPreview()
         _buildingLoungeState.value.selectedSubLoungeId?.let { id ->
             realtimeClient.unsubscribeTopic(RealtimeDestinations.subLounge(id))
             presenceCoordinator.deactivateSubLounge(id)
@@ -1253,6 +1262,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             trackSearchResults = emptyList(),
         )
         latestSubLoungeSnapshotAt = null
+        pendingAutoPlaySubLoungeId = null
+    }
+
+    private fun playLatestLoungeRecommendation(snapshot: SubLoungeSnapshotDto) {
+        snapshot.cards.latestRecommendation()?.let { card ->
+            playMusicPreview(title = card.trackTitle, artist = card.artistName)
+        }
     }
 
     private fun restoreSubLoungeSession(token: String) {
@@ -1273,6 +1289,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         selectedSubLoungeId = snapshot.id,
                         subLoungeSnapshot = snapshot,
                     )
+                    playLatestLoungeRecommendation(snapshot)
                 }
         }
     }
@@ -1303,6 +1320,9 @@ internal fun List<MusicSearchResult>.matchingPreviewUrl(title: String, artist: S
             result.previewUrl?.startsWith("https://") == true
     }?.previewUrl
 }
+
+internal fun List<LoungeRecommendationCardDto>.latestRecommendation(): LoungeRecommendationCardDto? =
+    maxWithOrNull(compareBy<LoungeRecommendationCardDto>({ it.createdAt }, { it.id }))
 
 private fun String.normalizedMusicIdentity(): String =
     lowercase().filter(Char::isLetterOrDigit)
