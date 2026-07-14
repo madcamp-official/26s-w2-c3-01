@@ -99,6 +99,12 @@ data class CommonTasteSummary(
     val calculatedAt: Instant = Instant.now(),
 )
 
+data class SharedFollowerPreview(
+    val profileHandle: String,
+    val displayName: String,
+    val avatarUrl: String,
+)
+
 data class ProfileResponse(
     val profileHandle: String,
     val displayName: String,
@@ -140,6 +146,8 @@ data class PublicProfileResponse(
     val following: Boolean,
     val mutual: Boolean,
     val sharedVerifiedExchangeCount: Int,
+    val sharedFollowers: List<SharedFollowerPreview> = emptyList(),
+    val sharedFollowerCount: Int = 0,
     val signatureTracks: List<ProfileTrack> = emptyList(),
     val favoriteArtists: List<ProfileArtist> = emptyList(),
     val nowPlaying: NowPlayingProfile? = null,
@@ -256,6 +264,7 @@ class ProfileQueryService(
             targetId = target.userId,
             includeTargetExchangeInsights = exchangeInsightsVisible,
         )
+        val sharedFollowers = sharedFollowers(viewerId, target.userId)
         return PublicProfileResponse(
             profileHandle = target.profileHandle,
             displayName = target.displayName,
@@ -274,6 +283,8 @@ class ProfileQueryService(
             following = following,
             mutual = mutual,
             sharedVerifiedExchangeCount = sharedExchangeCount,
+            sharedFollowers = sharedFollowers.previews,
+            sharedFollowerCount = sharedFollowers.totalCount,
             signatureTracks = signatureTracks(target.userId),
             favoriteArtists = favoriteArtists(target.userId),
             nowPlaying = nowPlaying,
@@ -584,6 +595,47 @@ class ProfileQueryService(
             viewerId,
             targetId,
         ) ?: 0
+    }
+
+    private data class SharedFollowers(
+        val totalCount: Int,
+        val previews: List<SharedFollowerPreview>,
+    )
+
+    private fun sharedFollowers(viewerId: UUID, targetId: UUID): SharedFollowers {
+        if (viewerId == targetId) return SharedFollowers(0, emptyList())
+        val rows = jdbc.query(
+            """
+            select u.profile_handle, u.display_name, u.avatar_seed, count(*) over()::int
+            from user_follows viewer_following
+            join users u on u.id=viewer_following.followed_id
+            join user_follows target_followers
+              on target_followers.follower_id=u.id and target_followers.followed_id=?
+            where viewer_following.follower_id=?
+              and not exists(
+                select 1 from user_blocks b
+                where (b.blocker_id=? and b.blocked_id=u.id)
+                   or (b.blocker_id=u.id and b.blocked_id=?)
+              )
+            order by viewer_following.created_at desc, u.display_name asc
+            limit 3
+            """.trimIndent(),
+            { rs, _ ->
+                rs.getInt(4) to SharedFollowerPreview(
+                    profileHandle = rs.getString(1),
+                    displayName = rs.getString(2),
+                    avatarUrl = avatars.create(rs.getString(3)),
+                )
+            },
+            targetId,
+            viewerId,
+            viewerId,
+            viewerId,
+        )
+        return SharedFollowers(
+            totalCount = rows.firstOrNull()?.first ?: 0,
+            previews = rows.map(Pair<Int, SharedFollowerPreview>::second),
+        )
     }
 
     private fun follows(from: UUID, to: UUID): Boolean = from != to && jdbc.queryForObject(

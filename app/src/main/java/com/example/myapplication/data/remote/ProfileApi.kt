@@ -125,11 +125,19 @@ data class RemotePublicProfile(
     val following: Boolean,
     val mutual: Boolean,
     val sharedVerifiedExchangeCount: Int,
+    val sharedFollowers: List<RemoteSharedFollowerPreview>? = emptyList(),
+    val sharedFollowerCount: Int = 0,
     val signatureTracks: List<RemoteProfileTrack>? = emptyList(),
     val favoriteArtists: List<RemoteProfileArtist>? = emptyList(),
     val nowPlaying: RemoteProfileNowPlaying? = null,
     val commonTaste: RemoteCommonTasteSummary? = null,
     val sectionStates: Map<String, String>? = emptyMap(),
+)
+
+data class RemoteSharedFollowerPreview(
+    val profileHandle: String,
+    val displayName: String,
+    val avatarUrl: String? = null,
 )
 data class ProfileUpdateRequest(
     val displayName: String,

@@ -122,6 +122,7 @@ data class NearbyListener(
     val canReact: Boolean = true,
     val isNew: Boolean = false,
     val avatarUrl: String? = null,
+    val isDirectlyDetected: Boolean = false,
 )
 
 data class PopularTrack(
@@ -316,6 +317,12 @@ data class ProfileMelodyAlias(
     val tempo: Int,
 )
 
+data class SharedFollowerPreview(
+    val profileHandle: String,
+    val displayName: String,
+    val avatarUrl: String?,
+)
+
 data class PublicProfile(
     val profileHandle: String,
     val isSelf: Boolean = false,
@@ -333,6 +340,8 @@ data class PublicProfile(
     val following: Boolean,
     val mutual: Boolean,
     val sharedVerifiedExchangeCount: Int,
+    val sharedFollowers: List<SharedFollowerPreview> = emptyList(),
+    val sharedFollowerCount: Int = 0,
     val signatureTracks: List<ProfileTrack> = emptyList(),
     val favoriteArtists: List<ProfileArtist> = emptyList(),
     val nowPlaying: ProfileNowPlaying? = null,
