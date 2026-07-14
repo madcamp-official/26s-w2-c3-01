@@ -1815,7 +1815,9 @@ class DemoMelodyRepository(
         }
     }
 
-    private suspend fun currentLocation(): android.location.Location? {
+    private suspend fun currentLocation(
+        allowInitialCoarseLocation: Boolean,
+    ): android.location.Location? {
         val fine = ContextCompat.checkSelfPermission(
             applicationContext,
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -1827,7 +1829,8 @@ class DemoMelodyRepository(
         if (!fine && !coarse) return null
 
         val cached = runCatching { fusedLocationClient.lastLocation.await() }.getOrNull()
-        if (cached != null && cached.hasAccuracy() && cached.accuracy <= NearbyLocationPolicy.MAX_ACCURACY_METERS &&
+        if (allowInitialCoarseLocation && cached != null && cached.hasAccuracy() &&
+            cached.accuracy <= NearbyLocationPolicy.MAX_ACCURACY_METERS &&
             System.currentTimeMillis() - cached.time in 0L..PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS
         ) {
             return cached
@@ -1837,15 +1840,33 @@ class DemoMelodyRepository(
         return try {
             withTimeoutOrNull(CURRENT_LOCATION_TIMEOUT_MILLIS) {
                 fusedLocationClient.getCurrentLocation(
-                    Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                    Priority.PRIORITY_HIGH_ACCURACY,
                     cancellation.token,
                 ).await()
             }?.takeIf { location ->
-                NearbyLocationPolicy.isUsable(
-                    observedAtMillis = location.time,
-                    accuracyMeters = location.accuracy.takeIf { location.hasAccuracy() },
-                    nowMillis = System.currentTimeMillis(),
-                )
+                val accuracy = location.accuracy.takeIf { location.hasAccuracy() }
+                if (allowInitialCoarseLocation) {
+                    NearbyLocationPolicy.isUsableForInitialDiscovery(
+                        observedAtMillis = location.time,
+                        accuracyMeters = accuracy,
+                        nowMillis = System.currentTimeMillis(),
+                    )
+                } else {
+                    NearbyLocationPolicy.isUsable(
+                        observedAtMillis = location.time,
+                        accuracyMeters = accuracy,
+                        nowMillis = System.currentTimeMillis(),
+                    )
+                }
+            } ?: cached?.takeIf { location ->
+                val accuracy = location.accuracy.takeIf { location.hasAccuracy() }
+                val age = System.currentTimeMillis() - location.time
+                if (allowInitialCoarseLocation) {
+                    accuracy != null && accuracy <= NearbyLocationPolicy.INITIAL_MAX_ACCURACY_METERS &&
+                        age in 0L..STATIONARY_LOCATION_FALLBACK_MAX_AGE_MILLIS
+                } else {
+                    NearbyLocationPolicy.isUsable(location.time, accuracy, System.currentTimeMillis())
+                }
             }
         } catch (_: SecurityException) {
             null
