@@ -22,6 +22,12 @@ class NearbyProximityStabilizer(
                 pendingByHandle.remove(next.nearbyHandle)
                 return@map next
             }
+            if (next.proximityConfidence == NearbyProximityConfidence.LOW) {
+                return@map next.copy(
+                    proximity = previous.proximity,
+                    displayPosition = previous.displayPosition,
+                )
+            }
             val pending = pendingByHandle[next.nearbyHandle]
             val count = if (pending?.proximity == next.proximity) pending.count + 1 else 1
             if (count >= confirmationsRequired) {

@@ -19,6 +19,8 @@ data class RemoteNearbyBubble(
     val displayPosition: RemotePosition,
     val matchScore: Int,
     val proximity: String,
+    val distanceConfidence: String = "UNKNOWN",
+    val distanceAccuracyMeters: Double? = null,
     val relationship: String?,
     val canReact: Boolean?,
     val track: RemoteTrack?,

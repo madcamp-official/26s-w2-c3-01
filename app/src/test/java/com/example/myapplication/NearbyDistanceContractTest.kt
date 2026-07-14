@@ -2,6 +2,7 @@ package com.example.myapplication
 
 import com.example.myapplication.core.model.DisplayPosition
 import com.example.myapplication.core.model.NearbyListener
+import com.example.myapplication.core.model.NearbyProximityConfidence
 import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityStabilizer
@@ -51,6 +52,20 @@ class NearbyDistanceContractTest {
         assertEquals(current.single().displayPosition, first.single().displayPosition)
         assertEquals(Proximity.WITHIN_10M, second.single().proximity)
         assertEquals(incoming.single().displayPosition, second.single().displayPosition)
+    }
+
+    @Test
+    fun lowConfidenceDistanceDoesNotMoveAnExistingBubble() {
+        val stabilizer = NearbyProximityStabilizer(confirmationsRequired = 1)
+        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+        val noisy = listener(Proximity.WITHIN_15M, DisplayPosition(0.85f, 0.5f)).copy(
+            proximityConfidence = NearbyProximityConfidence.LOW,
+        )
+
+        val result = stabilizer.stabilize(current, listOf(noisy)).single()
+
+        assertEquals(Proximity.WITHIN_5M, result.proximity)
+        assertEquals(current.single().displayPosition, result.displayPosition)
     }
 
     @Test

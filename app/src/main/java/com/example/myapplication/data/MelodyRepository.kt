@@ -17,6 +17,7 @@ import com.example.myapplication.core.model.MAX_NEARBY_RADIUS_METERS
 import com.example.myapplication.core.model.MelodyReducers
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.NearbyLoadState
+import com.example.myapplication.core.model.NearbyProximityConfidence
 import com.example.myapplication.core.model.NearbyMeasurementDiagnostics
 import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityStabilizer
@@ -1943,6 +1944,8 @@ class DemoMelodyRepository(
             displayPosition = com.example.myapplication.core.model.DisplayPosition(displayPosition.x, displayPosition.y),
             matchScore = matchScore,
             proximity = com.example.myapplication.core.model.Proximity.fromWire(proximity),
+            proximityConfidence = runCatching { NearbyProximityConfidence.valueOf(distanceConfidence) }
+                .getOrDefault(NearbyProximityConfidence.UNKNOWN),
             isPlaying = track != null,
             currentTrack = track?.let {
                 Track(

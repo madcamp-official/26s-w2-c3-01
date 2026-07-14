@@ -40,6 +40,12 @@ enum class NearbyMeasurementMethod(val label: String) {
     UNKNOWN("위치"),
 }
 
+enum class NearbyProximityConfidence {
+    HIGH,
+    LOW,
+    UNKNOWN,
+}
+
 data class NearbyMeasurementDiagnostics(
     val method: NearbyMeasurementMethod,
     val accuracyMeters: Float?,
@@ -131,6 +137,7 @@ data class NearbyListener(
     val displayPosition: DisplayPosition,
     val matchScore: Int,
     val proximity: Proximity,
+    val proximityConfidence: NearbyProximityConfidence = NearbyProximityConfidence.UNKNOWN,
     val isPlaying: Boolean,
     val currentTrack: Track?,
     val commonGenres: List<String>,
