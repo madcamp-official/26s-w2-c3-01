@@ -12,6 +12,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -33,9 +35,11 @@ import com.google.android.gms.location.Priority
 class SharingForegroundService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var locationManager: LocationManager
     private lateinit var notificationManager: NotificationManager
     private var isForeground = false
     private var isReceivingLocationUpdates = false
+    private var isReceivingGpsUpdates = false
     private var interactiveMode = true
     private var locationRequestGeneration = 0
 
@@ -45,13 +49,20 @@ class SharingForegroundService : Service() {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            result.locations.forEach(::publishLocationIfUsable)
+            result.locations.forEach { publishLocationIfUsable(it, source = "fused") }
+        }
+    }
+
+    private val gpsLocationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            publishLocationIfUsable(location, source = "gps")
         }
     }
 
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        locationManager = getSystemService(LocationManager::class.java)
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
     }
@@ -94,6 +105,7 @@ class SharingForegroundService : Service() {
             runCatching { fusedLocationClient.removeLocationUpdates(locationCallback) }
             isReceivingLocationUpdates = false
         }
+        stopGpsUpdates()
         preferences.edit().putBoolean(KEY_SHARING_ACTIVE, false).apply()
         publishSharingState(active = false)
         if (isForeground) {
@@ -126,26 +138,47 @@ class SharingForegroundService : Service() {
 
     @SuppressLint("MissingPermission")
     private fun requestLocationUpdatesIfNeeded() {
-        if (isReceivingLocationUpdates || !hasLocationPermission(this)) return
+        if (!hasLocationPermission(this)) return
         val profile = if (interactiveMode) NearbyLocationPolicy.INTERACTIVE else NearbyLocationPolicy.EFFICIENT
-        val request = LocationRequest.Builder(
-            Priority.PRIORITY_BALANCED_POWER_ACCURACY,
-            profile.intervalMillis,
-        )
-            .setMinUpdateIntervalMillis(profile.minIntervalMillis)
-            .setMinUpdateDistanceMeters(profile.minDistanceMeters)
-            .setMaxUpdateAgeMillis(NearbyLocationPolicy.MAX_AGE_MILLIS)
-            .build()
-        try {
-            fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
-                .addOnFailureListener { isReceivingLocationUpdates = false }
-            isReceivingLocationUpdates = true
-        } catch (_: SecurityException) {
-            isReceivingLocationUpdates = false
+        if (!isReceivingLocationUpdates) {
+            val request = LocationRequest.Builder(
+                Priority.PRIORITY_HIGH_ACCURACY,
+                profile.intervalMillis,
+            )
+                .setMinUpdateIntervalMillis(profile.minIntervalMillis)
+                .setMinUpdateDistanceMeters(profile.minDistanceMeters)
+                .setMaxUpdateAgeMillis(NearbyLocationPolicy.MAX_AGE_MILLIS)
+                .build()
+            try {
+                fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+                    .addOnFailureListener { isReceivingLocationUpdates = false }
+                isReceivingLocationUpdates = true
+            } catch (_: SecurityException) {
+                isReceivingLocationUpdates = false
+            }
+        }
+        if (!isReceivingGpsUpdates && hasFineLocationPermission(this)) {
+            try {
+                if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        profile.intervalMillis,
+                        profile.minDistanceMeters,
+                        gpsLocationListener,
+                        Looper.getMainLooper(),
+                    )
+                    isReceivingGpsUpdates = true
+                }
+            } catch (_: SecurityException) {
+                isReceivingGpsUpdates = false
+            } catch (_: IllegalArgumentException) {
+                isReceivingGpsUpdates = false
+            }
         }
     }
 
     private fun restartLocationUpdates() {
+        stopGpsUpdates()
         if (!isReceivingLocationUpdates) {
             requestLocationUpdatesIfNeeded()
             return
@@ -158,10 +191,21 @@ class SharingForegroundService : Service() {
         }
     }
 
-    private fun publishLocationIfUsable(location: Location) {
+    private fun stopGpsUpdates() {
+        if (!isReceivingGpsUpdates) return
+        runCatching { locationManager.removeUpdates(gpsLocationListener) }
+        isReceivingGpsUpdates = false
+    }
+
+    private fun publishLocationIfUsable(location: Location, source: String) {
         val accuracy = location.accuracy.takeIf { location.hasAccuracy() && it.isFinite() }
         val now = System.currentTimeMillis()
         if (!NearbyLocationPolicy.isUsable(location.time, accuracy, now)) return
+        android.util.Log.d(
+            "MelodyLocation",
+            "usable fix source=$source accuracy=${accuracy?.toInt()}m " +
+                "age=${now - location.time}ms interactive=$interactiveMode",
+        )
         preferences.edit()
             .putLong(KEY_LAST_LOCATION_UPDATE_EPOCH_MS, now)
             .putString(KEY_LAST_LOCATION_ACCURACY_QUALITY, accuracyQuality(location))
@@ -336,6 +380,10 @@ class SharingForegroundService : Service() {
             context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED ||
                 context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+
+        private fun hasFineLocationPermission(context: Context): Boolean =
+            context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
 
         fun isSharingActive(context: Context): Boolean = context.getSharedPreferences(
