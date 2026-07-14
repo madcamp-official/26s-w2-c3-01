@@ -73,7 +73,7 @@ object PlatformConnectedRangerFactory {
 
     @RequiresApi(36)
     private object Api36 {
-        fun create(context: Context): PlatformConnectedRanger = NoOpPlatformConnectedRanger()
+        fun create(context: Context): PlatformConnectedRanger = AndroidOobPeerRanger(context)
     }
 }
 
