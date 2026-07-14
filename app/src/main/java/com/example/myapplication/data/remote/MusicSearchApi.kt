@@ -61,6 +61,13 @@ class MusicSearchRepository(
     private val artistImageCache = ConcurrentHashMap<String, String>()
     private val artistImageLookupLimiter = Semaphore(6)
 
+    /** Fetches only the data required to start playback without waiting for artist image enrichment. */
+    suspend fun searchPreviews(keyword: String): List<MusicSearchResult> {
+        val term = keyword.trim()
+        require(term.isNotEmpty()) { "검색어를 입력해 주세요." }
+        return api.search(term = term).results.toSearchResults()
+    }
+
     suspend fun search(keyword: String): List<MusicSearchResult> = coroutineScope {
         val term = keyword.trim()
         require(term.isNotEmpty()) { "검색어를 입력해 주세요." }

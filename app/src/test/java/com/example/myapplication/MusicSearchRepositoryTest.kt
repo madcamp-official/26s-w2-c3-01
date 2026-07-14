@@ -15,6 +15,48 @@ import org.junit.Test
 
 class MusicSearchRepositoryTest {
     @Test
+    fun previewSearchDoesNotWaitForDeezerArtistEnrichment() = runBlocking {
+        var deezerCalls = 0
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ) = ITunesSearchResponse(
+                resultCount = 1,
+                results = listOf(
+                    ITunesSongDto(
+                        trackId = 123L,
+                        trackName = "Busy Boy",
+                        artistName = "리센느",
+                        previewUrl = "https://audio.example/busy-boy.m4a",
+                    ),
+                ),
+            )
+        }
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String): DeezerArtistSearchResponse {
+                deezerCalls += 1
+                return DeezerArtistSearchResponse()
+            }
+        }
+
+        val result = MusicSearchRepository(api, artistApi).searchPreviews("Busy Boy RESCENE").single()
+
+        assertEquals("https://audio.example/busy-boy.m4a", result.previewUrl)
+        assertEquals(0, deezerCalls)
+    }
+
+    @Test
     fun mapsITunesSongIntoProfileSearchResult() = runBlocking {
         val api = object : MusicSearchApi {
             override suspend fun genres(

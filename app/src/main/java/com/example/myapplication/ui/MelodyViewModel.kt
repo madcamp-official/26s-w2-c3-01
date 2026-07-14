@@ -511,7 +511,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             }
         nowPlayingPreviewJob = viewModelScope.launch {
             runCatching {
-                musicSearchRepository.search("${nowPlaying.title} ${nowPlaying.artist}")
+                musicSearchRepository.searchPreviews(musicPreviewSearchTerm(nowPlaying.title, nowPlaying.artist))
             }.onSuccess { results ->
                 results.firstOrNull { it.previewUrl == results.matchingPreviewUrl(nowPlaying.title, nowPlaying.artist) }
                     ?.let { musicPreviewPlayer.play(it.previewUrl!!, nowPlaying.title, nowPlaying.artist, it.artworkUrl) }
@@ -602,7 +602,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         previewLookupJob = viewModelScope.launch {
-            runCatching { musicSearchRepository.search(musicPreviewSearchTerm(title, artist)) }
+            runCatching { musicSearchRepository.searchPreviews(musicPreviewSearchTerm(title, artist)) }
                 .onSuccess { results ->
                     val matchingUrl = results.matchingPreviewUrl(title, artist)
                     val match = results.firstOrNull { it.previewUrl == matchingUrl }
