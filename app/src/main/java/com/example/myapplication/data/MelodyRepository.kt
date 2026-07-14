@@ -59,6 +59,7 @@ import com.example.myapplication.data.realtime.toServerEpochMillis
 import com.example.myapplication.data.remote.ApiEnvironment
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.LocationUpdateRequest
+import com.example.myapplication.data.remote.DirectProximityUpdateRequest
 import com.example.myapplication.data.remote.NearbyBeaconRequest
 import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.NearbyReactionRequest
@@ -262,6 +263,7 @@ class DemoMelodyRepository(
     private val chatRealtimeVersion = AtomicLong(0)
     private val nearbyRealtimeVersion = AtomicLong(0)
     private val locationSequence = AtomicLong(System.currentTimeMillis() * 1_000L)
+    private val directProximitySequence = AtomicLong(System.currentTimeMillis() * 1_000L)
     private val popularRealtimeVersion = AtomicLong(0)
     private val chatReadLock = Any()
     private val hiddenChatRoomLock = Any()
@@ -275,6 +277,7 @@ class DemoMelodyRepository(
     private var directNearbyByHandle = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
     private var directUsersByBeacon = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
     private var directMeasurementsByBeacon = emptyMap<String, PeerProximityMeasurement>()
+    private val reportedDirectMeasurementAt = mutableMapOf<String, Long>()
     private var passiveDiscoveryStarted = false
     // Server distance bands are already privacy-coarsened. Apply a crossed band immediately so
     // another user's movement is visible on the next snapshot instead of one cycle later.
@@ -357,6 +360,7 @@ class DemoMelodyRepository(
             passiveNearbyDiscovery.proximityMeasurements.collect { measurements ->
                 directMeasurementsByBeacon = measurements
                 applyDirectProximityMeasurements()
+                reportDirectProximityMeasurements(measurements)
             }
         }
         scope.launch {
@@ -1772,6 +1776,27 @@ class DemoMelodyRepository(
                 } ?: current.nearbyMeasurementDiagnostics,
                 snapshotSequence = current.snapshotSequence + 1,
             )
+        }
+    }
+
+    private suspend fun reportDirectProximityMeasurements(
+        measurements: Map<String, PeerProximityMeasurement>,
+    ) {
+        val token = accessToken ?: return
+        measurements.values.forEach { measurement ->
+            val lastReportedAt = reportedDirectMeasurementAt[measurement.beaconId] ?: Long.MIN_VALUE
+            if (measurement.observedAtEpochMillis <= lastReportedAt) return@forEach
+            val request = DirectProximityUpdateRequest(
+                beaconId = measurement.beaconId,
+                proximity = measurement.proximity.name,
+                confidence = measurement.confidence.name,
+                method = measurement.method.name,
+                sequence = directProximitySequence.incrementAndGet(),
+                observedAtEpochMillis = measurement.observedAtEpochMillis,
+            )
+            if (runCatching { nearbyApi.reportDirectProximity("Bearer $token", request) }
+                    .getOrDefault(false)
+            ) reportedDirectMeasurementAt[measurement.beaconId] = measurement.observedAtEpochMillis
         }
     }
 

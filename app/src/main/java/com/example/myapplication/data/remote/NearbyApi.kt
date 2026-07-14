@@ -97,6 +97,14 @@ data class NearbyBeaconRequest(val clientSessionId: String)
 data class RemoteNearbyBeacon(val beaconId: String, val expiresAt: String, val rotationAfterSeconds: Int)
 data class ResolveNearbyBeaconsRequest(val beaconIds: List<String>)
 data class RemoteResolvedNearbyBeacon(val beaconId: String, val user: RemoteNearbyBubble)
+data class DirectProximityUpdateRequest(
+    val beaconId: String,
+    val proximity: String,
+    val confidence: String,
+    val method: String,
+    val sequence: Long,
+    val observedAtEpochMillis: Long,
+)
 
 interface NearbyApi {
     @POST("api/v1/nearby/beacons")
@@ -110,6 +118,12 @@ interface NearbyApi {
         @Header("Authorization") authorization: String,
         @Body request: ResolveNearbyBeaconsRequest,
     ): List<RemoteResolvedNearbyBeacon>
+
+    @POST("api/v1/nearby/beacons/proximity")
+    suspend fun reportDirectProximity(
+        @Header("Authorization") authorization: String,
+        @Body request: DirectProximityUpdateRequest,
+    ): Boolean
 
     @GET("api/v1/nearby/snapshot")
     suspend fun snapshot(@Header("Authorization") authorization: String): RemoteNearbySnapshot
