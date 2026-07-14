@@ -122,6 +122,7 @@ private const val STATIONARY_LOCATION_FALLBACK_MAX_AGE_MILLIS = 10 * 60_000L
 private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
 private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
+private const val KEY_PROFILE_AVATAR_DIRTY = "profile-avatar-dirty"
 private const val KEY_HIDDEN_CHAT_ROOM_IDS = "hidden-chat-room-ids"
 
 private fun String?.isDeezerArtistImage(): Boolean =
@@ -1109,7 +1110,7 @@ class DemoMelodyRepository(
     }
 
     override fun randomizeAvatar() {
-        val token = accessToken ?: return
+        val token = accessToken
         val previousProfile = _state.value.profile
         val optimisticAvatar = AvatarProfileResolver.resolve(
             remoteSeed = UUID.randomUUID().toString(),
@@ -1126,20 +1127,31 @@ class DemoMelodyRepository(
                 ),
             )
         }
+        persistProfile(_state.value.profile)
+        preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_AVATAR_DIRTY), true).apply()
+        if (token == null) {
+            _state.update {
+                it.copy(profileSaving = false, feedbackMessage = "새 아바타를 기기에 적용했어요.")
+            }
+            return
+        }
         scope.launch {
             runCatching { profileApi.randomizeAvatar("Bearer $token") }
                 .onSuccess {
-                    if (isCurrentSession(token)) applyRemoteProfile(it, "새 아바타를 적용했어요")
+                    if (isCurrentSession(token)) {
+                        preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_AVATAR_DIRTY), false).apply()
+                        applyRemoteProfile(it, "새 아바타를 적용했어요")
+                    }
                 }
                 .onFailure {
                     if (isCurrentSession(token)) {
                         _state.update { state ->
                             state.copy(
-                                profile = previousProfile,
                                 profileSaving = false,
-                                feedbackMessage = requestErrorMessage(it, "아바타를 변경하지 못했어요"),
+                                feedbackMessage = "새 아바타를 기기에 적용했어요. 서버 연결 후 다시 동기화할게요.",
                             )
                         }
+                        persistProfile(_state.value.profile)
                     }
                 }
         }
@@ -1525,6 +1537,7 @@ class DemoMelodyRepository(
             val cachedProfile = restoreProfile(current.profile)
             val keepPendingCuration = preferences.getBoolean(profileScopedKey(KEY_PROFILE_CURATION_DIRTY), false)
             val keepPendingPrivacy = preferences.getBoolean(profileScopedKey(KEY_PROFILE_PRIVACY_DIRTY), false)
+            val keepPendingAvatar = preferences.getBoolean(profileScopedKey(KEY_PROFILE_AVATAR_DIRTY), false)
             val remoteAlias = remote.melodyAlias
             val stats = remote.stats?.toDomain() ?: current.profile.stats.copy(
                 verifiedExchangeCount = remote.offlineExchangeCount,
@@ -1548,8 +1561,8 @@ class DemoMelodyRepository(
                     nearbyDisplayAlias = remote.displayName,
                     colorHex = remote.profileColor.removePrefix("#").toLongOrNull(16) ?: current.profile.colorHex,
                     bio = remote.bio.orEmpty(),
-                    avatarSeed = resolvedAvatar.seed,
-                    avatarUrl = resolvedAvatar.url,
+                    avatarSeed = if (keepPendingAvatar) cachedProfile.avatarSeed else resolvedAvatar.seed,
+                    avatarUrl = if (keepPendingAvatar) cachedProfile.avatarUrl else resolvedAvatar.url,
                     genres = remote.genres.orEmpty(),
                     moods = remote.moods.orEmpty(),
                     profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },

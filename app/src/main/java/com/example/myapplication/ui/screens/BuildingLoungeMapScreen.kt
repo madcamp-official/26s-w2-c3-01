@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Map
@@ -81,7 +82,9 @@ import com.example.myapplication.R
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.data.remote.BuildingLoungeSummaryDto
 import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
+import com.example.myapplication.data.remote.LoungeMemberProfileDto
 import com.example.myapplication.data.remote.SubLoungeSummaryDto
+import com.example.myapplication.data.remote.SubLoungeSnapshotDto
 import com.example.myapplication.ui.BuildingLoungeUiState
 import com.example.myapplication.ui.theme.MossOutline
 import com.example.myapplication.ui.theme.MossSurface
@@ -103,11 +106,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap building footprint")
 
@@ -123,13 +122,15 @@ fun BuildingLoungeMapScreen(
     onOpenSubLounge: (String) -> Unit,
     onLeaveSubLounge: () -> Unit,
     onDeleteSubLounge: () -> Unit,
-    onSendTrack: (String?) -> Unit,
     onSearchTracks: (String) -> Unit,
-    onSendSearchedTrack: (LoungeMusicSearchResultDto, String?) -> Unit,
+    onSendSearchedTrack: (LoungeMusicSearchResultDto) -> Unit,
     onDeleteCard: (String) -> Unit,
     onReactToCard: (String, String) -> Unit,
     onVote: (String) -> Unit,
     onRefreshSubLounge: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onOpenMembers: () -> Unit,
+    profileHandlesByAlias: Map<String, String>,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -251,13 +252,15 @@ fun BuildingLoungeMapScreen(
             onDismiss = onLeaveSubLounge,
             onLeave = onLeaveSubLounge,
             onDeleteSubLounge = onDeleteSubLounge,
-            onSendTrack = onSendTrack,
             onSearchTracks = onSearchTracks,
             onSendSearchedTrack = onSendSearchedTrack,
             onDeleteCard = onDeleteCard,
             onReactToCard = onReactToCard,
             onVote = onVote,
             onRefresh = onRefreshSubLounge,
+            onOpenProfile = onOpenProfile,
+            onOpenMembers = onOpenMembers,
+            profileHandlesByAlias = profileHandlesByAlias,
         )
     }
 }
@@ -481,13 +484,13 @@ private fun LoungeRoomsSheet(
                 Icon(Icons.Outlined.Map, contentDescription = null, tint = SignalGreen)
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("실제 건물 라운지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Wi-Fi 라운지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
                         when {
                             !hasLocationPermission -> "위치 권한을 허용해 주세요."
                             entered != null -> "${entered.name} 안에서 사용자가 만든 방"
-                            insideLounges.isNotEmpty() -> "현재 위치에서 입장 가능한 건물을 선택하세요."
-                            else -> "가까운 실제 건물입니다. 반경 안으로 이동하면 입장할 수 있어요."
+                            insideLounges.isNotEmpty() -> "현재 위치에서 입장 가능한 라운지를 선택하세요."
+                            else -> "같은 Wi-Fi 사용자 2명 이상이 모이면 라운지가 열려요."
                         },
                         color = MutedMint,
                         style = MaterialTheme.typography.bodyMedium
@@ -511,8 +514,8 @@ private fun LoungeRoomsSheet(
                         contentAlignment = Alignment.Center,
                     ) { CircularProgressIndicator(color = SignalGreen) }
                     state.lounges.isEmpty() -> EmptyLoungePanel(
-                        if (state.loadFailed) "건물 정보를 불러오지 못했어요" else "주변 실제 건물이 없어요",
-                        if (state.loadFailed) "잠시 후 위치 새로고침을 다시 시도해 주세요." else "이 위치에는 아직 캐시된 OSM 건물이 없습니다.",
+                        if (state.loadFailed) "라운지 정보를 불러오지 못했어요" else "아직 열린 라운지가 없어요",
+                        if (state.loadFailed) "잠시 후 위치 새로고침을 다시 시도해 주세요." else "같은 Wi-Fi의 버블맵 사용자와 가까이 모여 보세요.",
                     )
                     else -> LazyColumn(
                         modifier = Modifier.height(320.dp),
@@ -528,17 +531,18 @@ private fun LoungeRoomsSheet(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = onShowCreate,
+                        enabled = state.subLounges.size < 5,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = SignalGreen)
                     ) {
                         Icon(Icons.Outlined.Add, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("하위 라운지 만들기")
+                        Text(if (state.subLounges.size < 5) "하위 라운지 만들기" else "하위 라운지 5/5")
                     }
                     OutlinedButton(onClick = onLeave, modifier = Modifier.weight(1f)) {
                         Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("건물 나가기")
+                        Text("라운지 나가기")
                     }
                 }
                 SubLoungeList(state.subLounges, onOpenSubLounge)
@@ -636,18 +640,30 @@ private fun SubLoungeDetailSheet(
     onDismiss: () -> Unit,
     onLeave: () -> Unit,
     onDeleteSubLounge: () -> Unit,
-    onSendTrack: (String?) -> Unit,
     onSearchTracks: (String) -> Unit,
-    onSendSearchedTrack: (LoungeMusicSearchResultDto, String?) -> Unit,
+    onSendSearchedTrack: (LoungeMusicSearchResultDto) -> Unit,
     onDeleteCard: (String) -> Unit,
     onReactToCard: (String, String) -> Unit,
     onVote: (String) -> Unit,
     onRefresh: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+    onOpenMembers: () -> Unit,
+    profileHandlesByAlias: Map<String, String>,
 ) {
     val snapshot = state.subLoungeSnapshot
-    var cardMessage by remember(state.selectedSubLoungeId) { mutableStateOf("") }
     var trackQuery by remember(state.selectedSubLoungeId) { mutableStateOf("") }
+    var selectedTrack by remember(state.selectedSubLoungeId) { mutableStateOf<LoungeMusicSearchResultDto?>(null) }
+    var submissionStarted by remember(state.selectedSubLoungeId) { mutableStateOf(false) }
     var confirmDeleteVisible by remember(state.selectedSubLoungeId) { mutableStateOf(false) }
+    LaunchedEffect(state.cardSubmitting) {
+        if (state.cardSubmitting) {
+            submissionStarted = true
+        } else if (submissionStarted) {
+            selectedTrack = null
+            trackQuery = ""
+            submissionStarted = false
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MossSurface,
@@ -711,9 +727,29 @@ private fun SubLoungeDetailSheet(
             snapshot?.let { room ->
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MetricPanel("참여자", "${room.memberCount}명", Modifier.weight(1f))
+                        MetricPanel("참여자", "${room.memberCount}명", Modifier.weight(1f), onClick = onOpenMembers)
                         MetricPanel("재생 중", "${room.listeningStatuses.count { it.isPlaying }}곡", Modifier.weight(1f))
                         MetricPanel("추천", "${room.cards.size}개", Modifier.weight(1f))
+                    }
+                }
+
+                item { SectionLabel("참여자") }
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenMembers),
+                        shape = RoundedCornerShape(14.dp),
+                        color = MossSurfaceHigh,
+                        border = BorderStroke(1.dp, MossOutline),
+                    ) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.PeopleOutline, contentDescription = null, tint = SignalGreen)
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("라운지 참여자 ${room.memberCount}명", fontWeight = FontWeight.Bold)
+                                Text("참여자 목록에서 프로필을 확인하고 팔로우할 수 있어요.", color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text("전체 보기", color = SignalGreen, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -723,6 +759,9 @@ private fun SubLoungeDetailSheet(
                 } else {
                     items(room.listeningStatuses, key = { "${it.listenerAlias}-${it.updatedAt}" }) { listening ->
                         Surface(
+                            modifier = Modifier.clickable(enabled = listening.listenerProfileHandle != null) {
+                                listening.listenerProfileHandle?.let(onOpenProfile)
+                            },
                             shape = RoundedCornerShape(14.dp),
                             color = MossSurfaceHigh,
                             border = BorderStroke(1.dp, MossOutline),
@@ -763,6 +802,41 @@ private fun SubLoungeDetailSheet(
                 }
 
                 item { SectionLabel("추천 음악 카드") }
+                state.currentDetectedTrack?.let { nowPlaying ->
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                selectedTrack = LoungeMusicSearchResultDto(
+                                    id = "now-playing:${nowPlaying.title}:${nowPlaying.artist}",
+                                    title = nowPlaying.title,
+                                    artistName = nowPlaying.artist,
+                                    artworkUrl = nowPlaying.artworkUrl,
+                                    storeUrl = nowPlaying.externalUrl,
+                                )
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = SignalGreen.copy(alpha = 0.10f),
+                            border = BorderStroke(1.dp, SignalGreen.copy(alpha = 0.45f)),
+                        ) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = SignalGreen)
+                                Spacer(Modifier.width(12.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text("현재 듣고 있는 노래", color = SignalGreen, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                                    Text(nowPlaying.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(nowPlaying.artist, color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Text("선택", color = SignalGreen, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                } ?: item {
+                    Text(
+                        "현재 재생 중인 곡이 감지되면 바로 선택할 수 있어요.",
+                        color = MutedMint,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 item {
                     OutlinedTextField(
                         value = trackQuery,
@@ -785,59 +859,92 @@ private fun SubLoungeDetailSheet(
                         },
                     )
                 }
-                items(state.trackSearchResults, key = { "search-${it.id}" }) { track ->
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MossSurfaceHigh,
-                        border = BorderStroke(1.dp, MossOutline),
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                if (selectedTrack == null) {
+                    items(state.trackSearchResults, key = { "search-${it.id}" }) { track ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                selectedTrack = track
+                                trackQuery = ""
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            color = MossSurfaceHigh,
+                            border = BorderStroke(1.dp, MossOutline),
                         ) {
-                            Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = SignalGreen)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(track.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(track.artistName, color = MutedMint, style = MaterialTheme.typography.bodySmall)
-                            }
-                            OutlinedButton(onClick = {
-                                onSendSearchedTrack(track, cardMessage.ifBlank { null })
-                                cardMessage = ""
-                            }) {
-                                Text("추천")
+                            Row(
+                                Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Outlined.MusicNote, contentDescription = null, tint = SignalGreen)
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(track.title, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(track.artistName, color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                                }
+                                Text("선택", color = SignalGreen, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
-                item {
-                    OutlinedTextField(
-                        value = cardMessage,
-                        onValueChange = { cardMessage = it.take(120) },
-                        label = { Text("추천 한마디 (선택)") },
-                        supportingText = { Text("현재 실제 재생 중인 곡이 카드로 공유돼요.") },
-                        modifier = Modifier.fillMaxWidth(),
-                        maxLines = 2,
-                    )
-                }
-                item {
-                    Button(
-                        onClick = {
-                            onSendTrack(cardMessage.ifBlank { null })
-                            cardMessage = ""
-                        },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = SignalGreen),
-                    ) {
-                        Icon(Icons.Outlined.MusicNote, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("지금 듣는 곡 추천하기", fontWeight = FontWeight.Bold)
+                selectedTrack?.let { track ->
+                    item {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            color = MossSurfaceHigh,
+                            border = BorderStroke(1.dp, SignalGreen.copy(alpha = 0.55f)),
+                        ) {
+                            Column(
+                                Modifier.fillMaxWidth().padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text("추천 카드 작성", color = SignalGreen, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(shape = RoundedCornerShape(12.dp), color = SignalGreen.copy(alpha = 0.14f)) {
+                                        Icon(
+                                            Icons.Outlined.MusicNote,
+                                            contentDescription = null,
+                                            tint = SignalGreen,
+                                            modifier = Modifier.padding(14.dp).size(28.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(track.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 2)
+                                        Text(track.artistName, color = MutedMint, style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    TextButton(onClick = {
+                                        selectedTrack = null
+                                    }) { Text("변경") }
+                                }
+                                Button(
+                                    onClick = {
+                                        onSendSearchedTrack(track)
+                                    },
+                                    enabled = !state.cardSubmitting,
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SignalGreen),
+                                ) {
+                                    if (state.cardSubmitting) {
+                                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("보내는 중…", fontWeight = FontWeight.Bold)
+                                    } else {
+                                        Icon(Icons.Outlined.MusicNote, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("추천 보내기", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if (room.cards.isEmpty()) {
                     item { EmptyLoungePanel("첫 추천을 기다리고 있어요", "좋아하는 곡으로 대화를 시작해 보세요.") }
                 } else {
                     items(room.cards, key = { it.id }) { card ->
+                        val senderHandle = card.senderProfileHandle
+                            ?: room.members.orEmpty().firstOrNull { it.displayName == card.senderAlias }?.profileHandle
+                            ?: profileHandlesByAlias[card.senderAlias]
                         Surface(
                             shape = RoundedCornerShape(16.dp),
                             color = MossSurfaceHigh,
@@ -857,8 +964,23 @@ private fun SubLoungeDetailSheet(
                                         }
                                     }
                                 }
-                                Text("${card.artistName} · ${card.senderAlias}", color = MutedMint)
-                                card.message?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable(enabled = senderHandle != null) { senderHandle?.let(onOpenProfile) }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Outlined.PeopleOutline, contentDescription = null, tint = SignalGreen, modifier = Modifier.size(20.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(card.artistName, color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                                        Text(card.senderAlias, fontWeight = FontWeight.Bold)
+                                    }
+                                    if (senderHandle != null) {
+                                        Text("프로필 보기", color = SignalGreen, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
                                 OutlinedButton(
                                     onClick = { onReactToCard(card.id, "LIKE") },
                                     modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -924,8 +1046,17 @@ private fun SubLoungeDetailSheet(
 }
 
 @Composable
-private fun MetricPanel(label: String, value: String, modifier: Modifier = Modifier) {
-    Surface(modifier = modifier, shape = RoundedCornerShape(12.dp), color = MossSurfaceHigh) {
+private fun MetricPanel(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+) {
+    Surface(
+        modifier = modifier.clickable(enabled = onClick != null) { onClick?.invoke() },
+        shape = RoundedCornerShape(12.dp),
+        color = MossSurfaceHigh,
+    ) {
         Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(value, color = SignalGreen, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(label, color = MutedMint, style = MaterialTheme.typography.labelSmall)
@@ -1048,31 +1179,88 @@ private suspend fun Context.currentLocation(): Location? {
 private fun Location.accuracyOrNull(): Float? = if (hasAccuracy()) accuracy else null
 
 private fun List<BuildingLoungeSummaryDto>.visibleMapLounges(): List<BuildingLoungeSummaryDto> {
-    val selected = mutableListOf<BuildingLoungeSummaryDto>()
-    filter { it.inside }
-        .sortedBy { it.distanceMeters }
-        .forEach { candidate ->
-            if (selected.size >= 6) return@forEach
-            val overlaps = selected.any { existing ->
-                distanceMeters(candidate.latitude, candidate.longitude, existing.latitude, existing.longitude) <
-                    (candidate.displayRadiusMeters() + existing.displayRadiusMeters()) * 0.72
+    // Dynamic Wi-Fi lounges are already merged by the server. Draw the actual circles so
+    // users can see where a nearby lounge begins before they enter it.
+    return sortedBy { it.distanceMeters }.take(6)
+}
+
+@Composable
+fun LoungeMembersScreen(
+    snapshot: SubLoungeSnapshotDto?,
+    selfMember: LoungeMemberProfileDto?,
+    profileHandlesByAlias: Map<String, String>,
+    onBack: () -> Unit,
+    onOpenProfile: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val members = remember(snapshot, selfMember, profileHandlesByAlias) {
+        buildList {
+            selfMember?.let(::add)
+            addAll(snapshot?.members.orEmpty())
+            snapshot?.cards.orEmpty().forEach { card ->
+                (card.senderProfileHandle ?: profileHandlesByAlias[card.senderAlias])?.let { handle ->
+                    add(LoungeMemberProfileDto(handle, card.senderAlias, "#6750A4"))
+                }
             }
-            if (!overlaps) selected += candidate
+            snapshot?.listeningStatuses.orEmpty().forEach { listening ->
+                (listening.listenerProfileHandle ?: profileHandlesByAlias[listening.listenerAlias])?.let { handle ->
+                    add(LoungeMemberProfileDto(handle, listening.listenerAlias, "#40897A"))
+                }
+            }
+        }.distinctBy(LoungeMemberProfileDto::profileHandle)
+    }
+    Column(modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로")
+            }
+            Column(Modifier.weight(1f)) {
+                Text("라운지 참여자", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("${snapshot?.memberCount ?: members.size}명 참여 중", color = MutedMint)
+            }
         }
-    return selected
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (members.isEmpty()) {
+                item {
+                    EmptyLoungePanel("참여자 프로필을 불러오는 중이에요", "잠시 후 라운지를 새로고침해 주세요.")
+                }
+            }
+            items(members, key = LoungeMemberProfileDto::profileHandle) { member ->
+                Surface(
+                    modifier = Modifier.fillMaxWidth().clickable { onOpenProfile(member.profileHandle) },
+                    shape = RoundedCornerShape(16.dp),
+                    color = MossSurfaceHigh,
+                    border = BorderStroke(1.dp, MossOutline),
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            modifier = Modifier.size(46.dp),
+                            shape = CircleShape,
+                            color = runCatching { Color(android.graphics.Color.parseColor(member.profileColor)) }
+                                .getOrDefault(SignalGreen.copy(alpha = 0.35f)),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(member.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(member.displayName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                            Text("@${member.profileHandle}", color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text("프로필 보기", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
 }
 
-private fun BuildingLoungeSummaryDto.displayRadiusMeters(): Int = when {
-    inside -> radiusMeters.coerceIn(90, 220)
-    category == "SHOPPING" || category == "SHOPPING_MALL" -> radiusMeters.coerceIn(110, 180)
-    else -> radiusMeters.coerceIn(70, 130)
-}
-
-private fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val radius = 6_371_000.0
-    val dLat = Math.toRadians(lat2 - lat1)
-    val dLon = Math.toRadians(lon2 - lon1)
-    val a = sin(dLat / 2) * sin(dLat / 2) +
-        cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2) * sin(dLon / 2)
-    return radius * 2 * atan2(sqrt(a), sqrt(1 - a))
-}
+private fun BuildingLoungeSummaryDto.displayRadiusMeters(): Int = radiusMeters.coerceIn(30, 2_000)

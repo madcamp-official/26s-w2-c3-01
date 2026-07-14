@@ -69,7 +69,8 @@ data class LoungeListeningStatusDto(
     val artistName: String?,
     val albumArtUrl: String?,
     val isPlaying: Boolean,
-    val updatedAt: String
+    val updatedAt: String,
+    val listenerProfileHandle: String? = null,
 )
 
 data class LoungeRecommendationCardDto(
@@ -83,7 +84,14 @@ data class LoungeRecommendationCardDto(
     val reactionCount: Int,
     val reactedByMe: Boolean,
     val canDelete: Boolean = false,
-    val createdAt: String
+    val createdAt: String,
+    val senderProfileHandle: String? = null,
+)
+
+data class LoungeMemberProfileDto(
+    val profileHandle: String,
+    val displayName: String,
+    val profileColor: String,
 )
 
 data class LoungeMusicSearchResultDto(
@@ -108,7 +116,9 @@ data class SubLoungeSnapshotDto(
     val listeningStatuses: List<LoungeListeningStatusDto>,
     val cards: List<LoungeRecommendationCardDto>,
     val poll: LoungePollStateDto,
-    val generatedAt: String
+    val generatedAt: String,
+    // Nullable for rolling deployments: Gson assigns null when an older server omits this field.
+    val members: List<LoungeMemberProfileDto>? = emptyList(),
 )
 
 data class UpdateLoungeListeningRequestDto(

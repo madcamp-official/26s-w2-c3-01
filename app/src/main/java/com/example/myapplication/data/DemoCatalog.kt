@@ -190,7 +190,7 @@ object DemoCatalog {
                 colorHex = 0xFF25C76FL,
                 bio = "좋은 음악을 발견하고 나누는 걸 좋아해요.",
                 avatarSeed = "demo-jh-melody",
-                avatarUrl = "https://api.dicebear.com/10.x/thumbs/svg?seed=demo-jh-melody",
+                avatarUrl = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=demo-jh-melody",
                 genres = listOf("Indie", "R&B"),
                 moods = listOf("Calm", "Night"),
                 melodyNotes = listOf("C4", "E4", "G4"),

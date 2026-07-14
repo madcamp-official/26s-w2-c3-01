@@ -5,12 +5,22 @@ import com.example.myapplication.data.realtime.RealtimeEventEnvelope
 import com.example.myapplication.data.remote.LoungePollOptionDto
 import com.example.myapplication.data.remote.LoungePollStateDto
 import com.example.myapplication.data.remote.SubLoungeSnapshotDto
+import com.google.gson.Gson
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SubLoungeEventReducerTest {
+    @Test
+    fun `older snapshot without members is treated as an empty profile list`() {
+        val json = """{"id":"room","buildingLoungeId":"building","title":"Room","memberCount":1,"joined":true,"canDelete":false,"listeningStatuses":[],"cards":[],"poll":{"options":[],"myVote":null},"generatedAt":"2026-07-12T01:00:00Z"}"""
+
+        val decoded = Gson().fromJson(json, SubLoungeSnapshotDto::class.java)
+
+        assertTrue(decoded.members.orEmpty().isEmpty())
+    }
+
     @Test
     fun `member event updates count without snapshot request`() {
         val reduced = SubLoungeEventReducer.reduce(

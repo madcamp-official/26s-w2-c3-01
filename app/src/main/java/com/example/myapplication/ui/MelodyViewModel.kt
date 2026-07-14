@@ -121,7 +121,9 @@ data class BuildingLoungeUiState(
     val subLoungeSnapshot: SubLoungeSnapshotDto? = null,
     val detailLoading: Boolean = false,
     val trackSearchLoading: Boolean = false,
+    val cardSubmitting: Boolean = false,
     val trackSearchResults: List<LoungeMusicSearchResultDto> = emptyList(),
+    val currentDetectedTrack: Track? = null,
     val realtimeState: ConnectionState = ConnectionState.OFFLINE,
     val message: String? = null
 )
@@ -253,6 +255,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     credential.displayAlias != state.profile.accountAlias ||
                     credential.expiresAt - System.currentTimeMillis() < 24 * 60 * 60 * 1_000L
                 if (shouldRenew) accessToken?.let(::prepareOfflineCredential)
+            }
+        }
+        viewModelScope.launch {
+            presenceCoordinator.detectedPlayback.collect { playback ->
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    currentDetectedTrack = playback.track,
+                )
             }
         }
         viewModelScope.launch {
@@ -843,16 +852,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private fun previewFollowKey(title: String, artist: String): String =
         "${title.trim().lowercase()}\u0000${artist.trim().lowercase()}"
 
-    fun stopProfileAudio() {
-        stopNowPlayingPreview()
-    }
-
-    private fun stopNowPlayingPreview() {
-        nowPlayingPreviewJob?.cancel()
-        nowPlayingPreviewJob = null
-        musicPreviewPlayer.stop()
-    }
-
     fun refreshBuildingLounges(latitude: Double, longitude: Double, accuracyMeters: Float? = null) {
         val token = accessToken
         if (token.isNullOrBlank()) {
@@ -966,6 +965,17 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         subLoungeSnapshot = if (response.forcedExit) null else _buildingLoungeState.value.subLoungeSnapshot,
                         message = if (response.forcedExit) "건물 반경을 벗어나 자동 퇴장했어요." else null
                     )
+                }
+                .onFailure {
+                    clearSelectedSubLounge()
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                        enteredLoungeId = null,
+                        subLounges = emptyList(),
+                        selectedSubLoungeId = null,
+                        subLoungeSnapshot = null,
+                        message = "라운지가 병합되었거나 닫혔어요. 새 라운지를 확인해 주세요.",
+                    )
+                    refreshBuildingLounges(latitude, longitude, accuracyMeters)
                 }
         }
     }
@@ -1090,7 +1100,22 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(trackSearchLoading = true, message = null)
-            buildingLoungeRepository.searchMusic(token, normalized)
+            runCatching {
+                val serverResults = buildingLoungeRepository.searchMusic(token, normalized).getOrNull()
+                if (!serverResults.isNullOrEmpty()) {
+                    serverResults
+                } else {
+                    musicSearchRepository.search(normalized).map { track ->
+                        LoungeMusicSearchResultDto(
+                            id = track.id.toString(),
+                            title = track.title,
+                            artistName = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            storeUrl = track.appleMusicUrl,
+                        )
+                    }
+                }
+            }
                 .onSuccess { results ->
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         trackSearchLoading = false,
@@ -1108,14 +1133,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun sendSearchedTrackToLounge(track: LoungeMusicSearchResultDto, message: String?) {
-        sendTrackToLounge(track.title, track.artistName, message)
+    fun sendSearchedTrackToLounge(track: LoungeMusicSearchResultDto) {
+        sendTrackToLounge(track.title, track.artistName, null)
     }
 
     private fun sendTrackToLounge(trackTitle: String, artistName: String, message: String?) {
         val token = accessToken ?: return
         val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
         viewModelScope.launch {
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(cardSubmitting = true, message = null)
             buildingLoungeRepository.addCard(
                 token,
                 subLoungeId,
@@ -1125,11 +1151,24 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     artistName = artistName,
                     message = message,
                 ),
-            ).onSuccess {
-                _buildingLoungeState.value = _buildingLoungeState.value.copy(trackSearchResults = emptyList())
+            ).onSuccess { createdCard ->
+                _buildingLoungeState.value = _buildingLoungeState.value.let { current ->
+                    val snapshot = current.subLoungeSnapshot
+                    current.copy(
+                        cardSubmitting = false,
+                        trackSearchResults = emptyList(),
+                        subLoungeSnapshot = snapshot?.copy(
+                            cards = (snapshot.cards.filterNot { it.id == createdCard.id } + createdCard),
+                        ),
+                        message = "추천 음악을 등록했어요.",
+                    )
+                }
                 refreshSelectedSubLounge(silent = true)
             }.onFailure {
-                _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 보내지 못했어요.")
+                _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                    cardSubmitting = false,
+                    message = "추천 카드를 보내지 못했어요.",
+                )
             }
         }
     }
@@ -1210,6 +1249,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             subLoungeSnapshot = null,
             detailLoading = false,
             trackSearchLoading = false,
+            cardSubmitting = false,
             trackSearchResults = emptyList(),
         )
         latestSubLoungeSnapshotAt = null

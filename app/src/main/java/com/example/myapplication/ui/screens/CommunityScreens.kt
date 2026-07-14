@@ -1271,7 +1271,7 @@ fun MyScreen(
             Spacer(Modifier.height(22.dp))
             if (editorSection == "BASIC") {
             ProfileAvatar(profile.avatarUrl, name, profile.colorHex, 112.dp)
-            Text("DiceBear Thumbs 아바타", color = MutedMint, style = MaterialTheme.typography.bodySmall)
+            Text("DiceBear Lorelei Neutral 아바타", color = MutedMint, style = MaterialTheme.typography.bodySmall)
             OutlinedButton(onClick = onRandomizeAvatar, enabled = !profileSaving) {
                 if (profileSaving) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
