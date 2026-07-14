@@ -129,6 +129,60 @@ class NearbyService(
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
     @Value("\${app.nearby.max-radius-meters:15}") private val maxRadiusMeters: Int,
 ) {
+    fun directBubble(viewerId: UUID, targetId: UUID): NearbyBubble? = jdbc.query(
+        """
+        select coalesce(ps.nearby_handle,concat('d_',replace(u.id::text,'-',''))) nearby_handle,
+          u.profile_handle,u.display_name,u.avatar_seed,u.profile_color,
+          (p.allow_reactions and ps.nearby_handle is not null) allow_reactions,
+          case
+            when exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=u.id)
+             and exists(select 1 from user_follows f where f.follower_id=u.id and f.followed_id=?) then 'MUTUAL'
+            when exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=u.id) then 'FOLLOWING'
+            when exists(select 1 from user_follows f where f.follower_id=u.id and f.followed_id=?) then 'FOLLOWS_ME'
+            else 'NONE' end relationship,
+          case when m.is_playing and p.share_music and p.music_visibility='TITLE_ARTIST' then m.track_title end track_title,
+          case when m.is_playing and p.share_music and p.music_visibility='TITLE_ARTIST' then m.artist_name end artist_name,
+          case when m.is_playing and p.share_music and p.music_visibility='TITLE_ARTIST' then m.album_art_url end album_art_url
+        from users u
+        join user_privacy_settings p on p.user_id=u.id
+        left join lateral (
+          select nearby_handle from presence_sessions
+          where user_id=u.id and expires_at>now()
+          order by last_seen_at desc limit 1
+        ) ps on true
+        left join music_statuses m on m.user_id=u.id and m.expires_at>now()
+        where u.id=? and u.id<>? and p.discoverable=true and p.discoverability_scope<>'HIDDEN'
+          and (p.discoverability_scope='NEARBY' or (
+            p.discoverability_scope='MUTUALS'
+            and exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=u.id)
+            and exists(select 1 from user_follows f where f.follower_id=u.id and f.followed_id=?)))
+          and not exists(select 1 from user_blocks b where
+            (b.blocker_id=? and b.blocked_id=u.id) or (b.blocker_id=u.id and b.blocked_id=?))
+        limit 1
+        """.trimIndent(),
+        { rs, _ ->
+            val handle = rs.getString("nearby_handle")
+            NearbyBubble(
+                nearbyHandle = handle,
+                profileHandle = rs.getString("profile_handle"),
+                displayAlias = rs.getString("display_name"),
+                avatarSeed = rs.getString("avatar_seed"),
+                avatarUrl = null,
+                profileColor = rs.getString("profile_color"),
+                displayPosition = abstractPosition(handle, ProximityBand.WITHIN_5M),
+                matchScore = 65 + stable(handle, 31),
+                proximity = ProximityBand.WITHIN_5M.name,
+                relationship = rs.getString("relationship"),
+                canReact = rs.getBoolean("allow_reactions"),
+                track = rs.getString("track_title")?.let {
+                    TrackSummary(it, rs.getString("artist_name"), rs.getString("album_art_url"))
+                },
+            )
+        },
+        viewerId, viewerId, viewerId, viewerId, targetId, viewerId,
+        viewerId, viewerId, viewerId, viewerId,
+    ).firstOrNull()
+
     fun snapshot(userId: UUID): NearbySnapshot = snapshot(userId, enforceRateLimit = true)
 
     private fun snapshot(userId: UUID, enforceRateLimit: Boolean): NearbySnapshot {
@@ -241,7 +295,7 @@ class NearbyService(
 
     @Transactional
     fun updateLocation(userId: UUID, update: LocationUpdate) {
-        rateLimiter.enforce(userId, "PRESENCE_LOCATION", 30, Duration.ofMinutes(1))
+        rateLimiter.enforce(userId, "PRESENCE_LOCATION", 120, Duration.ofMinutes(1))
         validateLocation(update)
         val previousViewers = nearbyViewerIds(userId)
         val expiresAt = Timestamp.from(Instant.now().plusSeconds(presenceTtlSeconds.coerceIn(30, 300)))

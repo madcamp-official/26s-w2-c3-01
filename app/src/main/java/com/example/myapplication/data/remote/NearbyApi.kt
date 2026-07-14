@@ -88,8 +88,24 @@ data class RemoteReceivedReaction(
     val trackArtist: String?,
     val createdAt: String
 )
+data class NearbyBeaconRequest(val clientSessionId: String)
+data class RemoteNearbyBeacon(val beaconId: String, val expiresAt: String, val rotationAfterSeconds: Int)
+data class ResolveNearbyBeaconsRequest(val beaconIds: List<String>)
+data class RemoteResolvedNearbyBeacon(val beaconId: String, val user: RemoteNearbyBubble)
 
 interface NearbyApi {
+    @POST("api/v1/nearby/beacons")
+    suspend fun issueBeacon(
+        @Header("Authorization") authorization: String,
+        @Body request: NearbyBeaconRequest,
+    ): RemoteNearbyBeacon
+
+    @POST("api/v1/nearby/beacons/resolve")
+    suspend fun resolveBeacons(
+        @Header("Authorization") authorization: String,
+        @Body request: ResolveNearbyBeaconsRequest,
+    ): List<RemoteResolvedNearbyBeacon>
+
     @GET("api/v1/nearby/snapshot")
     suspend fun snapshot(@Header("Authorization") authorization: String): RemoteNearbySnapshot
 
