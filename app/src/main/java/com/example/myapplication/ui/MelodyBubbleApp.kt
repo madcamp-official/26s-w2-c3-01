@@ -461,6 +461,15 @@ fun MelodyBubbleApp(
                         onBack = { navController.popBackStack() },
                         onRetry = { viewModel.loadPublicProfile(profileHandle) },
                         onFollow = viewModel::followPublicProfile,
+                        onMessage = {
+                            val roomId = state.chats.firstOrNull { it.peerHandle == profileHandle }?.roomId
+                            if (roomId != null) {
+                                navController.navigate(Route.chat(roomId))
+                            } else {
+                                viewModel.selectTab(MainTab.INBOX)
+                                navController.popBackStack(Route.MAIN, inclusive = false)
+                            }
+                        },
                         onPlayNowPlaying = { title, artist, artworkUrl ->
                             val nearbyHandle = state.nearbyListeners
                                 .firstOrNull { it.profileHandle == profileHandle }
@@ -520,6 +529,16 @@ fun MelodyBubbleApp(
                         onBack = { navController.popBackStack() },
                         onRetry = { viewModel.loadExchangeProfile(exchangeId) },
                         onFollow = viewModel::followPublicProfile,
+                        onMessage = {
+                            val profileHandle = state.selectedPublicProfile?.profileHandle
+                            val roomId = state.chats.firstOrNull { it.peerHandle == profileHandle }?.roomId
+                            if (roomId != null) {
+                                navController.navigate(Route.chat(roomId))
+                            } else {
+                                viewModel.selectTab(MainTab.INBOX)
+                                navController.popBackStack(Route.MAIN, inclusive = false)
+                            }
+                        },
                         onPlayNowPlaying = { title, artist, artworkUrl ->
                             val nearbyHandle = state.selectedPublicProfile?.profileHandle?.let { handle ->
                                 state.nearbyListeners.firstOrNull { it.profileHandle == handle }?.nearbyHandle

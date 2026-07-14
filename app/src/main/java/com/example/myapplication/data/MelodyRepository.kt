@@ -817,6 +817,7 @@ class DemoMelodyRepository(
                 if (!isCurrentSession(token)) return@onSuccess
                 loadPublicProfile(profile.profileHandle)
                 loadSocialConnections()
+                loadChatRooms()
             }.onFailure { error ->
                 if (isCurrentSession(token)) showRequestError(error, "팔로우 상태를 변경하지 못했어요")
             }
