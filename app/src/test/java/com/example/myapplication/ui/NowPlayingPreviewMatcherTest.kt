@@ -36,6 +36,27 @@ class NowPlayingPreviewMatcherTest {
     }
 
     @Test
+    fun acceptsUniqueExactTitleWhenStorefrontLocalizesArtistName() {
+        val localizedPreview = "https://audio.example/busy-boy.m4a"
+        val results = listOf(
+            result("Busy Boy", "리센느", localizedPreview),
+            result("Busy Boy (Galantis Remix)", "리센느", "https://audio.example/remix.m4a"),
+        )
+
+        assertEquals(localizedPreview, results.matchingPreviewUrl("Busy Boy", "RESCENE"))
+    }
+
+    @Test
+    fun rejectsLocalizedArtistFallbackWhenExactTitleIsAmbiguous() {
+        val results = listOf(
+            result("Stay", "스테이 원", "https://audio.example/one.m4a"),
+            result("Stay", "스테이 투", "https://audio.example/two.m4a"),
+        )
+
+        assertNull(results.matchingPreviewUrl("Stay", "STAY"))
+    }
+
+    @Test
     fun removesMelonLocalizedArtistQualifierFromSearchAndMatching() {
         val officialPreview = "https://audio.example/meow.m4a"
         val results = listOf(

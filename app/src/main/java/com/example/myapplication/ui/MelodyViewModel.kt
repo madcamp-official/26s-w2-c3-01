@@ -1074,11 +1074,21 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 internal fun List<MusicSearchResult>.matchingPreviewUrl(title: String, artist: String): String? {
     val normalizedTitle = title.normalizedMusicIdentity()
     val normalizedArtist = artist.withoutParentheticalQualifier().normalizedMusicIdentity()
-    return firstOrNull { result ->
+    val exactTitleCandidates = filter { result ->
         result.title.normalizedMusicIdentity() == normalizedTitle &&
-            result.artist.withoutParentheticalQualifier().normalizedMusicIdentity() == normalizedArtist &&
             result.previewUrl?.startsWith("https://") == true
-    }?.previewUrl
+    }
+    exactTitleCandidates.firstOrNull { result ->
+        result.artist.withoutParentheticalQualifier().normalizedMusicIdentity() == normalizedArtist
+    }?.previewUrl?.let { return it }
+
+    // The Korean iTunes storefront localizes some artist names even when the
+    // device reports the same artist in Latin characters (for example,
+    // RESCENE -> 리센느). Only accept this fallback when the title has one
+    // unambiguous result and the artist names use different writing systems.
+    return exactTitleCandidates.singleOrNull()
+        ?.takeIf { artist.usesDifferentWritingSystemFrom(it.artist) }
+        ?.previewUrl
 }
 
 internal fun musicPreviewSearchTerm(title: String, artist: String): String =
@@ -1090,6 +1100,13 @@ internal fun String.withoutParentheticalQualifier(): String =
     replace(PARENTHETICAL_QUALIFIER, " ")
         .replace(Regex("\\s+"), " ")
         .trim()
+
+private fun String.usesDifferentWritingSystemFrom(other: String): Boolean {
+    fun String.hasLatinLetter() = any { it in 'A'..'Z' || it in 'a'..'z' }
+    fun String.hasNonLatinLetter() = any { it.isLetter() && it !in 'A'..'Z' && it !in 'a'..'z' }
+    return (hasLatinLetter() && other.hasNonLatinLetter()) ||
+        (hasNonLatinLetter() && other.hasLatinLetter())
+}
 
 internal fun List<LoungeRecommendationCardDto>.latestRecommendation(): LoungeRecommendationCardDto? =
     maxWithOrNull(compareBy<LoungeRecommendationCardDto>({ it.createdAt }, { it.id }))
