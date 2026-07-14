@@ -70,7 +70,14 @@ class RealtimeInboxStore(context: Context) {
             if (activeOwner == null) return
             val current = readItems()
             if (current.any { it.id == item.id }) return
-            writeItems((listOf(item) + current).take(MAX_ITEMS))
+            val lastReadAt = preferences.getLong(KEY_LAST_READ_AT, 0L)
+            val storedItem = item.copy(
+                isRead = item.isRead || notificationWasAlreadyRead(
+                    createdAtEpochMillis = item.createdAtEpochMillis,
+                    lastReadAtEpochMillis = lastReadAt,
+                ),
+            )
+            writeItems((listOf(storedItem) + current).take(MAX_ITEMS))
             _notifications.value = readItems().toNotifications()
         }
     }
@@ -95,7 +102,13 @@ class RealtimeInboxStore(context: Context) {
 
     fun markAllRead() = synchronized(lock) {
         if (activeOwner != null) {
-            writeItems(readItems().map { it.copy(isRead = true) })
+            val items = readItems()
+            val lastReadAt = maxOf(
+                System.currentTimeMillis(),
+                items.maxOfOrNull(StoredItem::createdAtEpochMillis) ?: 0L,
+            )
+            preferences.edit().putLong(KEY_LAST_READ_AT, lastReadAt).apply()
+            writeItems(items.map { it.copy(isRead = true) })
             _notifications.value = readItems().toNotifications()
         }
     }
@@ -210,10 +223,16 @@ class RealtimeInboxStore(context: Context) {
         private const val PREFERENCES_NAME = "realtime_inbox"
         private const val KEY_OWNER = "owner"
         private const val KEY_ITEMS = "items"
+        private const val KEY_LAST_READ_AT = "last_read_at"
         private const val MAX_ITEMS = 100
         private val CONTROL_CHARACTERS = Regex("[\\p{Cc}\\p{Cf}]+")
     }
 }
+
+internal fun notificationWasAlreadyRead(
+    createdAtEpochMillis: Long,
+    lastReadAtEpochMillis: Long,
+): Boolean = lastReadAtEpochMillis > 0L && createdAtEpochMillis <= lastReadAtEpochMillis
 
 internal fun notificationRelativeTime(
     createdAtEpochMillis: Long,

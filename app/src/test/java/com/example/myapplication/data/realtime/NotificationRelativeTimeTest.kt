@@ -21,4 +21,14 @@ class NotificationRelativeTimeTest {
         assertNotNull("2026-07-14T03:24:15.123456789Z".toServerEpochMillis())
         assertNotNull("2026-07-14T12:24:15+09:00".toServerEpochMillis())
     }
+
+    @Test
+    fun treatsLateSyncedNotificationsBeforeLastViewAsRead() {
+        val lastViewedAt = 10_000L
+
+        assertEquals(true, notificationWasAlreadyRead(9_999L, lastViewedAt))
+        assertEquals(true, notificationWasAlreadyRead(10_000L, lastViewedAt))
+        assertEquals(false, notificationWasAlreadyRead(10_001L, lastViewedAt))
+        assertEquals(false, notificationWasAlreadyRead(1L, 0L))
+    }
 }
