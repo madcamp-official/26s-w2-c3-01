@@ -13,6 +13,7 @@ import com.example.myapplication.core.model.radiusFromCenter
 import com.example.myapplication.data.keepSettledDuringRefresh
 import com.example.myapplication.data.toMeasurementMethod
 import com.example.myapplication.nearby.BleBeaconCodec
+import com.example.myapplication.nearby.BleRssiProximityEstimator
 import com.example.myapplication.service.NearbyLocationPolicy
 import com.example.myapplication.service.AccuracyFirstLocationSelector
 import com.example.myapplication.service.NearbyLocationSample
@@ -132,6 +133,23 @@ class NearbyDistanceContractTest {
 
         assertEquals(beaconId, BleBeaconCodec.decode(BleBeaconCodec.encode(beaconId)))
         assertEquals(null, BleBeaconCodec.encode("profile-handle"))
+    }
+
+    @Test
+    fun stableBleRssiSamplesProduceCoarseProximityBands() {
+        val near = BleRssiProximityEstimator()
+        val middle = BleRssiProximityEstimator()
+        val outer = BleRssiProximityEstimator()
+
+        repeat(5) {
+            near.add("near", -65, it.toLong())
+            middle.add("middle", -78, it.toLong())
+            outer.add("outer", -83, it.toLong())
+        }
+
+        assertEquals(Proximity.WITHIN_5M, near.add("near", -65, 6L)?.proximity)
+        assertEquals(Proximity.WITHIN_10M, middle.add("middle", -78, 6L)?.proximity)
+        assertEquals(Proximity.WITHIN_15M, outer.add("outer", -83, 6L)?.proximity)
     }
 
     private fun sample(accuracy: Float, elapsedNanos: Long) = NearbyLocationSample(
