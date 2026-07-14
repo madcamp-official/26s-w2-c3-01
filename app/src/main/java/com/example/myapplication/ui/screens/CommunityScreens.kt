@@ -1831,6 +1831,57 @@ fun PublicProfileScreen(
 }
 
 @Composable
+private fun PublicProfileHero(
+    profile: PublicProfile,
+    ink: Color,
+    muted: Color,
+    accent: Color,
+    outline: Color,
+    onFollow: () -> Unit,
+    onMessage: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ProfileAvatar(profile.avatarUrl, profile.displayName, profile.colorHex, 88.dp)
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    profile.displayName,
+                    color = ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    LightProfileCount("팔로워", profile.stats.followerCount, ink, muted, Modifier.weight(1f))
+                    LightProfileCount("팔로잉", profile.stats.followingCount, ink, muted, Modifier.weight(1f))
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            profile.bio.ifBlank { "음악으로 자신을 소개하는 사용자" },
+            color = ink,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        val tasteTags = (profile.genres + profile.moods).distinct().take(4)
+        if (tasteTags.isNotEmpty()) {
+            Spacer(Modifier.height(9.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                tasteTags.forEach { LightProfileTag(it.uppercase(), accent, outline) }
+            }
+        }
+        SharedFollowerSummary(profile, muted)
+        Spacer(Modifier.height(14.dp))
+        PublicProfileActions(profile, accent, muted, onFollow, onMessage)
+    }
+}
+
+@Composable
 private fun ProfileLightPanel(
     outline: Color,
     ink: Color,
@@ -1847,6 +1898,41 @@ private fun ProfileLightPanel(
         border = androidx.compose.foundation.BorderStroke(1.dp, outline),
         shadowElevation = 0.dp,
     ) { Column(Modifier.padding(contentPadding), content = content) }
+}
+
+@Composable
+private fun SharedFollowerSummary(profile: PublicProfile, muted: Color) {
+    if (profile.sharedFollowerCount <= 0 || profile.sharedFollowers.isEmpty()) return
+    Spacer(Modifier.height(14.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .width((36 + (profile.sharedFollowers.take(3).size - 1) * 24).dp)
+                .height(36.dp),
+        ) {
+            profile.sharedFollowers.take(3).forEachIndexed { index, follower ->
+                Box(Modifier.padding(start = (index * 24).dp)) {
+                    Surface(
+                        shape = CircleShape,
+                        border = androidx.compose.foundation.BorderStroke(2.dp, MelodyBubbleColors.Background),
+                    ) {
+                        ProfileAvatar(follower.avatarUrl, follower.displayName, profile.colorHex, 36.dp)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.width(9.dp))
+        val shownNames = profile.sharedFollowers.take(2).joinToString(", ") { it.displayName }
+        val remainingCount = (profile.sharedFollowerCount - 2).coerceAtLeast(0)
+        Text(
+            if (remainingCount > 0) "$shownNames 외 ${remainingCount}명이 팔로우해요" else "$shownNames 님이 팔로우해요",
+            modifier = Modifier.weight(1f),
+            color = muted,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 @Composable
