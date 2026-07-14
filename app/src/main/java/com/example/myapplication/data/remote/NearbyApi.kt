@@ -38,6 +38,9 @@ data class RemotePopularTrack(
 data class LocationUpdateRequest(
     val requestId: String,
     val clientSessionId: String,
+    val sequence: Long,
+    val observedAtEpochMillis: Long,
+    val source: String,
     val latitude: Double,
     val longitude: Double,
     val accuracyMeters: Float?

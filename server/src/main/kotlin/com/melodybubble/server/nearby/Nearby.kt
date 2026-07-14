@@ -88,6 +88,9 @@ data class NearbySnapshot(
 data class LocationUpdate(
     val requestId: String,
     val clientSessionId: String,
+    val sequence: Long = 0L,
+    val observedAtEpochMillis: Long? = null,
+    val source: String = "UNKNOWN",
     val latitude: Double,
     val longitude: Double,
     val accuracyMeters: Float? = null,

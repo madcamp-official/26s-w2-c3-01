@@ -255,6 +255,7 @@ class DemoMelodyRepository(
     private var exchangeObserveJob: Job? = null
     private val chatRealtimeVersion = AtomicLong(0)
     private val nearbyRealtimeVersion = AtomicLong(0)
+    private val locationSequence = AtomicLong(System.currentTimeMillis() * 1_000L)
     private val popularRealtimeVersion = AtomicLong(0)
     private val chatReadLock = Any()
     private val hiddenChatRoomLock = Any()
@@ -1775,6 +1776,11 @@ class DemoMelodyRepository(
                 LocationUpdateRequest(
                     UUID.randomUUID().toString(),
                     clientSessionId,
+                    locationSequence.updateAndGet { previous ->
+                        maxOf(previous + 1L, location.observedAtEpochMillis * 1_000L)
+                    },
+                    location.observedAtEpochMillis,
+                    location.source.uppercase(),
                     location.latitude,
                     location.longitude,
                     location.accuracyMeters,
