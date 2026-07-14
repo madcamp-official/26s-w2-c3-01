@@ -2231,6 +2231,8 @@ class DemoMelodyRepository(
                     type = NotificationType.MUTUAL_FOLLOW,
                     actorAlias = peer.displayAlias,
                     actorColorHex = peer.colorHex,
+                    actorProfileHandle = peer.profileHandle,
+                    actorAvatarUrl = peer.avatarUrl,
                     preview = "서로 팔로우했어요. 이제 대화할 수 있어요",
                     relativeTime = "방금",
                 )
@@ -2404,6 +2406,10 @@ class DemoMelodyRepository(
         val actorColor = payload.senderNearbyHandle?.let { handle ->
             _state.value.nearbyListeners.firstOrNull { it.nearbyHandle == handle }?.colorHex
         }
+        val actorAvatarUrl = _state.value.nearbyListeners.firstOrNull { listener ->
+            listener.nearbyHandle == payload.senderNearbyHandle ||
+                listener.profileHandle == payload.senderProfileHandle
+        }?.avatarUrl ?: payload.senderAvatarUrl
         val reaction = reactionLabelForType(payload.reactionType)
         val preview = payload.trackTitle?.takeIf(String::isNotBlank)?.let { title ->
             "$reaction · ‘$title’"
@@ -2414,6 +2420,7 @@ class DemoMelodyRepository(
             actorAlias = alias,
             actorColorHex = actorColor,
             actorProfileHandle = payload.senderProfileHandle?.takeIf(String::isNotBlank),
+            actorAvatarUrl = actorAvatarUrl,
             preview = preview,
             relativeTime = notificationRelativeTime(
                 payload.createdAt.toServerEpochMillis()
@@ -2693,6 +2700,7 @@ class DemoMelodyRepository(
                             reactionId = reaction.reactionId,
                             senderAlias = reaction.senderAlias,
                             senderProfileHandle = reaction.senderProfileHandle,
+                            senderAvatarUrl = reaction.senderAvatarUrl,
                             reactionType = reaction.reactionType,
                             trackTitle = reaction.trackTitle,
                             createdAtEpochMillis = reaction.createdAt.toServerEpochMillis()
@@ -2707,6 +2715,7 @@ class DemoMelodyRepository(
                             actorAlias = reaction.senderAlias,
                             actorColorHex = null,
                             actorProfileHandle = reaction.senderProfileHandle,
+                            actorAvatarUrl = reaction.senderAvatarUrl,
                             preview = reaction.trackTitle?.takeIf(String::isNotBlank)?.let {
                                 "$label · ‘$it’"
                             } ?: label,

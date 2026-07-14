@@ -1,5 +1,6 @@
 package com.melodybubble.server.nearby
 
+import com.melodybubble.server.profile.AvatarUrlFactory
 import com.melodybubble.server.realtime.RealtimeEventTypes
 import com.melodybubble.server.realtime.RealtimePublisher
 import com.melodybubble.server.realtime.RealtimeQueues
@@ -41,6 +42,7 @@ data class NearbyReactionCreatedPayload(
     val reactionType: String,
     val senderAlias: String,
     val senderProfileHandle: String,
+    val senderAvatarUrl: String,
     val trackTitle: String?,
     val trackArtist: String?,
     val createdAt: Instant,
@@ -67,13 +69,15 @@ class NearbyReactionService(
     private val rateLimiter: ActionRateLimiter,
     private val realtime: RealtimePublisher,
     private val nearby: NearbyService,
+    private val avatars: AvatarUrlFactory,
 ) {
     fun received(recipientId: UUID, limit: Int): List<NearbyReactionCreatedPayload> {
         rateLimiter.enforce(recipientId, "REACTION_INBOX", 60, Duration.ofMinutes(1))
         return jdbc.query(
             """
             select reaction.id,reaction.client_reaction_id,reaction.reaction_type,
-              sender.display_name,sender.profile_handle,reaction.track_title,reaction.track_artist,reaction.created_at
+              sender.display_name,sender.profile_handle,sender.avatar_seed,sender.avatar_data_url,
+              reaction.track_title,reaction.track_artist,reaction.created_at
             from nearby_reactions reaction
             join users sender on sender.id=reaction.sender_id
             where reaction.recipient_id=?
@@ -87,6 +91,7 @@ class NearbyReactionService(
                     reactionType = rs.getString("reaction_type"),
                     senderAlias = rs.getString("display_name"),
                     senderProfileHandle = rs.getString("profile_handle"),
+                    senderAvatarUrl = avatars.resolve(rs.getString("avatar_seed"), rs.getString("avatar_data_url")),
                     trackTitle = rs.getString("track_title"),
                     trackArtist = rs.getString("track_artist"),
                     createdAt = rs.getTimestamp("created_at").toInstant(),
@@ -152,7 +157,10 @@ class NearbyReactionService(
     }
 
     private fun publishCreated(reaction: StoredReaction) {
-        val sender = jdbc.queryForMap("select display_name,profile_handle from users where id=?", reaction.senderId)
+        val sender = jdbc.queryForMap(
+            "select display_name,profile_handle,avatar_seed,avatar_data_url from users where id=?",
+            reaction.senderId,
+        )
         realtime.toUserAfterCommit(
             reaction.recipientId,
             RealtimeQueues.REACTIONS,
@@ -163,6 +171,10 @@ class NearbyReactionService(
                 reactionType = reaction.reactionType,
                 senderAlias = sender["display_name"] as? String ?: "Listener",
                 senderProfileHandle = sender["profile_handle"] as String,
+                senderAvatarUrl = avatars.resolve(
+                    sender["avatar_seed"] as String,
+                    sender["avatar_data_url"] as? String,
+                ),
                 trackTitle = reaction.trackTitle,
                 trackArtist = reaction.trackArtist,
                 createdAt = reaction.createdAt,

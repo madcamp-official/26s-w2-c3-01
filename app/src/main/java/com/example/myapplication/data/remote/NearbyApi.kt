@@ -90,6 +90,7 @@ data class RemoteReceivedReaction(
     val reactionType: String,
     val senderAlias: String,
     val senderProfileHandle: String? = null,
+    val senderAvatarUrl: String? = null,
     val trackTitle: String?,
     val trackArtist: String?,
     val createdAt: String

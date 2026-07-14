@@ -92,6 +92,7 @@ data class LoungeMemberProfileDto(
     val profileHandle: String,
     val displayName: String,
     val profileColor: String,
+    val avatarUrl: String? = null,
 )
 
 data class LoungeMusicSearchResultDto(

@@ -421,7 +421,12 @@ fun MelodyBubbleApp(
                 LoungeMembersScreen(
                     snapshot = buildingLoungeState.subLoungeSnapshot,
                     selfMember = state.profile.profileHandle.takeIf(String::isNotBlank)?.let { handle ->
-                        LoungeMemberProfileDto(handle, state.profile.accountAlias, "#6750A4")
+                        LoungeMemberProfileDto(
+                            profileHandle = handle,
+                            displayName = state.profile.accountAlias,
+                            profileColor = "#%08X".format(state.profile.colorHex and 0xFFFFFFFFL),
+                            avatarUrl = state.profile.avatarUrl,
+                        )
                     },
                     profileHandlesByAlias = state.loungeProfileHandlesByAlias(),
                     onBack = { navController.popBackStack() },

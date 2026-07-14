@@ -69,6 +69,7 @@ data class NearbyReactionCreatedPayload(
     val senderNearbyHandle: String? = null,
     val senderAlias: String? = null,
     val senderProfileHandle: String? = null,
+    val senderAvatarUrl: String? = null,
     val reactionType: String? = null,
     val trackTitle: String? = null,
     val trackArtist: String? = null,

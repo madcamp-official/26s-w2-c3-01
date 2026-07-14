@@ -92,6 +92,7 @@ import com.example.myapplication.data.remote.SubLoungeSnapshotDto
 import com.example.myapplication.ui.BuildingLoungeUiState
 import com.example.myapplication.core.model.PreviewPlaybackState
 import com.example.myapplication.ui.components.PreviewEqualizerBars
+import com.example.myapplication.ui.components.ProfileAvatar
 import com.example.myapplication.ui.theme.MossOutline
 import com.example.myapplication.ui.theme.MossSurface
 import com.example.myapplication.ui.theme.MossSurfaceHigh
@@ -1347,16 +1348,15 @@ fun LoungeMembersScreen(
                     border = BorderStroke(1.dp, MossOutline),
                 ) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            modifier = Modifier.size(46.dp),
-                            shape = CircleShape,
-                            color = runCatching { Color(android.graphics.Color.parseColor(member.profileColor)) }
-                                .getOrDefault(SignalGreen.copy(alpha = 0.35f)),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(member.displayName.take(1).uppercase(), fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        ProfileAvatar(
+                            avatarUrl = member.avatarUrl,
+                            name = member.displayName,
+                            colorHex = runCatching {
+                                android.graphics.Color.parseColor(member.profileColor).toLong() and 0xFFFFFFFFL
+                            }.getOrDefault(0xFF6750A4L),
+                            size = 46.dp,
+                            stableIdentity = member.profileHandle,
+                        )
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(member.displayName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)

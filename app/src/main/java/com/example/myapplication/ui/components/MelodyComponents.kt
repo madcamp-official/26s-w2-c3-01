@@ -59,11 +59,51 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.PreviewPlaybackState
+import com.example.myapplication.data.AvatarProfileResolver
 import com.example.myapplication.ui.theme.CurrentSyncPalette
+
+/**
+ * Renders a user's profile avatar consistently across nearby, chat, notifications and lounges.
+ * A stable DiceBear avatar is used while an older response has no avatar URL, so user identities
+ * never fall back to initials.
+ */
+@Composable
+fun ProfileAvatar(
+    avatarUrl: String?,
+    name: String,
+    colorHex: Long,
+    size: Dp,
+    stableIdentity: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    val resolvedAvatarUrl = androidx.compose.runtime.remember(avatarUrl, name, stableIdentity) {
+        AvatarProfileResolver.resolve(
+            remoteSeed = null,
+            remoteUrl = avatarUrl,
+            stableIdentity = stableIdentity ?: name,
+            fallbackSeed = name,
+        ).url
+    }
+    Surface(
+        modifier = modifier.size(size),
+        shape = CircleShape,
+        color = Color(colorHex),
+    ) {
+        AsyncImage(
+            model = resolvedAvatarUrl,
+            contentDescription = "$name 프로필 아바타",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
 
 @Composable
 fun PreviewNowPlayingBar(

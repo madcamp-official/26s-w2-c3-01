@@ -22,6 +22,17 @@ class SubLoungeEventReducerTest {
     }
 
     @Test
+    fun `lounge member avatar survives snapshot decoding`() {
+        val avatarUrl = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=member"
+        val json = """{"id":"room","buildingLoungeId":"building","title":"Room","memberCount":1,"joined":true,"canDelete":false,"listeningStatuses":[],"cards":[],"poll":{"options":[],"myVote":null},"members":[{"profileHandle":"member-handle","displayName":"민아","profileColor":"#6750A4","avatarUrl":"$avatarUrl"}],"generatedAt":"2026-07-12T01:00:00Z"}"""
+
+        val member = Gson().fromJson(json, SubLoungeSnapshotDto::class.java).members.orEmpty().single()
+
+        assertEquals("member-handle", member.profileHandle)
+        assertEquals(avatarUrl, member.avatarUrl)
+    }
+
+    @Test
     fun `member event updates count without snapshot request`() {
         val reduced = SubLoungeEventReducer.reduce(
             snapshot(),

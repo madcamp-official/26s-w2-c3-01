@@ -156,6 +156,7 @@ data class InboxNotification(
     val actorAlias: String?,
     val actorColorHex: Long?,
     val actorProfileHandle: String? = null,
+    val actorAvatarUrl: String? = null,
     val preview: String,
     val relativeTime: String,
     val isRead: Boolean = false,

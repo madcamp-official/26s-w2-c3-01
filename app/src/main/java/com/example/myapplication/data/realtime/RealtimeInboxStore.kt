@@ -47,6 +47,7 @@ class RealtimeInboxStore(context: Context) {
         reactionId: String,
         senderAlias: String,
         senderProfileHandle: String? = null,
+        senderAvatarUrl: String? = null,
         reactionType: String,
         trackTitle: String?,
         createdAtEpochMillis: Long = System.currentTimeMillis(),
@@ -59,6 +60,7 @@ class RealtimeInboxStore(context: Context) {
                 type = NotificationType.REACTION.name,
                 actorAlias = senderAlias.safeText(40) ?: "주변 사용자",
                 actorProfileHandle = senderProfileHandle.safeText(80),
+                actorAvatarUrl = senderAvatarUrl.safeText(8_192),
                 preview = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
                 createdAtEpochMillis = createdAtEpochMillis,
             )
@@ -95,6 +97,7 @@ class RealtimeInboxStore(context: Context) {
             actorAlias = item.actorAlias,
             actorColorHex = null,
             actorProfileHandle = item.actorProfileHandle,
+            actorAvatarUrl = item.actorAvatarUrl,
             preview = item.preview,
             relativeTime = notificationRelativeTime(item.createdAtEpochMillis),
             isRead = item.isRead,
@@ -171,6 +174,7 @@ class RealtimeInboxStore(context: Context) {
                 type = NotificationType.REACTION.name,
                 actorAlias = alias,
                 actorProfileHandle = payload.senderProfileHandle.safeText(80),
+                actorAvatarUrl = payload.senderAvatarUrl.safeText(8_192),
                 preview = listOfNotNull(reaction, track?.let { "‘$it’" }).joinToString(" · "),
                 createdAtEpochMillis = payload.createdAt.toServerEpochMillis()
                     ?: envelope.timestamp.toServerEpochMillis()
@@ -229,6 +233,7 @@ class RealtimeInboxStore(context: Context) {
         val type: String,
         val actorAlias: String?,
         val actorProfileHandle: String? = null,
+        val actorAvatarUrl: String? = null,
         val preview: String,
         val createdAtEpochMillis: Long,
         val isRead: Boolean = false,

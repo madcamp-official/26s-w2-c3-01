@@ -1,5 +1,6 @@
 package com.melodybubble.server.lounge
 
+import com.melodybubble.server.profile.AvatarUrlFactory
 import com.melodybubble.server.realtime.RealtimeEventTypes
 import com.melodybubble.server.realtime.RealtimePublisher
 import com.melodybubble.server.safety.ActionRateLimiter
@@ -52,6 +53,7 @@ data class LoungeMemberProfile(
     val profileHandle: String,
     val displayName: String,
     val profileColor: String,
+    val avatarUrl: String,
 )
 
 data class RecommendationCardDeletedPayload(val cardId: UUID, val subLoungeId: UUID)
@@ -111,6 +113,7 @@ class SubLoungeRealtimeService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val realtime: RealtimePublisher,
+    private val avatars: AvatarUrlFactory,
 ) {
     fun snapshot(userId: UUID, subLoungeId: UUID): SubLoungeSnapshot {
         requireMember(userId, subLoungeId)
@@ -465,7 +468,8 @@ class SubLoungeRealtimeService(
 
     private fun members(subLoungeId: UUID): List<LoungeMemberProfile> = jdbc.query(
         """
-        select person.profile_handle,person.display_name,person.profile_color
+        select person.profile_handle,person.display_name,person.profile_color,
+          person.avatar_seed,person.avatar_data_url
         from sub_lounge_members member
         join users person on person.id=member.user_id
         join sub_lounges room on room.id=member.sub_lounge_id
@@ -475,7 +479,14 @@ class SubLoungeRealtimeService(
           and session.active=true and session.expires_at>now()
         order by member.joined_at
         """.trimIndent(),
-        { rs, _ -> LoungeMemberProfile(rs.getString("profile_handle"), rs.getString("display_name"), rs.getString("profile_color")) },
+        { rs, _ ->
+            LoungeMemberProfile(
+                profileHandle = rs.getString("profile_handle"),
+                displayName = rs.getString("display_name"),
+                profileColor = rs.getString("profile_color"),
+                avatarUrl = avatars.resolve(rs.getString("avatar_seed"), rs.getString("avatar_data_url")),
+            )
+        },
         subLoungeId,
     )
 

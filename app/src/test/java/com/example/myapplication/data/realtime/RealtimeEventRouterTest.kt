@@ -63,6 +63,31 @@ class RealtimeEventRouterTest {
     }
 
     @Test
+    fun routesReactionSenderAvatar() {
+        val avatarUrl = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=sender"
+        val event = router.route(
+            RealtimeDestinations.REACTIONS,
+            """{
+              "eventId":"reaction-event-1",
+              "type":"NEARBY_REACTION_CREATED",
+              "version":1,
+              "timestamp":"2026-07-14T10:00:00Z",
+              "payload":{
+                "reactionId":"reaction-1",
+                "senderAlias":"민아",
+                "senderProfileHandle":"member-handle",
+                "senderAvatarUrl":"$avatarUrl",
+                "reactionType":"LIKE",
+                "createdAt":"2026-07-14T10:00:00Z"
+              }
+            }""".trimIndent(),
+        )
+
+        assertTrue(event is RealtimeEvent.NearbyReactionCreated)
+        assertEquals(avatarUrl, (event as RealtimeEvent.NearbyReactionCreated).envelope.payload.senderAvatarUrl)
+    }
+
+    @Test
     fun routesAuthoritativeNearbySnapshotWithoutExactDistance() {
         val event = router.route(
             RealtimeDestinations.NEARBY,

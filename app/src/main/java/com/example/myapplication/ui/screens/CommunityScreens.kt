@@ -149,6 +149,7 @@ import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
 import com.example.myapplication.ui.components.MelodyCard
 import com.example.myapplication.ui.components.MelodyBubbleColors
+import com.example.myapplication.ui.components.ProfileAvatar
 import com.example.myapplication.ui.MusicSearchUiState
 import com.example.myapplication.ui.GenreCatalogUiState
 import kotlinx.coroutines.delay
@@ -947,11 +948,28 @@ fun NotificationScreen(
                                         onClick = { notification.actorProfileHandle?.let(onOpenProfile) },
                                     ),
                                 ) {
-                                    TrackGlyph(
-                                        notification.actorAlias ?: "시스템",
-                                        notification.actorColorHex ?: 0xFFB8A7FFL,
-                                        size = 36.dp,
-                                    )
+                                    if (notification.actorAlias != null) {
+                                        ProfileAvatar(
+                                            avatarUrl = notification.actorAvatarUrl,
+                                            name = notification.actorAlias,
+                                            colorHex = notification.actorColorHex ?: 0xFFB8A7FFL,
+                                            size = 36.dp,
+                                            stableIdentity = notification.actorProfileHandle,
+                                        )
+                                    } else {
+                                        Surface(
+                                            modifier = Modifier.size(36.dp),
+                                            shape = CircleShape,
+                                            color = MelodyBubbleColors.Primary.copy(alpha = 0.18f),
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.Radio,
+                                                contentDescription = "Sync 알림",
+                                                tint = MelodyBubbleColors.Primary,
+                                                modifier = Modifier.padding(8.dp),
+                                            )
+                                        }
+                                    }
                                 }
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
@@ -2686,21 +2704,6 @@ fun SocialConnectionsScreen(
 }
 
 @Composable
-private fun ProfileAvatar(avatarUrl: String?, name: String, colorHex: Long, size: androidx.compose.ui.unit.Dp) {
-    val resolvedAvatarUrl = remember(avatarUrl, name) {
-        AvatarProfileResolver.resolve(
-            remoteSeed = null,
-            remoteUrl = avatarUrl,
-            stableIdentity = name,
-            fallbackSeed = name,
-        ).url
-    }
-    Surface(modifier = Modifier.size(size), shape = CircleShape, color = Color(colorHex)) {
-        AsyncImage(resolvedAvatarUrl, "$name 프로필 아바타", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    }
-}
-
-@Composable
 private fun ExpandableProfileTagSection(
     title: String,
     selectedCount: Int,
@@ -2887,17 +2890,6 @@ private fun LiveDot(live: Boolean) {
             .size(9.dp)
             .background(if (live) SignalGreen else MutedMint, CircleShape)
     )
-}
-
-@Composable
-private fun TrackGlyph(label: String, colorSeed: Long, size: androidx.compose.ui.unit.Dp = 46.dp) {
-    val colors = listOf(0xFF25C76FL, 0xFF53D889L, 0xFF79A85BL, 0xFF2C9F65L)
-    val color = Color(colors[(kotlin.math.abs(colorSeed) % colors.size).toInt()])
-    Surface(modifier = Modifier.size(size), shape = CircleShape, color = color) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(label.take(1).uppercase(), color = MelodyBubbleColors.OnPrimary, fontWeight = FontWeight.Black)
-        }
-    }
 }
 
 @Composable
