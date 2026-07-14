@@ -120,7 +120,7 @@ class NearbyDistanceContractTest {
             confirmationsRequired = 1,
             missingRetentionMillis = 15_000L,
         )
-        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+        val current = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)))
 
         stabilizer.stabilize(current, emptyList())
         val withoutDeparted = stabilizer.remove(current, listOf(current.single().nearbyHandle))
