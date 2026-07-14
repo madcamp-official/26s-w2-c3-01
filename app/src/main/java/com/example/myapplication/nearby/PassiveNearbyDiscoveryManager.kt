@@ -17,17 +17,21 @@ import kotlinx.coroutines.flow.asStateFlow
 /** Passive discovery only: endpoint names contain short-lived, server-issued opaque beacon IDs. */
 class PassiveNearbyDiscoveryManager(context: Context) {
     private val client = Nearby.getConnectionsClient(context.applicationContext)
+    private val peerRanger: PeerRanger = BlePeerRanger(context.applicationContext)
     private val serviceId = "com.example.myapplication.NEARBY_DISCOVERY_V1"
     private val endpoints = linkedMapOf<String, String>()
     private val handler = Handler(Looper.getMainLooper())
     private val pendingLosses = mutableMapOf<String, Runnable>()
     private val _beaconIds = MutableStateFlow<Set<String>>(emptySet())
     val beaconIds: StateFlow<Set<String>> = _beaconIds.asStateFlow()
+    val proximityMeasurements: StateFlow<Map<String, PeerProximityMeasurement>> =
+        peerRanger.measurements
     private var running = false
     @SuppressLint("MissingPermission")
     fun start(localBeaconId: String) {
         stop()
         running = true
+        peerRanger.start(localBeaconId)
         startAdvertising(localBeaconId)
         runCatching {
             client.startDiscovery(
@@ -40,6 +44,7 @@ class PassiveNearbyDiscoveryManager(context: Context) {
     @SuppressLint("MissingPermission")
     fun rotate(localBeaconId: String) {
         if (!running) return
+        peerRanger.rotate(localBeaconId)
         runCatching { client.stopAdvertising() }
         startAdvertising(localBeaconId)
     }
@@ -47,6 +52,7 @@ class PassiveNearbyDiscoveryManager(context: Context) {
         running = false
         runCatching { client.stopAdvertising() }
         runCatching { client.stopDiscovery() }
+        peerRanger.stop()
         endpoints.clear()
         pendingLosses.values.forEach(handler::removeCallbacks)
         pendingLosses.clear()
