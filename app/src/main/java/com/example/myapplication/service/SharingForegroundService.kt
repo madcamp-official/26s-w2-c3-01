@@ -15,10 +15,13 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import com.example.myapplication.MainActivity
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -42,6 +45,9 @@ class SharingForegroundService : Service() {
     private var isReceivingGpsUpdates = false
     private var interactiveMode = true
     private var locationRequestGeneration = 0
+    private val locationHandler = Handler(Looper.getMainLooper())
+    private val locationSelector = AccuracyFirstLocationSelector()
+    private var locationSelectionScheduled = false
 
     private val preferences by lazy(LazyThreadSafetyMode.NONE) {
         getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -49,13 +55,13 @@ class SharingForegroundService : Service() {
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
-            result.locations.forEach { publishLocationIfUsable(it, source = "fused") }
+            result.locations.forEach { queueLocationIfUsable(it, source = "fused") }
         }
     }
 
     private val gpsLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            publishLocationIfUsable(location, source = "gps")
+            queueLocationIfUsable(location, source = "gps")
         }
     }
 
@@ -101,6 +107,7 @@ class SharingForegroundService : Service() {
 
     override fun onDestroy() {
         locationRequestGeneration += 1
+        locationHandler.removeCallbacksAndMessages(null)
         if (isReceivingLocationUpdates) {
             runCatching { fusedLocationClient.removeLocationUpdates(locationCallback) }
             isReceivingLocationUpdates = false
@@ -147,7 +154,10 @@ class SharingForegroundService : Service() {
             )
                 .setMinUpdateIntervalMillis(profile.minIntervalMillis)
                 .setMinUpdateDistanceMeters(profile.minDistanceMeters)
-                .setMaxUpdateAgeMillis(NearbyLocationPolicy.MAX_AGE_MILLIS)
+                .setMaxUpdateAgeMillis(0L)
+                .setMaxUpdateDelayMillis(0L)
+                .setGranularity(Granularity.GRANULARITY_FINE)
+                .setWaitForAccurateLocation(true)
                 .build()
             try {
                 fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
@@ -197,36 +207,56 @@ class SharingForegroundService : Service() {
         isReceivingGpsUpdates = false
     }
 
-    private fun publishLocationIfUsable(location: Location, source: String) {
+    private fun queueLocationIfUsable(location: Location, source: String) {
         val accuracy = location.accuracy.takeIf { location.hasAccuracy() && it.isFinite() }
         val now = System.currentTimeMillis()
         if (!NearbyLocationPolicy.isUsable(location.time, accuracy, now)) return
+        locationSelector.offer(
+            NearbyLocationSample(
+                latitude = location.latitude,
+                longitude = location.longitude,
+                accuracyMeters = accuracy ?: return,
+                observedAtEpochMillis = location.time,
+                elapsedRealtimeNanos = location.elapsedRealtimeNanos.takeIf { it > 0L }
+                    ?: SystemClock.elapsedRealtimeNanos(),
+                source = source,
+            )
+        )
+        if (locationSelectionScheduled) return
+        locationSelectionScheduled = true
+        locationHandler.postDelayed({
+            locationSelectionScheduled = false
+            locationSelector.takeBest(SystemClock.elapsedRealtimeNanos())?.let(::publishLocation)
+        }, NearbyLocationPolicy.SAMPLE_SELECTION_WINDOW_MILLIS)
+    }
+
+    private fun publishLocation(sample: NearbyLocationSample) {
+        val now = System.currentTimeMillis()
         android.util.Log.d(
             "MelodyLocation",
-            "usable fix source=$source accuracy=${accuracy?.toInt()}m " +
-                "age=${now - location.time}ms interactive=$interactiveMode",
+            "selected fix source=${sample.source} accuracy=${sample.accuracyMeters.toInt()}m " +
+                "age=${now - sample.observedAtEpochMillis}ms interactive=$interactiveMode",
         )
         preferences.edit()
             .putLong(KEY_LAST_LOCATION_UPDATE_EPOCH_MS, now)
-            .putString(KEY_LAST_LOCATION_ACCURACY_QUALITY, accuracyQuality(location))
+            .putString(KEY_LAST_LOCATION_ACCURACY_QUALITY, accuracyQuality(sample.accuracyMeters))
             .apply()
         sendBroadcast(
             Intent(ACTION_LOCATION_FIX)
                 .setPackage(packageName)
-                .putExtra(EXTRA_LATITUDE, location.latitude)
-                .putExtra(EXTRA_LONGITUDE, location.longitude)
-                .putExtra(EXTRA_ACCURACY_METERS, accuracy ?: Float.NaN)
-                .putExtra(EXTRA_LOCATION_TIME_EPOCH_MS, location.time)
-                .putExtra(EXTRA_LOCATION_SOURCE, source)
+                .putExtra(EXTRA_LATITUDE, sample.latitude)
+                .putExtra(EXTRA_LONGITUDE, sample.longitude)
+                .putExtra(EXTRA_ACCURACY_METERS, sample.accuracyMeters)
+                .putExtra(EXTRA_LOCATION_TIME_EPOCH_MS, sample.observedAtEpochMillis)
+                .putExtra(EXTRA_LOCATION_SOURCE, sample.source)
         )
     }
 
-    private fun accuracyQuality(location: Location): String {
-        if (!location.hasAccuracy()) return ACCURACY_UNKNOWN
+    private fun accuracyQuality(accuracyMeters: Float): String {
         return when {
-            location.accuracy <= 10f -> ACCURACY_EXCELLENT
-            location.accuracy <= 30f -> ACCURACY_GOOD
-            location.accuracy <= 100f -> ACCURACY_FAIR
+            accuracyMeters <= 10f -> ACCURACY_EXCELLENT
+            accuracyMeters <= 30f -> ACCURACY_GOOD
+            accuracyMeters <= 100f -> ACCURACY_FAIR
             else -> ACCURACY_POOR
         }
     }
