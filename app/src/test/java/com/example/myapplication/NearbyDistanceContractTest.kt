@@ -12,6 +12,7 @@ import com.example.myapplication.core.model.abstractDisplayPosition
 import com.example.myapplication.core.model.radiusFromCenter
 import com.example.myapplication.data.keepSettledDuringRefresh
 import com.example.myapplication.data.toMeasurementMethod
+import com.example.myapplication.nearby.BleBeaconCodec
 import com.example.myapplication.service.NearbyLocationPolicy
 import com.example.myapplication.service.AccuracyFirstLocationSelector
 import com.example.myapplication.service.NearbyLocationSample
@@ -123,6 +124,14 @@ class NearbyDistanceContractTest {
         assertEquals(null, selector.takeBest(1_100_000_000L))
         selector.offer(sample(accuracy = 1f, elapsedNanos = 800_000_000L))
         assertEquals(null, selector.takeBest(1_200_000_000L))
+    }
+
+    @Test
+    fun bleBeaconPayloadRoundTripsTheOpaqueIdentifier() {
+        val beaconId = "mb1_0123456789abcdef0123456789abcdef"
+
+        assertEquals(beaconId, BleBeaconCodec.decode(BleBeaconCodec.encode(beaconId)))
+        assertEquals(null, BleBeaconCodec.encode("profile-handle"))
     }
 
     private fun sample(accuracy: Float, elapsedNanos: Long) = NearbyLocationSample(
