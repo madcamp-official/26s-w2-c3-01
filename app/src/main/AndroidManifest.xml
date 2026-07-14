@@ -24,6 +24,15 @@
     <uses-feature
         android:name="android.hardware.location.gps"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.uwb"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.wifi.rtt"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
 
     <application
         android:name=".MelodyApplication"
