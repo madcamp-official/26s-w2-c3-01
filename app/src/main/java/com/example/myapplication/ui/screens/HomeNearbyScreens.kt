@@ -88,8 +88,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.myapplication.BuildConfig
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MelodyUiState
+import com.example.myapplication.core.model.NearbyMeasurementDiagnostics
 import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NearbyRingFractions
@@ -262,6 +264,11 @@ fun NearbyScreen(
                 )
             }
         }
+        if (BuildConfig.DEBUG) {
+            state.nearbyMeasurementDiagnostics?.let { diagnostics ->
+                item { NearbyDiagnosticsLine(diagnostics) }
+            }
+        }
         item {
             NearbyMusicFilterRow(
                 selectedFilter = musicFilter,
@@ -376,6 +383,23 @@ private fun NearbyInlineStatus(
             TextButton(onClick = onRetry) { Text("다시 연결") }
         }
     }
+}
+
+@Composable
+private fun NearbyDiagnosticsLine(diagnostics: NearbyMeasurementDiagnostics) {
+    val ageMillis = (System.currentTimeMillis() - diagnostics.observedAtEpochMillis)
+        .coerceAtLeast(0L)
+    val parts = buildList {
+        add(diagnostics.method.label)
+        diagnostics.accuracyMeters?.let { add("±${it.toInt()}m") }
+        diagnostics.uploadLatencyMillis?.let { add("서버 ${it}ms") }
+        add("${ageMillis}ms 전")
+    }
+    Text(
+        text = parts.joinToString(" · "),
+        color = MelodyBubbleColors.TextMuted,
+        style = MaterialTheme.typography.labelSmall,
+    )
 }
 
 /**
