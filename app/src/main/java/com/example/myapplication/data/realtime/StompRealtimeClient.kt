@@ -302,7 +302,7 @@ class StompRealtimeClient(
                     }
                 }
             }
-            RealtimeDestinations.userQueues.forEachIndexed { index, destination ->
+            RealtimeDestinations.defaultSubscriptions.forEachIndexed { index, destination ->
                 webSocket.send(subscribeFrame("user-$index", destination))
             }
             synchronized(lock) { topicSubscriptions.toMap() }.forEach { (destination, id) ->

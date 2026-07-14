@@ -121,6 +121,7 @@ fun BuildingLoungeMapScreen(
     onLocationUpdate: (Double, Double, Float?) -> Unit,
     onLocationUnavailable: () -> Unit,
     onHeartbeat: (Double, Double, Float?) -> Unit,
+    onCreateLounge: () -> Unit,
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
     onCreateSubLounge: (String, String?) -> Unit,
@@ -245,6 +246,7 @@ fun BuildingLoungeMapScreen(
             hasLocationPermission = hasLocationPermission,
             onEnter = onEnter,
             onLeave = onLeave,
+            onCreateLounge = onCreateLounge,
             onCreateSubLounge = onCreateSubLounge,
             onOpenSubLounge = onOpenSubLounge,
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -370,6 +372,7 @@ private fun LoungeBottomSheetPanel(
     hasLocationPermission: Boolean,
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
+    onCreateLounge: () -> Unit,
     onCreateSubLounge: (String, String?) -> Unit,
     onOpenSubLounge: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -401,8 +404,8 @@ private fun LoungeBottomSheetPanel(
                 Text(
                     when {
                         entered != null -> entered.name
-                        insideLounges.isNotEmpty() -> "입장 가능한 실제 건물 ${insideLounges.size}곳"
-                        else -> "주변 실제 건물 라운지"
+                        insideLounges.isNotEmpty() -> "현재 포함된 위치 라운지 ${insideLounges.size}곳"
+                        else -> "주변 위치 라운지"
                     },
                     color = PaleMint,
                     style = MaterialTheme.typography.titleMedium,
@@ -415,9 +418,9 @@ private fun LoungeBottomSheetPanel(
                         !hasLocationPermission -> "주변 건물을 찾으려면 위치 권한이 필요해요."
                         entered != null -> "사용자가 만든 하위 라운지 ${state.subLounges.size}개"
                         insideLounges.isNotEmpty() -> "눌러서 입장할 건물을 선택하세요."
-                        recommended.isNotEmpty() -> "가까운 실제 건물을 확인할 수 있어요."
+                        recommended.isNotEmpty() -> "가까운 위치 라운지를 확인할 수 있어요."
                         state.loadFailed -> "서버 연결을 확인하고 다시 시도해 주세요."
-                        else -> "주변에 등록된 실제 건물이 없어요."
+                        else -> "주변에 생성된 위치 라운지가 없어요."
                     },
                     color = MutedMint,
                     style = MaterialTheme.typography.labelMedium,
@@ -450,6 +453,7 @@ private fun LoungeBottomSheetPanel(
             onDismiss = { roomSheetVisible = false },
             onEnter = onEnter,
             onLeave = onLeave,
+            onCreateLounge = onCreateLounge,
             onShowCreate = {
                 roomSheetVisible = false
                 createSheetVisible = true
@@ -470,6 +474,7 @@ private fun LoungeRoomsSheet(
     onDismiss: () -> Unit,
     onEnter: (String) -> Unit,
     onLeave: () -> Unit,
+    onCreateLounge: () -> Unit,
     onShowCreate: () -> Unit,
     onOpenSubLounge: (String) -> Unit,
 ) {
@@ -490,13 +495,13 @@ private fun LoungeRoomsSheet(
                 Icon(Icons.Outlined.Map, contentDescription = null, tint = SignalGreen)
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("Wi-Fi 라운지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("위치 라운지", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
                         when {
                             !hasLocationPermission -> "위치 권한을 허용해 주세요."
                             entered != null -> "${entered.name} 안에서 사용자가 만든 방"
                             insideLounges.isNotEmpty() -> "현재 위치에서 입장 가능한 라운지를 선택하세요."
-                            else -> "같은 Wi-Fi 사용자 2명 이상이 모이면 라운지가 열려요."
+                            else -> "어떤 라운지 반경에도 속하지 않을 때 새 라운지를 만들 수 있어요."
                         },
                         color = MutedMint,
                         style = MaterialTheme.typography.bodyMedium
@@ -513,6 +518,17 @@ private fun LoungeRoomsSheet(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
+            if (entered == null && insideLounges.isEmpty() && hasLocationPermission) {
+                Button(
+                    onClick = onCreateLounge,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = SignalGreen),
+                ) {
+                    Icon(Icons.Outlined.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("현재 위치에 라운지 만들기")
+                }
+            }
             if (entered == null) {
                 when {
                     state.loading -> Box(
@@ -521,7 +537,7 @@ private fun LoungeRoomsSheet(
                     ) { CircularProgressIndicator(color = SignalGreen) }
                     state.lounges.isEmpty() -> EmptyLoungePanel(
                         if (state.loadFailed) "라운지 정보를 불러오지 못했어요" else "아직 열린 라운지가 없어요",
-                        if (state.loadFailed) "잠시 후 위치 새로고침을 다시 시도해 주세요." else "같은 Wi-Fi의 버블맵 사용자와 가까이 모여 보세요.",
+                        if (state.loadFailed) "잠시 후 위치 새로고침을 다시 시도해 주세요." else "현재 위치에 첫 라운지를 만들어 보세요.",
                     )
                     else -> LazyColumn(
                         modifier = Modifier.height(320.dp),
@@ -1244,4 +1260,4 @@ fun LoungeMembersScreen(
     }
 }
 
-private fun BuildingLoungeSummaryDto.displayRadiusMeters(): Int = radiusMeters.coerceIn(30, 2_000)
+private fun BuildingLoungeSummaryDto.displayRadiusMeters(): Int = radiusMeters.coerceIn(5, 2_000)

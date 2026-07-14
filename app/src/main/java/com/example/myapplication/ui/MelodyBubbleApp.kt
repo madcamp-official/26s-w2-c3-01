@@ -837,6 +837,7 @@ private fun MainShell(
                 onLocationUpdate = viewModel::refreshBuildingLounges,
                 onLocationUnavailable = viewModel::setBuildingLoungeLocationUnavailable,
                 onHeartbeat = viewModel::heartbeatBuildingLounge,
+                onCreateLounge = viewModel::createLocationLounge,
                 onEnter = viewModel::enterBuildingLounge,
                 onLeave = viewModel::leaveBuildingLounge,
                 onCreateSubLounge = viewModel::createBuildingSubLounge,

@@ -60,7 +60,9 @@ class RealtimeEventRouter(
             )
 
             TYPE_ERROR, TYPE_SERVER_ERROR -> serverError(destination, envelope)
-            else -> if (destination.startsWith("/topic/sub-lounges/")) {
+            else -> if (destination == RealtimeDestinations.LOCATION_LOUNGES) {
+                RealtimeEvent.LocationLoungeUpdated(destination, envelope)
+            } else if (destination.startsWith("/topic/sub-lounges/")) {
                 RealtimeEvent.SubLoungeUpdated(destination, envelope)
             } else if (destination == RealtimeDestinations.ERRORS) {
                 serverError(destination, envelope)

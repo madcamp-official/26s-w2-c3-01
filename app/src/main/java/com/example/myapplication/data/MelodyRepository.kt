@@ -2009,6 +2009,7 @@ class DemoMelodyRepository(
             is RealtimeEvent.PopularTracksUpdated -> applyPopularTracksUpdated(event)
             is RealtimeEvent.NotificationCreated -> applyNotificationCreated(event)
             is RealtimeEvent.SubLoungeUpdated -> Unit
+            is RealtimeEvent.LocationLoungeUpdated -> Unit
             is RealtimeEvent.ServerError -> {
                 event.envelope.payload.message?.takeIf(String::isNotBlank)?.let { message ->
                     _state.update { it.copy(feedbackMessage = message) }

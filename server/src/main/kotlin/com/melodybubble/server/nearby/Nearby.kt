@@ -3,6 +3,7 @@ package com.melodybubble.server.nearby
 import com.melodybubble.server.realtime.RealtimeEnvelope
 import com.melodybubble.server.realtime.RealtimeEventTypes
 import com.melodybubble.server.realtime.RealtimePublisher
+import com.melodybubble.server.lounge.LocationLoungeService
 import com.melodybubble.server.realtime.RealtimeQueues
 import com.melodybubble.server.safety.ActionRateLimiter
 import org.springframework.beans.factory.annotation.Value
@@ -126,6 +127,7 @@ class NearbyService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val realtime: RealtimePublisher,
+    private val locationLounges: LocationLoungeService,
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
     @Value("\${app.nearby.max-radius-meters:15}") private val maxRadiusMeters: Int,
 ) {
@@ -326,6 +328,7 @@ class NearbyService(
             update.accuracyMeters,
             expiresAt,
         )
+        locationLounges.reconcileAfterLocationChange()
         publishNearbySnapshotsAfterCommit(previousViewers + nearbyViewerIds(userId))
     }
 
@@ -444,9 +447,11 @@ class NearbyService(
         }
     }
 
+    @Transactional
     fun stop(userId: UUID, clientSessionId: String) {
         val previousViewers = nearbyViewerIds(userId)
         jdbc.update("delete from presence_sessions where user_id=? and client_session_id=?", userId, clientSessionId.take(128))
+        locationLounges.reconcileAfterLocationChange()
         publishNearbySnapshotsAfterCommit(previousViewers)
     }
 

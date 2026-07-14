@@ -9,8 +9,10 @@ object RealtimeDestinations {
     const val NEARBY = "/user/queue/nearby"
     const val NOTIFICATIONS = "/user/queue/notifications"
     const val ERRORS = "/user/queue/errors"
+    const val LOCATION_LOUNGES = "/topic/location-lounges"
 
     val userQueues = listOf(CHAT, REACTIONS, NEARBY, NOTIFICATIONS, ERRORS)
+    val defaultSubscriptions = userQueues + LOCATION_LOUNGES
 
     fun subLounge(subLoungeId: String) = "/topic/sub-lounges/$subLoungeId"
 }
@@ -196,6 +198,14 @@ sealed interface RealtimeEvent {
     }
 
     data class SubLoungeUpdated(
+        override val destination: String,
+        val envelope: RealtimeEventEnvelope<JsonElement>,
+    ) : RealtimeEvent {
+        override val eventId: String = envelope.eventId
+        override val type: String = envelope.type
+    }
+
+    data class LocationLoungeUpdated(
         override val destination: String,
         val envelope: RealtimeEventEnvelope<JsonElement>,
     ) : RealtimeEvent {

@@ -103,6 +103,9 @@ object ApiClient {
     fun createBuildingLoungeApi(environment: ApiEnvironment = ApiEnvironment()): BuildingLoungeApi =
         retrofit(environment).create(BuildingLoungeApi::class.java)
 
+    fun createLocationLoungeApi(environment: ApiEnvironment = ApiEnvironment()): LocationLoungeApi =
+        authenticatedRetrofit(environment).create(LocationLoungeApi::class.java)
+
 }
 
 private object SessionRuntime {
