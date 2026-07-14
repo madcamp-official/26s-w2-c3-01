@@ -48,6 +48,8 @@ import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PeopleOutline
@@ -57,6 +59,7 @@ import androidx.compose.material.icons.outlined.Radio
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Button
@@ -1623,6 +1626,7 @@ fun PublicProfileScreen(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onFollow: () -> Unit,
+    onMessage: () -> Unit = {},
     onPlayNowPlaying: (String, String, String?) -> Unit = { _, _, _ -> },
     onPlayTrackPreview: (ProfileTrack) -> Unit = {},
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
@@ -1643,10 +1647,19 @@ fun PublicProfileScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로", tint = ink)
             }
-            Text("음악 프로필", color = ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                profile?.profileHandle ?: "음악 프로필",
+                color = ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = onShare) { Text("공유", color = lavender) }
-            onMore?.let { action -> TextButton(onClick = action) { Text("더보기", color = muted) } }
+            IconButton(onClick = onShare) { Icon(Icons.Outlined.Share, contentDescription = "공유", tint = lavender) }
+            onMore?.let { action ->
+                IconButton(onClick = action) { Icon(Icons.Outlined.MoreVert, contentDescription = "더보기", tint = muted) }
+            }
         }
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1665,63 +1678,15 @@ fun PublicProfileScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 item {
-                    ProfileLightPanel(outline = outline, ink = ink) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            ProfileAvatar(profile.avatarUrl, profile.displayName, profile.colorHex, 82.dp)
-                            Spacer(Modifier.width(14.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(profile.displayName, color = ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                                Text("@${profile.profileHandle}", color = muted, style = MaterialTheme.typography.bodyMedium)
-                                Spacer(Modifier.height(5.dp))
-                                Text(
-                                    profile.bio.ifBlank { "음악으로 자신을 소개하는 사용자" },
-                                    color = muted,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    (profile.genres + profile.moods).distinct().take(3).forEach {
-                                        LightProfileTag(it.uppercase(), lavender, outline)
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        if (!profile.isSelf) {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (profile.mutual) {
-                                    Surface(
-                                        color = MelodyBubbleColors.SurfaceSelected,
-                                        contentColor = lavender,
-                                        shape = RoundedCornerShape(22.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, MelodyBubbleColors.BorderStrong),
-                                    ) { Text("맞팔 중", Modifier.padding(horizontal = 18.dp, vertical = 10.dp), fontWeight = FontWeight.Bold) }
-                                }
-                                Button(
-                                    onClick = onFollow,
-                                    modifier = Modifier.weight(1f),
-                                    colors = ButtonDefaults.buttonColors(containerColor = lavender, contentColor = MelodyBubbleColors.OnPrimary),
-                                ) {
-                                    Text(when {
-                                        profile.following -> "팔로잉"
-                                        profile.relationship == RelationshipStatus.FOLLOWS_ME -> "맞팔하기"
-                                        else -> "팔로우"
-                                    })
-                                }
-                            }
-                        } else {
-                            Surface(color = MelodyBubbleColors.SurfaceSelected, contentColor = lavender, shape = RoundedCornerShape(22.dp)) {
-                                Text("내 프로필", Modifier.fillMaxWidth().padding(vertical = 10.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Spacer(Modifier.height(15.dp))
-                        Row(Modifier.fillMaxWidth()) {
-                            LightProfileCount("팔로잉", profile.stats.followingCount, ink, muted, Modifier.weight(1f))
-                            LightProfileCount("팔로워", profile.stats.followerCount, ink, muted, Modifier.weight(1f))
-                            LightProfileCount("검증된 교환", profile.stats.verifiedExchangeCount, ink, muted, Modifier.weight(1f))
-                        }
-                    }
+                    PublicProfileHero(
+                        profile = profile,
+                        ink = ink,
+                        muted = muted,
+                        accent = lavender,
+                        outline = outline,
+                        onFollow = onFollow,
+                        onMessage = onMessage,
+                    )
                 }
                 if (profile.sharedVerifiedExchangeCount > 0) item {
                     ProfileLightPanel(outline = outline, ink = ink, contentPadding = 14.dp) {
