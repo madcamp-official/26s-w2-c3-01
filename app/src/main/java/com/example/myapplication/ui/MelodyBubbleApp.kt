@@ -227,6 +227,9 @@ fun MelodyBubbleApp(
         snackbarHostState.showSnackbar(message)
         viewModel.clearFeedback()
     }
+    LaunchedEffect(previewPlaybackState.errorMessage) {
+        previewPlaybackState.errorMessage?.let { snackbarHostState.showSnackbar(it) }
+    }
 
     if (loginState !is LoginUiState.Success) {
         LoginScreen(
@@ -635,7 +638,9 @@ private fun MainShell(
                 onOpenNotifications = onOpenNotifications,
                 onSelectListener = { onOpenUser(it.nearbyHandle) },
                 onOpenTrack = onOpenTrack,
-                onPlayPreview = { viewModel.playMusicPreview(it.title, it.artist) },
+                onPlayPreview = {
+                    viewModel.playMusicPreview(it.title, it.artist, artworkUrl = it.artworkUrl)
+                },
             )
             MainTab.NEARBY -> NearbyScreen(
                 state = state,
@@ -651,6 +656,7 @@ private fun MainShell(
                         viewModel.playMusicPreview(
                             track.title,
                             track.artist,
+                            artworkUrl = track.artworkUrl,
                             sourceNearbyHandle = it.nearbyHandle,
                         )
                     }
@@ -663,6 +669,7 @@ private fun MainShell(
                     viewModel.playMusicPreview(
                         track.title,
                         track.artist,
+                        artworkUrl = track.artworkUrl,
                         sourceNearbyHandle = listener.nearbyHandle,
                     )
                 },

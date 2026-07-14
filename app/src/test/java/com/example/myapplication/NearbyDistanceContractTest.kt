@@ -8,6 +8,7 @@ import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NearbyRingFractions
 import com.example.myapplication.core.model.Proximity
+import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.abstractDisplayPosition
 import com.example.myapplication.core.model.nearbyMapMarkers
 import com.example.myapplication.core.model.radiusFromCenter
@@ -316,6 +317,29 @@ class NearbyDistanceContractTest {
         ).getValue(current.nearbyHandle)
 
         assertEquals(current.displayPosition, result.displayPosition)
+    }
+
+    @Test
+    fun staleDirectProfileCannotRollBackRealtimeMusic() {
+        val newTrack = Track("new", "New Song", "Artist", platform = "REMOTE")
+        val oldTrack = Track("old", "Old Song", "Artist", platform = "REMOTE")
+        val current = listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)).copy(
+            isPlaying = true,
+            currentTrack = newTrack,
+        )
+        val staleDirect = current.copy(
+            displayPosition = DisplayPosition(0.70f, 0.5f),
+            currentTrack = oldTrack,
+            isDirectlyDetected = true,
+        )
+
+        val result = preferDirectNearbyUsers(
+            candidates = listOf(DirectNearbyCandidate("beacon", staleDirect, null)),
+            currentByHandle = mapOf(current.nearbyHandle to current),
+        ).getValue(current.nearbyHandle)
+
+        assertEquals(newTrack, result.currentTrack)
+        assertTrue(result.isPlaying)
     }
 
     @Test

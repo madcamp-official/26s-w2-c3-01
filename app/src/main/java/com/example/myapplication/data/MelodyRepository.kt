@@ -180,6 +180,17 @@ internal fun reactionTypeForLabel(label: String): String? = when (label.trim()) 
     else -> null
 }
 
+internal fun List<PopularTrack>.preservingResolvedArtwork(
+    previous: List<PopularTrack>,
+): List<PopularTrack> {
+    val previousArtwork = previous.associate { it.track.id to it.track.artworkUrl }
+    return map { incoming ->
+        val retained = incoming.track.artworkUrl ?: previousArtwork[incoming.track.id]
+        if (retained == incoming.track.artworkUrl) incoming
+        else incoming.copy(track = incoming.track.copy(artworkUrl = retained))
+    }
+}
+
 internal data class DirectNearbyCandidate(
     val beaconId: String,
     val user: com.example.myapplication.core.model.NearbyListener,
@@ -198,18 +209,27 @@ internal fun preferDirectNearbyUsers(
                 .thenBy { it.beaconId },
         ) ?: error("direct candidate group cannot be empty")
         val existing = currentByHandle[preferred.user.nearbyHandle]
-        if (preferred.user.proximityConfidence == NearbyProximityConfidence.LOW &&
-            existing != null && preferred.user.proximity != existing.proximity
-        ) {
+        // A beacon resolution is authoritative only for direct proximity. Its embedded profile
+        // snapshot can be older than a realtime music event, so never let it roll playback back.
+        val proximityUser = existing?.let { current ->
             preferred.user.copy(
+                relationship = current.relationship,
+                isPlaying = current.isPlaying,
+                currentTrack = current.currentTrack,
+            )
+        } ?: preferred.user
+        if (proximityUser.proximityConfidence == NearbyProximityConfidence.LOW &&
+            existing != null && proximityUser.proximity != existing.proximity
+        ) {
+            proximityUser.copy(
                 proximity = existing.proximity,
                 displayPosition = existing.displayPosition,
             )
-        } else if (existing != null && preferred.user.proximity == existing.proximity) {
-            preferred.user.copy(displayPosition = existing.displayPosition)
+        } else if (existing != null && proximityUser.proximity == existing.proximity) {
+            proximityUser.copy(displayPosition = existing.displayPosition)
         } else {
-            preferred.user.copy(
-                displayPosition = randomDisplayPosition(preferred.user.proximity),
+            proximityUser.copy(
+                displayPosition = randomDisplayPosition(proximityUser.proximity),
             )
         }
     }
@@ -1820,7 +1840,15 @@ class DemoMelodyRepository(
         _state.update { current ->
             val existingHandles = current.nearbyListeners.mapTo(mutableSetOf()) { it.nearbyHandle }
             val listeners = current.nearbyListeners.map { existing ->
-                direct[existing.nearbyHandle] ?: existing
+                val measured = direct[existing.nearbyHandle] ?: return@map existing
+                // Re-read playback from the atomic state update. A realtime event may have arrived
+                // after direct candidates were calculated but before this reducer executes.
+                existing.copy(
+                    proximity = measured.proximity,
+                    proximityConfidence = measured.proximityConfidence,
+                    displayPosition = measured.displayPosition,
+                    isDirectlyDetected = true,
+                )
             } +
                 direct.values.filterNot { it.nearbyHandle in existingHandles }
             current.copy(
@@ -2084,8 +2112,11 @@ class DemoMelodyRepository(
                 .onSuccess { tracks ->
                     if (!isCurrentSession(token)) return@onSuccess
                     if (popularRealtimeVersion.get() != versionAtRequest) return@onSuccess
+                    val incoming = tracks.map { it.toDomain() }
                     _state.update { current ->
-                        current.copy(popularTracks = tracks.map { it.toDomain() })
+                        current.copy(
+                            popularTracks = incoming.preservingResolvedArtwork(current.popularTracks),
+                        )
                     }
                     resolveMissingPopularArtwork()
                 }
@@ -2453,6 +2484,18 @@ class DemoMelodyRepository(
                 platform = "REMOTE",
             )
         } else null
+        synchronized(directStateLock) {
+            directNearbyByHandle = directNearbyByHandle.mapValues { (_, listener) ->
+                if (listener.nearbyHandle == handle) {
+                    listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
+                } else listener
+            }
+            directUsersByBeacon = directUsersByBeacon.mapValues { (_, listener) ->
+                if (listener.nearbyHandle == handle) {
+                    listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
+                } else listener
+            }
+        }
         var found = false
         _state.update { current ->
             current.copy(
@@ -2515,7 +2558,11 @@ class DemoMelodyRepository(
                 reactionCount = remote.reactionCount?.coerceAtLeast(0) ?: 0,
             )
         }
-        _state.update { it.copy(popularTracks = tracks) }
+        _state.update { current ->
+            current.copy(
+                popularTracks = tracks.preservingResolvedArtwork(current.popularTracks),
+            )
+        }
         resolveMissingPopularArtwork()
     }
 

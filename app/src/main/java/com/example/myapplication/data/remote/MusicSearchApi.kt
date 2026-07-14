@@ -59,6 +59,7 @@ class MusicSearchRepository(
     private val artistApi: DeezerArtistApi = ApiClient.createDeezerArtistApi(),
 ) {
     private val artistImageCache = ConcurrentHashMap<String, String>()
+    private val trackMediaCache = ConcurrentHashMap<String, MusicSearchResult>()
     private val artistImageLookupLimiter = Semaphore(6)
 
     /** Fetches only the data required to start playback without waiting for artist image enrichment. */
@@ -66,6 +67,42 @@ class MusicSearchRepository(
         val term = keyword.trim()
         require(term.isNotEmpty()) { "검색어를 입력해 주세요." }
         return api.search(term = term).results.toSearchResults()
+    }
+
+    /** Resolves one track's preview and artwork without involving Deezer artist enrichment. */
+    suspend fun findTrackMedia(title: String, artist: String): MusicSearchResult? {
+        val safeTitle = title.trim()
+        val safeArtist = artist.withoutMusicQualifier().trim()
+        if (safeTitle.isEmpty() || safeArtist.isEmpty()) return null
+        val cacheKey = "${safeTitle.normalizedMusicIdentity()}\u0000${safeArtist.normalizedMusicIdentity()}"
+        trackMediaCache[cacheKey]?.let { return it }
+
+        val combinedResults = api.search(term = "$safeTitle $safeArtist", limit = 30)
+            .results
+            .toSearchResults()
+        val normalizedTitle = safeTitle.normalizedMusicIdentity()
+        val normalizedArtist = safeArtist.normalizedMusicIdentity()
+        val exactTitleCandidates = combinedResults.filter {
+            it.title.normalizedMusicIdentity() == normalizedTitle
+        }
+        val directMatch = exactTitleCandidates.firstOrNull {
+            it.artist.withoutMusicQualifier().normalizedMusicIdentity() == normalizedArtist
+        }
+        val resolved = directMatch ?: run {
+            // The Korean storefront localizes some artist names (ILLIT -> 아일릿). Resolve the
+            // storefront artist id separately, then use it to disambiguate identical song titles.
+            val artistResults = api.search(term = safeArtist, limit = 30)
+                .results
+                .toSearchResults()
+            val localizedArtistId = artistResults.firstOrNull {
+                it.artist.withoutMusicQualifier().normalizedMusicIdentity() == normalizedArtist
+            }?.artistId ?: artistResults.firstOrNull()?.artistId
+            exactTitleCandidates.firstOrNull {
+                localizedArtistId != null && it.artistId == localizedArtistId
+            } ?: exactTitleCandidates.firstOrNull()
+                ?.takeIf { combinedResults.firstOrNull() === it }
+        }
+        return resolved?.also { trackMediaCache[cacheKey] = it }
     }
 
     suspend fun search(keyword: String): List<MusicSearchResult> = coroutineScope {
@@ -120,20 +157,7 @@ class MusicSearchRepository(
     }
 
     suspend fun trackArtwork(title: String, artist: String): String? {
-        val safeTitle = title.trim()
-        val safeArtist = artist.trim()
-        if (safeTitle.isEmpty() || safeArtist.isEmpty()) return null
-        val results = api.search(term = "$safeTitle $safeArtist", limit = 10)
-            .results
-            .toSearchResults()
-        val normalizedTitle = safeTitle.normalizedMusicIdentity()
-        val normalizedArtist = safeArtist.normalizedMusicIdentity()
-        return results.firstOrNull {
-            it.title.normalizedMusicIdentity() == normalizedTitle &&
-                it.artist.normalizedMusicIdentity() == normalizedArtist
-        }?.artworkUrl ?: results.firstOrNull {
-            it.artist.normalizedMusicIdentity() == normalizedArtist
-        }?.artworkUrl
+        return findTrackMedia(title, artist)?.artworkUrl
     }
 
     private fun List<ITunesSongDto>.toSearchResults(
@@ -181,6 +205,11 @@ private fun String.highResolutionArtwork(): String =
 
 private fun String.normalizedMusicIdentity(): String =
     trim().lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "")
+
+private fun String.withoutMusicQualifier(): String =
+    replace(Regex("\\([^)]*\\)|（[^）]*）"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
 internal fun List<DeezerArtistDto>.toArtistImageMap(): Map<String, String> = buildMap {
     this@toArtistImageMap.forEach { artist ->

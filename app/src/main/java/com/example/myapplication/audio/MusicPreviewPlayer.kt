@@ -41,6 +41,11 @@ class MusicPreviewPlayer(context: Context) {
     private val _state = MutableStateFlow(PreviewPlaybackState())
     val state = _state.asStateFlow()
 
+    fun beginLookup(title: String, artist: String, artworkUrl: String? = null) {
+        stop()
+        _state.value = PreviewPlaybackState(title, artist, artworkUrl, isLoading = true)
+    }
+
     fun play(url: String, title: String, artist: String, artworkUrl: String? = null) {
         stop()
         _state.value = PreviewPlaybackState(title, artist, artworkUrl, isLoading = true)

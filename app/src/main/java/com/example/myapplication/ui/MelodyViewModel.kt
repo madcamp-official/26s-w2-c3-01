@@ -530,14 +530,19 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 followedNearbyTrackKey = previewFollowKey(nowPlaying.title, nowPlaying.artist)
             }
         nowPlayingPreviewJob = viewModelScope.launch {
-            runCatching {
-                musicSearchRepository.searchPreviews(musicPreviewSearchTerm(nowPlaying.title, nowPlaying.artist))
-            }.onSuccess { results ->
-                results.firstOrNull { it.previewUrl == results.matchingPreviewUrl(nowPlaying.title, nowPlaying.artist) }
-                    ?.let { musicPreviewPlayer.play(it.previewUrl!!, nowPlaying.title, nowPlaying.artist, it.artworkUrl) }
-            }.onFailure { error ->
-                if (error is CancellationException) throw error
-            }
+            musicPreviewPlayer.beginLookup(nowPlaying.title, nowPlaying.artist, nowPlaying.artworkUrl)
+            runCatching { musicSearchRepository.findTrackMedia(nowPlaying.title, nowPlaying.artist) }
+                .onSuccess { match ->
+                    match?.previewUrl?.let { previewUrl ->
+                        musicPreviewPlayer.play(
+                            previewUrl,
+                            nowPlaying.title,
+                            nowPlaying.artist,
+                            match.artworkUrl ?: nowPlaying.artworkUrl,
+                        )
+                    } ?: musicPreviewPlayer.stop("정확한 미리듣기를 찾지 못했어요.")
+                }
+                .onFailure { musicPreviewPlayer.stop("미리듣기를 찾지 못했어요.") }
         }
     }
 
@@ -621,11 +626,10 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             musicPreviewPlayer.play(previewUrl, title, artist, artworkUrl)
             return
         }
+        musicPreviewPlayer.beginLookup(title, artist, artworkUrl)
         previewLookupJob = viewModelScope.launch {
-            runCatching { musicSearchRepository.searchPreviews(musicPreviewSearchTerm(title, artist)) }
-                .onSuccess { results ->
-                    val matchingUrl = results.matchingPreviewUrl(title, artist)
-                    val match = results.firstOrNull { it.previewUrl == matchingUrl }
+            runCatching { musicSearchRepository.findTrackMedia(title, artist) }
+                .onSuccess { match ->
                     val url = match?.previewUrl
                     if (url == null) {
                         musicPreviewPlayer.stop("정확한 미리듣기를 찾지 못했어요.")

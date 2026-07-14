@@ -15,6 +15,62 @@ import org.junit.Test
 
 class MusicSearchRepositoryTest {
     @Test
+    fun resolvesLocalizedArtistByArtistIdWhenTrackTitleIsAmbiguous() = runBlocking {
+        val correctPreview = "https://audio.example/illit.m4a"
+        val correctArtwork = "https://image.example/illit/100x100bb.jpg"
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ) = if (term == "ILLIT") {
+                ITunesSearchResponse(
+                    resultCount = 1,
+                    results = listOf(ITunesSongDto(trackId = 3L, artistId = 100L, trackName = "Magnetic", artistName = "아일릿")),
+                )
+            } else {
+                ITunesSearchResponse(
+                    resultCount = 2,
+                    results = listOf(
+                        ITunesSongDto(
+                            trackId = 1L,
+                            artistId = 100L,
+                            trackName = "It's Me",
+                            artistName = "아일릿",
+                            artworkUrl100 = correctArtwork,
+                            previewUrl = correctPreview,
+                        ),
+                        ITunesSongDto(
+                            trackId = 2L,
+                            artistId = 200L,
+                            trackName = "It's Me",
+                            artistName = "Chilli Beans.",
+                            previewUrl = "https://audio.example/wrong.m4a",
+                        ),
+                    ),
+                )
+            }
+        }
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String) = DeezerArtistSearchResponse()
+        }
+
+        val resolved = MusicSearchRepository(api, artistApi).findTrackMedia("It's Me", "ILLIT")
+
+        assertEquals(correctPreview, resolved?.previewUrl)
+        assertTrue(resolved?.artworkUrl.orEmpty().contains("600x600bb"))
+    }
+
+    @Test
     fun previewSearchDoesNotWaitForDeezerArtistEnrichment() = runBlocking {
         var deezerCalls = 0
         val api = object : MusicSearchApi {
