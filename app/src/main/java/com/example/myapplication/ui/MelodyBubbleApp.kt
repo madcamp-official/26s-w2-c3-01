@@ -611,6 +611,7 @@ fun MelodyBubbleApp(
             composable(Route.NOTIFICATIONS) {
                 NotificationScreen(
                     notifications = state.notifications,
+                    onViewed = viewModel::markInboxRead,
                     onBack = { navController.popBackStack() },
                     onClearAll = viewModel::clearNotifications,
                     onDelete = viewModel::deleteNotification,

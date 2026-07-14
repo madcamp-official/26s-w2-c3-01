@@ -828,6 +828,7 @@ fun InboxScreen(
 @Composable
 fun NotificationScreen(
     notifications: List<InboxNotification>,
+    onViewed: () -> Unit,
     onBack: () -> Unit,
     onClearAll: () -> Unit,
     onDelete: (String) -> Unit,
@@ -837,6 +838,7 @@ fun NotificationScreen(
     val animationScope = rememberCoroutineScope()
     var removingIds by remember { mutableStateOf(emptySet<String>()) }
     var clearingAll by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { onViewed() }
     LaunchedEffect(notifications.map(InboxNotification::id)) {
         removingIds = removingIds.intersect(notifications.map(InboxNotification::id).toSet())
         if (notifications.isEmpty()) clearingAll = false
