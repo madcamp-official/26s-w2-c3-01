@@ -225,6 +225,20 @@ class NearbyService(
     private fun snapshot(userId: UUID, enforceRateLimit: Boolean): NearbySnapshot {
         if (enforceRateLimit) rateLimiter.enforce(userId, "NEARBY_SNAPSHOT", 60, Duration.ofMinutes(1))
         val radius = discoveryRadius(userId)
+        val directProximityByTarget = jdbc.query(
+            """
+            SELECT target_user_id,proximity,confidence
+            FROM direct_proximity_measurements
+            WHERE viewer_user_id=? AND expires_at>now()
+            """.trimIndent(),
+            { rs, _ ->
+                UUID.fromString(rs.getString("target_user_id")) to Pair(
+                    ProximityBand.valueOf(rs.getString("proximity")),
+                    DistanceConfidence.valueOf(rs.getString("confidence")),
+                )
+            },
+            userId,
+        ).toMap()
         val sql = """
           WITH my_location AS (
             SELECT location.point, location.accuracy_meters
@@ -310,11 +324,12 @@ class NearbyService(
         }.toTypedArray()
         val items = jdbc.query(sql, { rs, _ ->
             val handle = rs.getString("nearby_handle")
+            val direct = directProximityByTarget[UUID.fromString(rs.getString("user_id"))]
             val distanceMeters = rs.getDouble("distance_meters").coerceAtMost(radius.toDouble())
             val viewerAccuracy = rs.getDouble("viewer_accuracy_meters").takeUnless { rs.wasNull() }
             val targetAccuracy = rs.getDouble("target_accuracy_meters").takeUnless { rs.wasNull() }
             val combinedAccuracy = combinedHorizontalAccuracyMeters(viewerAccuracy, targetAccuracy)
-            val band = proximityBand(distanceMeters)
+            val band = direct?.first ?: proximityBand(distanceMeters)
                 ?: ProximityBand.WITHIN_15M
             NearbyBubble(
                 nearbyHandle = handle,
@@ -326,8 +341,9 @@ class NearbyService(
                 displayPosition = abstractPosition(handle, band),
                 matchScore = 65 + stable(handle, 31),
                 proximity = band.name,
-                distanceConfidence = distanceConfidence(distanceMeters, combinedAccuracy).name,
-                distanceAccuracyMeters = combinedAccuracy,
+                distanceConfidence = (direct?.second
+                    ?: distanceConfidence(distanceMeters, combinedAccuracy)).name,
+                distanceAccuracyMeters = combinedAccuracy.takeIf { direct == null },
                 relationship = rs.getString("relationship"),
                 canReact = rs.getBoolean("allow_reactions"),
                 track = rs.getString("track_title")?.let {
