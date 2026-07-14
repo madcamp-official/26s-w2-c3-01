@@ -96,6 +96,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -113,6 +117,13 @@ private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
 private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
 private const val KEY_HIDDEN_CHAT_ROOM_IDS = "hidden-chat-room-ids"
+
+private fun String?.isDeezerArtistImage(): Boolean =
+    this?.startsWith("https://cdn-images.dzcdn.net/images/artist/") == true
+
+private fun List<ProfileArtist>.hasSameArtistSelection(other: List<ProfileArtist>): Boolean =
+    map { it.providerArtistId to it.name.trim().lowercase() } ==
+        other.map { it.providerArtistId to it.name.trim().lowercase() }
 
 internal fun reactionTypeForLabel(label: String): String? = when (label.trim()) {
     "이 곡 좋아요", "LIKE" -> "LIKE"
@@ -722,9 +733,11 @@ class DemoMelodyRepository(
             runCatching { profileApi.exchangeProfile("Bearer $token", exchangeId) }
                 .onSuccess { remote ->
                     if (!isCurrentSession(token)) return@onSuccess
+                    val profile = remote.toDomain()
                     _state.update {
-                        it.copy(selectedPublicProfile = remote.toDomain(), publicProfileLoading = false)
+                        it.copy(selectedPublicProfile = profile, publicProfileLoading = false)
                     }
+                    resolvePublicProfileArtwork(profile)
                 }
                 .onFailure { error ->
                     if (!isCurrentSession(token)) return@onFailure
@@ -1537,6 +1550,7 @@ class DemoMelodyRepository(
             )
         }
         persistProfile(_state.value.profile)
+        resolveOwnProfileArtistArtwork()
     }
 
     private fun persistProfile(profile: com.example.myapplication.core.model.ProfileSettings) {
@@ -2084,24 +2098,76 @@ class DemoMelodyRepository(
     }
 
     private fun resolvePublicProfileArtwork(profile: PublicProfile) {
-        val nowPlaying = profile.nowPlaying?.takeIf { it.artworkUrl.isNullOrBlank() } ?: return
+        profile.nowPlaying?.takeIf { it.artworkUrl.isNullOrBlank() }?.let { nowPlaying ->
+            scope.launch {
+                val resolvedUrl = runCatching {
+                    musicSearchRepository.trackArtwork(nowPlaying.title, nowPlaying.artist)
+                }.getOrNull() ?: return@launch
+                _state.update { current ->
+                    val selected = current.selectedPublicProfile
+                    if (selected?.profileHandle != profile.profileHandle ||
+                        selected.nowPlaying?.title != nowPlaying.title ||
+                        selected.nowPlaying.artist != nowPlaying.artist
+                    ) current else current.copy(
+                        selectedPublicProfile = selected.copy(
+                            nowPlaying = selected.nowPlaying.copy(artworkUrl = resolvedUrl),
+                        ),
+                    )
+                }
+            }
+        }
+
+        val sourceArtists = profile.favoriteArtists
+        if (sourceArtists.isEmpty()) return
         scope.launch {
-            val resolvedUrl = runCatching {
-                musicSearchRepository.trackArtwork(nowPlaying.title, nowPlaying.artist)
-            }.getOrNull() ?: return@launch
+            val resolvedArtists = resolveArtistArtwork(sourceArtists)
+            if (resolvedArtists == sourceArtists) return@launch
             _state.update { current ->
                 val selected = current.selectedPublicProfile
                 if (selected?.profileHandle != profile.profileHandle ||
-                    selected.nowPlaying?.title != nowPlaying.title ||
-                    selected.nowPlaying.artist != nowPlaying.artist
+                    !selected.favoriteArtists.hasSameArtistSelection(sourceArtists)
                 ) current else current.copy(
-                    selectedPublicProfile = selected.copy(
-                        nowPlaying = selected.nowPlaying.copy(artworkUrl = resolvedUrl),
-                    ),
+                    selectedPublicProfile = selected.copy(favoriteArtists = resolvedArtists),
                 )
             }
         }
     }
+
+    private fun resolveOwnProfileArtistArtwork() {
+        val accountId = _state.value.activeAccountId
+        val sourceArtists = _state.value.profile.favoriteArtists
+        if (sourceArtists.isEmpty()) return
+        scope.launch {
+            val resolvedArtists = resolveArtistArtwork(sourceArtists)
+            if (resolvedArtists == sourceArtists) return@launch
+            _state.update { current ->
+                if (current.activeAccountId != accountId ||
+                    !current.profile.favoriteArtists.hasSameArtistSelection(sourceArtists)
+                ) current else current.copy(
+                    profile = current.profile.copy(favoriteArtists = resolvedArtists),
+                )
+            }
+            val current = _state.value
+            if (current.activeAccountId == accountId &&
+                current.profile.favoriteArtists.hasSameArtistSelection(resolvedArtists)
+            ) {
+                persistProfile(current.profile)
+            }
+        }
+    }
+
+    private suspend fun resolveArtistArtwork(artists: List<ProfileArtist>): List<ProfileArtist> =
+        coroutineScope {
+            artists.map { artist ->
+                async {
+                    if (artist.imageUrl.isDeezerArtistImage()) return@async artist
+                    val deezerImage = runCatching {
+                        musicSearchRepository.artistImage(artist.name)
+                    }.getOrNull()
+                    deezerImage?.let { artist.copy(imageUrl = it) } ?: artist
+                }
+            }.awaitAll()
+        }
 
     private fun applyNotificationCreated(event: RealtimeEvent.NotificationCreated) {
         val payload = event.envelope.payload
