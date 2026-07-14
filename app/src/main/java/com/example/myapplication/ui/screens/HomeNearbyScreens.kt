@@ -1438,49 +1438,6 @@ private fun SelectedListenerCard(
 }
 
 @Composable
-private fun NearbyResultState(
-    state: NearbyLoadState,
-    message: String?,
-    onRetry: () -> Unit,
-) {
-    MelodyCard {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(
-                imageVector = if (state == NearbyLoadState.ERROR) {
-                    Icons.Outlined.ReportGmailerrorred
-                } else Icons.Outlined.Radar,
-                contentDescription = null,
-                modifier = Modifier.size(36.dp),
-                tint = if (state == NearbyLoadState.ERROR) MelodyBubbleColors.Danger else MelodyBubbleColors.TextMuted,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = when (state) {
-                    NearbyLoadState.LOADING -> "주변을 안전하게 찾고 있어요"
-                    NearbyLoadState.EMPTY -> "주변에 공개된 버블이 없어요"
-                    NearbyLoadState.ERROR -> "주변 목록을 불러오지 못했어요"
-                    else -> "주변 상태를 확인하고 있어요"
-                },
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-            )
-            if (!message.isNullOrBlank()) {
-                Spacer(Modifier.height(4.dp))
-                Text(message, color = MelodyBubbleColors.TextMuted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-            }
-            if (state == NearbyLoadState.ERROR) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onRetry) { Text("다시 연결") }
-            }
-        }
-    }
-}
-
-@Composable
 private fun NoListenerResult(
     threshold: Int,
     message: String = "유사도 $threshold% 이상인 버블이 없어요"
