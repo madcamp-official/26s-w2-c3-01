@@ -1247,20 +1247,45 @@ fun MyScreen(
     var avatarCustomization by remember(profile.avatarUrl) {
         mutableStateOf(AvatarProfileResolver.customizationFrom(profile.avatarUrl))
     }
+    var avatarDialogCustomization by remember(profile.avatarUrl) {
+        mutableStateOf(AvatarProfileResolver.customizationFrom(profile.avatarUrl))
+    }
+    var avatarCustomizationDirty by remember(profile.avatarUrl) { mutableStateOf(false) }
+    var genreExpanded by rememberSaveable { mutableStateOf(false) }
+    var moodExpanded by rememberSaveable { mutableStateOf(false) }
+
+    fun resetEditorDrafts() {
+        name = profile.accountAlias
+        bio = profile.bio
+        genres = profile.genres
+        moods = profile.moods
+        signatureTracks = profile.signatureTracks
+        favoriteArtists = profile.favoriteArtists
+        avatarCustomization = AvatarProfileResolver.customizationFrom(profile.avatarUrl)
+        avatarDialogCustomization = avatarCustomization
+        avatarCustomizationDirty = false
+        genreExpanded = false
+        moodExpanded = false
+    }
+
+    fun dismissEditor() {
+        resetEditorDrafts()
+        editorSection = null
+        selectionDialogSection = null
+        onClearMusicSearch()
+    }
     LaunchedEffect(profileSaving, feedbackMessage, awaitingProfileSave) {
         if (awaitingProfileSave && profileSaving) profileSaveStarted = true
         if (awaitingProfileSave && profileSaveStarted && !profileSaving) {
             awaitingProfileSave = false
             profileSaveStarted = false
-            if (feedbackMessage == "프로필을 변경했어요") editorSection = null
+            if (feedbackMessage == "프로필을 변경했어요" || feedbackMessage == "새 아바타를 적용했어요") {
+                editorSection = null
+            }
         }
     }
     if (editorSection != null) CenteredProfileEditorDialog(
-        onDismissRequest = {
-            editorSection = null
-            selectionDialogSection = null
-            onClearMusicSearch()
-        },
+        onDismissRequest = ::dismissEditor,
         scrollable = editorSection == "BASIC",
     ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1283,47 +1308,70 @@ fun MyScreen(
                         color = MutedMint,
                     )
                 }
-                TextButton(onClick = {
-                    editorSection = null
-                    selectionDialogSection = null
-                    onClearMusicSearch()
-                }) { Text("닫기") }
+                TextButton(onClick = ::dismissEditor) { Text("닫기") }
             }
             Spacer(Modifier.height(22.dp))
             if (editorSection == "BASIC") {
-            ProfileAvatar(profile.avatarUrl, name, profile.colorHex, 112.dp)
-            Text("DiceBear Lorelei Neutral 아바타", color = MutedMint, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = { avatarEditorVisible = true }, enabled = !profileSaving) {
+            ProfileAvatar(
+                if (avatarCustomizationDirty) AvatarProfileResolver.customizedUrl(profile.avatarSeed, avatarCustomization) else profile.avatarUrl,
+                name,
+                profile.colorHex,
+                112.dp,
+            )
+            OutlinedButton(onClick = {
+                avatarDialogCustomization = avatarCustomization
+                avatarEditorVisible = true
+            }, enabled = !profileSaving) {
                 Text("아바타 꾸미기")
             }
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(name, { name = it.take(40) }, Modifier.fillMaxWidth(), label = { Text("프로필 이름") }, singleLine = true)
+            OutlinedTextField(
+                name,
+                { name = it.take(40) },
+                Modifier.fillMaxWidth().testTag("profile_name_input"),
+                label = { Text("프로필 이름") },
+                singleLine = true,
+            )
             Spacer(Modifier.height(12.dp))
             OutlinedTextField(
                 bio, { bio = it.take(160) }, Modifier.fillMaxWidth(), label = { Text("소개") },
                 supportingText = { Text("${bio.length}/160") }, minLines = 3,
             )
             Spacer(Modifier.height(20.dp))
-            GenreCatalogPicker(
-                title = "좋아하는 장르",
-                state = genreCatalogState,
-                selected = genres,
-                onChange = { genres = it },
-                onRetry = onRetryGenreCatalog,
-            )
-            Spacer(Modifier.height(16.dp))
-            ProfileTagEditor(
-                options = listOf("Calm", "Night", "Dreamy", "Bright", "Energetic", "Warm"),
-                selected = moods,
-                onChange = { moods = it },
-                title = "내 음악 무드",
-            )
+            ExpandableProfileTagSection(
+                title = "장르",
+                selectedCount = genres.size,
+                expanded = genreExpanded,
+                onToggle = { genreExpanded = !genreExpanded },
+            ) {
+                GenreCatalogPicker(
+                    title = "좋아하는 장르",
+                    state = genreCatalogState,
+                    selected = genres,
+                    onChange = { genres = it },
+                    onRetry = onRetryGenreCatalog,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            ExpandableProfileTagSection(
+                title = "무드",
+                selectedCount = moods.size,
+                expanded = moodExpanded,
+                onToggle = { moodExpanded = !moodExpanded },
+            ) {
+                ProfileTagEditor(
+                    options = listOf("Calm", "Night", "Dreamy", "Bright", "Energetic", "Warm"),
+                    selected = moods,
+                    onChange = { moods = it },
+                )
+            }
             Spacer(Modifier.height(26.dp))
             Button(
                 onClick = {
                     awaitingProfileSave = true
                     profileSaveStarted = false
                     onProfileUpdate(name, profile.colorHex, bio, genres, moods)
+                    if (avatarCustomizationDirty) onCustomizeAvatar(avatarCustomization)
                 },
                 enabled = name.trim().length >= 2 && !awaitingProfileSave,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -1476,7 +1524,10 @@ fun MyScreen(
             }
         }
         item {
-            ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "BASIC" }) {
+            ProfileLightPanel(outline = outline, ink = ink, onClick = {
+                resetEditorDrafts()
+                editorSection = "BASIC"
+            }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ProfileAvatar(profile.avatarUrl, profile.accountAlias, profile.colorHex, 82.dp)
                     Spacer(Modifier.width(14.dp))
@@ -1543,7 +1594,11 @@ fun MyScreen(
             }
         }
         item {
-            ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "TRACKS" }) {
+            ProfileLightPanel(outline = outline, ink = ink, onClick = {
+                signatureTracks = profile.signatureTracks
+                favoriteArtists = profile.favoriteArtists
+                editorSection = "TRACKS"
+            }) {
                 Text("요즘 나를 설명하는 3곡", color = ink, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(9.dp))
                 if (profile.signatureTracks.isEmpty()) {
@@ -1569,7 +1624,11 @@ fun MyScreen(
             }
         }
         item {
-            ProfileLightPanel(outline = outline, ink = ink, onClick = { editorSection = "ARTISTS" }) {
+            ProfileLightPanel(outline = outline, ink = ink, onClick = {
+                signatureTracks = profile.signatureTracks
+                favoriteArtists = profile.favoriteArtists
+                editorSection = "ARTISTS"
+            }) {
                 Text("최애 아티스트 3명", color = ink, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(9.dp))
                 if (profile.favoriteArtists.isEmpty()) {
@@ -1622,11 +1681,12 @@ fun MyScreen(
     if (avatarEditorVisible) {
         AvatarCustomizationDialog(
             seed = profile.avatarSeed,
-            customization = avatarCustomization,
-            onChange = { avatarCustomization = it },
+            customization = avatarDialogCustomization,
+            onChange = { avatarDialogCustomization = it },
             onDismiss = { avatarEditorVisible = false },
             onSave = {
-                onCustomizeAvatar(avatarCustomization)
+                avatarCustomization = avatarDialogCustomization
+                avatarCustomizationDirty = AvatarProfileResolver.customizedUrl(profile.avatarSeed, avatarCustomization) != profile.avatarUrl
                 avatarEditorVisible = false
             },
         )
@@ -1743,7 +1803,7 @@ fun PublicProfileScreen(
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로", tint = ink)
             }
             Text(
-                profile?.profileHandle ?: "음악 프로필",
+                profile?.displayName ?: "음악 프로필",
                 color = ink,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
@@ -2453,6 +2513,37 @@ private fun ProfileAvatar(avatarUrl: String?, name: String, colorHex: Long, size
     }
     Surface(modifier = Modifier.size(size), shape = CircleShape, color = Color(colorHex)) {
         AsyncImage(resolvedAvatarUrl, "$name 프로필 아바타", Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    }
+}
+
+@Composable
+private fun ExpandableProfileTagSection(
+    title: String,
+    selectedCount: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
+        shape = RoundedCornerShape(16.dp),
+        color = MossSurfaceHigh,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MossOutline),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                Text("${selectedCount}개 선택", color = MutedMint, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    if (expanded) Icons.Outlined.KeyboardArrowDown else Icons.Outlined.ChevronRight,
+                    contentDescription = if (expanded) "$title 접기" else "$title 펼치기",
+                )
+            }
+            AnimatedVisibility(visible = expanded) {
+                Column(Modifier.fillMaxWidth().padding(top = 10.dp), content = content)
+            }
+        }
     }
 }
 

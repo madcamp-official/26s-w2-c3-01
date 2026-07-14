@@ -283,15 +283,6 @@ fun NearbyScreen(
             )
         }
         item {
-            Text(
-                text = "링은 5m·10m·15m 거리 구간이며 방향과 구간 안의 배치는 추상 표현이에요.",
-                modifier = Modifier.fillMaxWidth(),
-                color = MelodyBubbleColors.TextMuted,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center
-            )
-        }
-        item {
             SectionTitle(
                 title = "선택한 리스너",
                 subtitle = when {

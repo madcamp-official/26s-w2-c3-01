@@ -64,6 +64,7 @@ class PublicProfileScreenTest {
         }
 
         composeRule.onNodeWithText("Night Listener").assertIsDisplayed()
+        composeRule.onAllNodesWithText("listener_night").assertCountEquals(0)
         composeRule.onAllNodesWithText("R&B").assertCountEquals(2)
         composeRule.onNodeWithText("팔로우").performClick()
 

@@ -2,12 +2,14 @@ package com.example.myapplication
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.ProfileSettings
@@ -22,6 +24,47 @@ import org.junit.Test
 class MyProfileScreenTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun basicProfileDraftIsDiscardedWithoutSave() {
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                MyScreen(
+                    profile = emptyProfile(),
+                    profileSaving = false,
+                    feedbackMessage = null,
+                    followingCount = 0,
+                    followerCount = 0,
+                    nowPlayingTrack = null,
+                    nowPlayingActive = false,
+                    onLoadConnections = {},
+                    onOpenFollowing = {},
+                    onOpenFollowers = {},
+                    onOpenSettings = {},
+                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileCurationUpdate = { _, _ -> },
+                    musicSearchState = MusicSearchUiState.Idle,
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
+                    onSearchMusic = {},
+                    onClearMusicSearch = {},
+                    onPreviewMusic = {},
+                    onCustomizeAvatar = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("테스트 리스너").performClick()
+        composeRule.onAllNodesWithText("DiceBear Lorelei Neutral 아바타").assertCountEquals(0)
+        composeRule.onNodeWithText("장르").assertIsDisplayed().performClick()
+        composeRule.onNodeWithText("K-Pop").assertIsDisplayed()
+        composeRule.onNodeWithTag("profile_name_input").performTextReplacement("저장 안 한 이름")
+        composeRule.onNodeWithText("닫기").performClick()
+
+        composeRule.onNodeWithText("테스트 리스너").performClick()
+        composeRule.onNodeWithTag("profile_name_input").assertTextContains("테스트 리스너")
+        composeRule.onNodeWithText("무드").assertIsDisplayed()
+    }
 
     @Test
     fun emptyProfileKeepsMusicFeaturesDiscoverable() {
