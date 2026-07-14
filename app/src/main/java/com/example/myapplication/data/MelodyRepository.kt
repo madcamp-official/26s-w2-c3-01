@@ -44,6 +44,7 @@ import com.example.myapplication.core.model.TasteFingerprint
 import com.example.myapplication.core.model.TasteMetric
 import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.Track
+import com.example.myapplication.core.model.abstractDisplayPosition
 import com.example.myapplication.data.local.MelodyDatabase
 import com.example.myapplication.data.local.OfflineExchangeEntity
 import com.example.myapplication.data.local.SyncOutboxEntity
@@ -86,6 +87,7 @@ import com.example.myapplication.offlineexchange.ExchangeProtocol
 import com.example.myapplication.offlineexchange.OfflineExchangeResult
 import com.example.myapplication.offlineexchange.OfflineExchangeSyncWorker
 import com.example.myapplication.nearby.PassiveNearbyDiscoveryManager
+import com.example.myapplication.nearby.PeerProximityMeasurement
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -110,6 +112,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -268,6 +273,8 @@ class DemoMelodyRepository(
     private val nearbyApi = ApiClient.createNearbyApi(environment)
     private val passiveNearbyDiscovery = PassiveNearbyDiscoveryManager(applicationContext)
     private var directNearbyByHandle = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
+    private var directUsersByBeacon = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
+    private var directMeasurementsByBeacon = emptyMap<String, PeerProximityMeasurement>()
     private var passiveDiscoveryStarted = false
     // Server distance bands are already privacy-coarsened. Apply a crossed band immediately so
     // another user's movement is visible on the next snapshot instead of one cycle later.
@@ -339,7 +346,18 @@ class DemoMelodyRepository(
             }
         }
         scope.launch {
-            passiveNearbyDiscovery.beaconIds.collect(::resolveDirectBeacons)
+            combine(
+                passiveNearbyDiscovery.beaconIds,
+                passiveNearbyDiscovery.proximityMeasurements.map { it.keys }.distinctUntilChanged(),
+            ) { connectionIds, rangingIds -> connectionIds + rangingIds }
+                .distinctUntilChanged()
+                .collect(::resolveDirectBeacons)
+        }
+        scope.launch {
+            passiveNearbyDiscovery.proximityMeasurements.collect { measurements ->
+                directMeasurementsByBeacon = measurements
+                applyDirectProximityMeasurements()
+            }
         }
         scope.launch {
             for (ignored in locationSyncSignal) {
@@ -1703,6 +1721,7 @@ class DemoMelodyRepository(
     private fun resolveDirectBeacons(beaconIds: Set<String>) {
         val token = accessToken ?: return
         if (beaconIds.isEmpty()) {
+            directUsersByBeacon = emptyMap()
             directNearbyByHandle = emptyMap()
             refreshNearbySnapshot()
             return
@@ -1715,11 +1734,44 @@ class DemoMelodyRepository(
                 )
             }.onSuccess { resolved ->
                 if (!isCurrentSession(token)) return@onSuccess
-                directNearbyByHandle = resolved.associate { item ->
-                    item.user.nearbyHandle to item.user.toDomain().copy(isDirectlyDetected = true)
+                directUsersByBeacon = resolved.associate { item ->
+                    item.beaconId to item.user.toDomain()
                 }
+                applyDirectProximityMeasurements()
                 refreshNearbySnapshot()
             }
+        }
+    }
+
+    private fun applyDirectProximityMeasurements() {
+        directNearbyByHandle = directUsersByBeacon.map { (beaconId, user) ->
+            val measurement = directMeasurementsByBeacon[beaconId]
+            val measuredUser = if (measurement == null) {
+                user.copy(isDirectlyDetected = true)
+            } else {
+                user.copy(
+                    proximity = measurement.proximity,
+                    proximityConfidence = measurement.confidence,
+                    displayPosition = abstractDisplayPosition(user.nearbyHandle, measurement.proximity),
+                    isDirectlyDetected = true,
+                )
+            }
+            measuredUser.nearbyHandle to measuredUser
+        }.toMap()
+        val direct = directNearbyByHandle
+        val newest = directMeasurementsByBeacon.values.maxByOrNull { it.observedAtEpochMillis }
+        _state.update { current ->
+            val existingHandles = current.nearbyListeners.mapTo(mutableSetOf()) { it.nearbyHandle }
+            val listeners = current.nearbyListeners.map { direct[it.nearbyHandle] ?: it } +
+                direct.values.filterNot { it.nearbyHandle in existingHandles }
+            current.copy(
+                nearbyListeners = listeners,
+                nearbyLoadState = if (listeners.isEmpty()) current.nearbyLoadState else NearbyLoadState.READY,
+                nearbyMeasurementDiagnostics = newest?.let {
+                    NearbyMeasurementDiagnostics(it.method, null, it.observedAtEpochMillis, null)
+                } ?: current.nearbyMeasurementDiagnostics,
+                snapshotSequence = current.snapshotSequence + 1,
+            )
         }
     }
 
