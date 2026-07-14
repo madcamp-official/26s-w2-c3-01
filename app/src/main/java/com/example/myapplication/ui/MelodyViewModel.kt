@@ -582,16 +582,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
         previewLookupJob = viewModelScope.launch {
-            runCatching { musicSearchRepository.search("$title $artist") }
+            runCatching { musicSearchRepository.search(musicPreviewSearchTerm(title, artist)) }
                 .onSuccess { results ->
-                    val normalizedTitle = title.trim().lowercase()
-                    val match = results.firstOrNull {
-                        it.title.trim().lowercase() == normalizedTitle &&
-                            it.artist.contains(artist, ignoreCase = true)
-                    } ?: results.firstOrNull { it.previewUrl != null }
+                    val matchingUrl = results.matchingPreviewUrl(title, artist)
+                    val match = results.firstOrNull { it.previewUrl == matchingUrl }
                     val url = match?.previewUrl
                     if (url == null) {
-                        musicPreviewPlayer.stop("이 곡은 30초 미리듣기를 제공하지 않아요.")
+                        musicPreviewPlayer.stop("정확한 미리듣기를 찾지 못했어요.")
                     } else {
                         musicPreviewPlayer.play(url, title, artist, match.artworkUrl ?: artworkUrl)
                     }
@@ -1054,13 +1051,23 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
 internal fun List<MusicSearchResult>.matchingPreviewUrl(title: String, artist: String): String? {
     val normalizedTitle = title.normalizedMusicIdentity()
-    val normalizedArtist = artist.normalizedMusicIdentity()
+    val normalizedArtist = artist.withoutParentheticalQualifier().normalizedMusicIdentity()
     return firstOrNull { result ->
         result.title.normalizedMusicIdentity() == normalizedTitle &&
-            result.artist.normalizedMusicIdentity() == normalizedArtist &&
+            result.artist.withoutParentheticalQualifier().normalizedMusicIdentity() == normalizedArtist &&
             result.previewUrl?.startsWith("https://") == true
     }?.previewUrl
 }
+
+internal fun musicPreviewSearchTerm(title: String, artist: String): String =
+    listOf(title.trim(), artist.withoutParentheticalQualifier())
+        .filter(String::isNotBlank)
+        .joinToString(" ")
+
+internal fun String.withoutParentheticalQualifier(): String =
+    replace(PARENTHETICAL_QUALIFIER, " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
 internal fun List<LoungeRecommendationCardDto>.latestRecommendation(): LoungeRecommendationCardDto? =
     maxWithOrNull(compareBy<LoungeRecommendationCardDto>({ it.createdAt }, { it.id }))
@@ -1083,3 +1090,5 @@ internal fun locationLoungeErrorMessage(error: Throwable, fallback: String): Str
 
 private fun String.normalizedMusicIdentity(): String =
     lowercase().filter(Char::isLetterOrDigit)
+
+private val PARENTHETICAL_QUALIFIER = Regex("\\([^)]*\\)|（[^）]*）")
