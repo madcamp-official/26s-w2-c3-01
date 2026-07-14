@@ -89,6 +89,9 @@ import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.gson.Gson
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.service.NearbyLocationPolicy
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -120,7 +123,7 @@ import retrofit2.HttpException
 
 private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 5_000L
 private const val PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS = 60_000L
-private const val STATIONARY_LOCATION_FALLBACK_MAX_AGE_MILLIS = 10 * 60_000L
+private const val STATIONARY_LOCATION_FALLBACK_MAX_AGE_MILLIS = 2 * 60_000L
 private const val ACTIVE_PRESENCE_REFRESH_INTERVAL_MILLIS = 1_000L
 private const val DIRECT_PROXIMITY_REPORT_INTERVAL_MILLIS = 1_000L
 private const val DIRECT_BEACON_RESOLVE_INTERVAL_MILLIS = 1_100L
@@ -145,6 +148,20 @@ internal fun NearbyLoadState.keepSettledDuringRefresh(
     NearbyLoadState.IDLE,
     NearbyLoadState.LOADING,
     -> fallback
+}
+
+internal fun chatSentAtLabel(
+    sentAt: String?,
+    nowEpochMillis: Long = System.currentTimeMillis(),
+): String {
+    val sentAtEpochMillis = sentAt.toServerEpochMillis() ?: return ""
+    val sent = Calendar.getInstance().apply { timeInMillis = sentAtEpochMillis }
+    val now = Calendar.getInstance().apply { timeInMillis = nowEpochMillis }
+    val sameDay = sent.get(Calendar.ERA) == now.get(Calendar.ERA) &&
+        sent.get(Calendar.YEAR) == now.get(Calendar.YEAR) &&
+        sent.get(Calendar.DAY_OF_YEAR) == now.get(Calendar.DAY_OF_YEAR)
+    val pattern = if (sameDay) "a h:mm" else "M월 d일 a h:mm"
+    return SimpleDateFormat(pattern, Locale.KOREAN).format(sent.time)
 }
 
 private fun String?.isDeezerArtistImage(): Boolean =
@@ -305,6 +322,8 @@ class DemoMelodyRepository(
     private var chatSyncJob: Job? = null
     private val chatRealtimeVersion = AtomicLong(0)
     private val nearbyRealtimeVersion = AtomicLong(0)
+    private val socialConnectionsRequestVersion = AtomicLong(0)
+    private val publicProfileRequestVersion = AtomicLong(0)
     private val locationSequence = AtomicLong(System.currentTimeMillis() * 1_000L)
     private val directProximitySequence = AtomicLong(System.currentTimeMillis() * 1_000L)
     private val popularRealtimeVersion = AtomicLong(0)
@@ -322,6 +341,8 @@ class DemoMelodyRepository(
     @Volatile private var directUsersByBeacon = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
     @Volatile private var directMeasurementsByBeacon = emptyMap<String, PeerProximityMeasurement>()
     private val reportedDirectMeasurementAt = ConcurrentHashMap<String, Long>()
+    private val lastMusicEventAtByHandle = ConcurrentHashMap<String, Long>()
+    private val explicitlyRemovedNearbyHandles = ConcurrentHashMap.newKeySet<String>()
     private var passiveDiscoveryStarted = false
     // Server distance bands are already privacy-coarsened. Apply a crossed band immediately so
     // another user's movement is visible on the next snapshot instead of one cycle later.
@@ -358,6 +379,14 @@ class DemoMelodyRepository(
             }
         }
     }
+    private val sharingStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != SharingForegroundService.ACTION_SHARING_STATE_CHANGED) return
+            if (!intent.getBooleanExtra(SharingForegroundService.EXTRA_SHARING_ACTIVE, false)) {
+                stopSharing()
+            }
+        }
+    }
     init {
         ContextCompat.registerReceiver(
             applicationContext,
@@ -366,6 +395,12 @@ class DemoMelodyRepository(
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         locationReceiverRegistered = true
+        ContextCompat.registerReceiver(
+            applicationContext,
+            sharingStateReceiver,
+            IntentFilter(SharingForegroundService.ACTION_SHARING_STATE_CHANGED),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         scope.launch {
             realtimeClient.events.collect(::handleRealtimeEvent)
         }
@@ -569,6 +604,9 @@ class DemoMelodyRepository(
     }
 
     override fun stopSharing() {
+        val shouldNotifyServer = sharingJob != null ||
+            _state.value.sharingState == SharingState.STARTING ||
+            _state.value.sharingState == SharingState.ACTIVE
         sharingJob?.cancel()
         sharingJob = null
         hybridDiscoveryJob?.cancel()
@@ -590,6 +628,8 @@ class DemoMelodyRepository(
         passiveDiscoveryStarted = false
         latestLocationFix = null
         nearbyProximityStabilizer.clear()
+        explicitlyRemovedNearbyHandles.clear()
+        lastMusicEventAtByHandle.clear()
         _state.update {
             it.copy(
                 sharingState = SharingState.STOPPED,
@@ -600,7 +640,11 @@ class DemoMelodyRepository(
                 feedbackMessage = "주변 공유를 중지했어요"
             )
         }
-        accessToken?.let { token -> scope.launch { runCatching { nearbyApi.stopPresence("Bearer $token", clientSessionId) } } }
+        if (shouldNotifyServer) {
+            accessToken?.let { token ->
+                scope.launch { runCatching { nearbyApi.stopPresence("Bearer $token", clientSessionId) } }
+            }
+        }
     }
 
     override fun setSharingPermissionRequired() {
@@ -647,7 +691,9 @@ class DemoMelodyRepository(
             .firstOrNull { it.nearbyHandle == handle }?.relationship ?: return
         scope.launch {
             runCatching {
-                if (relationship == RelationshipStatus.FOLLOWING) {
+                if (relationship == RelationshipStatus.FOLLOWING ||
+                    relationship == RelationshipStatus.MUTUAL
+                ) {
                     socialApi.unfollow("Bearer $token", handle)
                 } else {
                     socialApi.follow("Bearer $token", handle)
@@ -776,22 +822,28 @@ class DemoMelodyRepository(
 
     override fun loadSocialConnections() {
         val token = accessToken ?: return
+        val requestVersion = socialConnectionsRequestVersion.incrementAndGet()
         _state.update { it.copy(socialConnectionsLoading = true) }
         scope.launch {
             runCatching {
                 val authorization = "Bearer $token"
                 socialApi.following(authorization) to socialApi.followers(authorization)
             }.onSuccess { (following, followers) ->
-                if (!isCurrentSession(token)) return@onSuccess
+                if (!isCurrentSession(token) ||
+                    requestVersion != socialConnectionsRequestVersion.get()
+                ) return@onSuccess
                 _state.update {
                     it.copy(
                         following = following.map { it.toDomain() },
                         followers = followers.map { it.toDomain() },
                         socialConnectionsLoading = false,
+                        socialConnectionsLoaded = true,
                     )
                 }
             }.onFailure { error ->
-                if (!isCurrentSession(token)) return@onFailure
+                if (!isCurrentSession(token) ||
+                    requestVersion != socialConnectionsRequestVersion.get()
+                ) return@onFailure
                 _state.update { it.copy(socialConnectionsLoading = false) }
                 showRequestError(error, "팔로우 목록을 불러오지 못했어요")
             }
@@ -827,9 +879,11 @@ class DemoMelodyRepository(
     override fun loadPublicProfile(profileHandle: String) {
         val token = accessToken ?: return
         if (profileHandle.isBlank()) return
+        val requestVersion = publicProfileRequestVersion.incrementAndGet()
         _state.update {
             it.copy(
-                selectedPublicProfile = null,
+                selectedPublicProfile = it.selectedPublicProfile
+                    ?.takeIf { profile -> profile.profileHandle == profileHandle },
                 publicProfileLoading = true,
                 publicProfileError = null,
             )
@@ -837,7 +891,9 @@ class DemoMelodyRepository(
         scope.launch {
             runCatching { profileApi.publicProfile("Bearer $token", profileHandle) }
                 .onSuccess { remote ->
-                    if (!isCurrentSession(token)) return@onSuccess
+                    if (!isCurrentSession(token) ||
+                        requestVersion != publicProfileRequestVersion.get()
+                    ) return@onSuccess
                     val profile = remote.toDomain()
                     _state.update {
                         it.copy(
@@ -849,7 +905,9 @@ class DemoMelodyRepository(
                     resolvePublicProfileArtwork(profile)
                 }
                 .onFailure { error ->
-                    if (!isCurrentSession(token)) return@onFailure
+                    if (!isCurrentSession(token) ||
+                        requestVersion != publicProfileRequestVersion.get()
+                    ) return@onFailure
                     _state.update {
                         it.copy(
                             selectedPublicProfile = null,
@@ -866,6 +924,7 @@ class DemoMelodyRepository(
     }
 
     override fun clearPublicProfile() {
+        publicProfileRequestVersion.incrementAndGet()
         _state.update {
             it.copy(selectedPublicProfile = null, publicProfileLoading = false, publicProfileError = null)
         }
@@ -882,8 +941,21 @@ class DemoMelodyRepository(
                 } else {
                     socialApi.followProfile("Bearer $token", profile.profileHandle)
                 }
-            }.onSuccess {
+            }.onSuccess { response ->
                 if (!isCurrentSession(token)) return@onSuccess
+                val relationship = runCatching { RelationshipStatus.valueOf(response.relationship) }
+                    .getOrDefault(RelationshipStatus.NONE)
+                publicProfileRequestVersion.incrementAndGet()
+                _state.update { current ->
+                    val selected = current.selectedPublicProfile
+                    if (selected?.profileHandle != profile.profileHandle) current else current.copy(
+                        selectedPublicProfile = selected.copy(
+                            relationship = relationship,
+                            following = response.following,
+                            mutual = response.mutual,
+                        )
+                    )
+                }
                 loadPublicProfile(profile.profileHandle)
                 loadSocialConnections()
                 loadChatRooms()
@@ -957,6 +1029,7 @@ class DemoMelodyRepository(
                                 if (message.clientMessageId == clientId) {
                                     message.copy(
                                         messageId = remote.messageId,
+                                        sentAtLabel = chatSentAtLabel(remote.sentAt),
                                         deliveryState = if (message.deliveryState == DeliveryState.READ) {
                                             DeliveryState.READ
                                         } else DeliveryState.SENT,
@@ -1347,6 +1420,7 @@ class DemoMelodyRepository(
                 following = emptyList(),
                 followers = emptyList(),
                 socialConnectionsLoading = false,
+                socialConnectionsLoaded = false,
                 selectedPublicProfile = null,
                 publicProfileLoading = false,
                 publicProfileError = null,
@@ -1391,6 +1465,7 @@ class DemoMelodyRepository(
         refreshPopularTracks(accessToken)
         syncReceivedReactions(accessToken)
         loadBlockedUsers()
+        loadSocialConnections()
         realtimeClient.connect(accessToken)
         handleRealtimeConnectionState(realtimeClient.connectionState.value)
         startChatSync(accessToken)
@@ -1430,6 +1505,7 @@ class DemoMelodyRepository(
             following = emptyList(),
             followers = emptyList(),
             socialConnectionsLoading = false,
+            socialConnectionsLoaded = false,
             selectedPublicProfile = null,
             publicProfileLoading = false,
             publicProfileError = null,
@@ -1820,8 +1896,44 @@ class DemoMelodyRepository(
     private fun mergeDirectNearby(
         locationUsers: List<com.example.myapplication.core.model.NearbyListener>,
     ): List<com.example.myapplication.core.model.NearbyListener> {
-        val locationHandles = locationUsers.mapTo(mutableSetOf()) { it.nearbyHandle }
-        return locationUsers + directNearbyByHandle.values.filterNot { it.nearbyHandle in locationHandles }
+        val activeLocationUsers = locationUsers.filterNot {
+            it.nearbyHandle in explicitlyRemovedNearbyHandles
+        }
+        val locationHandles = activeLocationUsers.mapTo(mutableSetOf()) { it.nearbyHandle }
+        val currentByProfile = _state.value.nearbyListeners
+            .mapNotNull { listener -> listener.profileHandle?.let { it to listener } }
+            .toMap()
+        val directOnly = directNearbyByHandle.values.filterNot {
+            it.nearbyHandle in locationHandles || it.nearbyHandle in explicitlyRemovedNearbyHandles
+        }.map { direct ->
+            val current = direct.profileHandle?.let(currentByProfile::get) ?: return@map direct
+            direct.copy(
+                relationship = current.relationship,
+                isPlaying = current.isPlaying,
+                currentTrack = current.currentTrack,
+            )
+        }
+        return activeLocationUsers + directOnly
+    }
+
+    private fun preserveNewerRealtimeMusic(
+        incoming: List<com.example.myapplication.core.model.NearbyListener>,
+        snapshotGeneratedAt: String?,
+    ): List<com.example.myapplication.core.model.NearbyListener> {
+        val snapshotEpochMillis = snapshotGeneratedAt.toServerEpochMillis() ?: return incoming
+        val currentByHandle = _state.value.nearbyListeners.associateBy { it.nearbyHandle }
+        return incoming.map { listener ->
+            val musicEventAt = lastMusicEventAtByHandle[listener.nearbyHandle] ?: return@map listener
+            val current = currentByHandle[listener.nearbyHandle] ?: return@map listener
+            if (musicEventAt > snapshotEpochMillis) {
+                listener.copy(
+                    isPlaying = current.isPlaying,
+                    currentTrack = current.currentTrack,
+                )
+            } else {
+                listener
+            }
+        }
     }
 
     private suspend fun syncPresence(
@@ -1896,7 +2008,10 @@ class DemoMelodyRepository(
             if (!isCurrentSession(token)) return@runCatching false
             val stabilizedListeners = nearbyProximityStabilizer.stabilize(
                 _state.value.nearbyListeners,
-                mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                preserveNewerRealtimeMusic(
+                    mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                    snapshot.generatedAt,
+                ),
             )
             _state.update { current ->
                 val listeners = if (nearbyRealtimeVersion.get() == nearbyVersionAtRequest) {
@@ -1996,7 +2111,7 @@ class DemoMelodyRepository(
 
         val cached = runCatching { fusedLocationClient.lastLocation.await() }.getOrNull()
         if (allowInitialCoarseLocation && cached != null && cached.hasAccuracy() &&
-            cached.accuracy <= NearbyLocationPolicy.MAX_ACCURACY_METERS &&
+            cached.accuracy <= NearbyLocationPolicy.INITIAL_MAX_ACCURACY_METERS &&
             System.currentTimeMillis() - cached.time in 0L..PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS
         ) {
             return cached
@@ -2083,6 +2198,14 @@ class DemoMelodyRepository(
         response.roomId?.takeIf { response.mutual }?.let { roomId ->
             persistChatRoomHidden(roomId, hidden = false)
         }
+        synchronized(directStateLock) {
+            directNearbyByHandle = directNearbyByHandle.mapValues { (_, listener) ->
+                if (listener.nearbyHandle == handle) listener.copy(relationship = relationship) else listener
+            }
+            directUsersByBeacon = directUsersByBeacon.mapValues { (_, listener) ->
+                if (listener.nearbyHandle == handle) listener.copy(relationship = relationship) else listener
+            }
+        }
         _state.update { current ->
             val peer = current.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
             val listeners = current.nearbyListeners.map {
@@ -2126,6 +2249,7 @@ class DemoMelodyRepository(
             )
         }
         if (response.mutual) loadChatRooms()
+        loadSocialConnections()
     }
 
     private fun handleRealtimeConnectionState(realtimeState: RealtimeConnectionState) {
@@ -2194,7 +2318,7 @@ class DemoMelodyRepository(
                 roomId = roomId,
                 isMine = isMine,
                 content = content.take(1_000),
-                sentAtLabel = "방금",
+                sentAtLabel = chatSentAtLabel(payload.sentAt ?: event.envelope.timestamp),
                 deliveryState = existing?.deliveryState?.takeIf { it == DeliveryState.READ }
                     ?: DeliveryState.SENT,
             )
@@ -2311,6 +2435,8 @@ class DemoMelodyRepository(
     private fun applyNearbyMusicUpdated(event: RealtimeEvent.NearbyMusicUpdated) {
         val payload = event.envelope.payload
         val handle = payload.nearbyHandle?.takeIf(String::isNotBlank) ?: return
+        lastMusicEventAtByHandle[handle] = event.envelope.timestamp.toServerEpochMillis()
+            ?: System.currentTimeMillis()
         val title = payload.track?.title?.trim()?.takeIf(String::isNotEmpty)
         val artist = payload.track?.artist?.trim()?.takeIf(String::isNotEmpty)
         val playingTrack = if (payload.isPlaying == true && title != null && artist != null) {
@@ -2338,9 +2464,24 @@ class DemoMelodyRepository(
 
     private fun applyNearbySnapshot(event: RealtimeEvent.NearbySnapshot) {
         val snapshot = event.envelope.payload
+        val removedHandles = snapshot.removedNearbyHandles.orEmpty().toSet()
+        var currentListeners = _state.value.nearbyListeners
+        if (removedHandles.isNotEmpty()) {
+            explicitlyRemovedNearbyHandles.addAll(removedHandles)
+            currentListeners = nearbyProximityStabilizer.remove(currentListeners, removedHandles)
+            synchronized(directStateLock) {
+                directNearbyByHandle = directNearbyByHandle.filterKeys { it !in removedHandles }
+                directUsersByBeacon = directUsersByBeacon.filterValues {
+                    it.nearbyHandle !in removedHandles
+                }
+            }
+        }
         val listeners = nearbyProximityStabilizer.stabilize(
-            _state.value.nearbyListeners,
-            mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+            currentListeners,
+            preserveNewerRealtimeMusic(
+                mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                snapshot.generatedAt,
+            ),
         )
         _state.update { current ->
             current.copy(
@@ -2510,7 +2651,10 @@ class DemoMelodyRepository(
                     if (!isCurrentSession(token)) return@onSuccess
                     val stabilizedListeners = nearbyProximityStabilizer.stabilize(
                         _state.value.nearbyListeners,
-                        mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                        preserveNewerRealtimeMusic(
+                            mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                            snapshot.generatedAt,
+                        ),
                     )
                     _state.update { current ->
                         val listeners = if (nearbyRealtimeVersion.get() == versionAtRequest) {
@@ -2647,7 +2791,7 @@ class DemoMelodyRepository(
                                                 message.roomId,
                                                 message.isMine,
                                                 message.content,
-                                                "최근",
+                                                chatSentAtLabel(message.sentAt),
                                                 if (message.isMine && message.readByPeer == true) {
                                                     DeliveryState.READ
                                                 } else previous?.deliveryState?.takeIf {

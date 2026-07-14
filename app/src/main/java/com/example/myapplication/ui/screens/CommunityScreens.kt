@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -171,6 +172,7 @@ fun OnboardingScreen(
     var moods by rememberSaveable { mutableStateOf(setOf("Calm", "Night")) }
     var favoriteArtists by remember { mutableStateOf<List<ProfileArtist>>(emptyList()) }
     var signatureTracks by remember { mutableStateOf<List<ProfileTrack>>(emptyList()) }
+    var selectionDialogSection by rememberSaveable { mutableStateOf<String?>(null) }
     val titles = listOf(
         "약관을 확인해 주세요",
         "좋아하는 장르를 골라요",
@@ -189,6 +191,7 @@ fun OnboardingScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
             .padding(horizontal = 20.dp, vertical = 20.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -284,16 +287,13 @@ fun OnboardingScreen(
                 }
             }
             if (page == 2) {
-                SelectedArtistSummary(favoriteArtists) { removed ->
-                    favoriteArtists = favoriteArtists
-                        .filterNot { it.providerArtistId == removed.providerArtistId && it.name == removed.name }
-                        .mapIndexed { index, artist -> artist.copy(rank = index + 1) }
-                }
                 MusicCatalogSearch(
                     state = musicSearchState,
                     placeholder = "아티스트 이름 · 예: 아이유",
                     onSearch = onSearchMusic,
                     onClear = onClearMusicSearch,
+                    selectedCount = favoriteArtists.size,
+                    onOpenSelected = { selectionDialogSection = "ARTISTS" },
                 )
                 val artistResults = (musicSearchState as? MusicSearchUiState.Success)
                     ?.results
@@ -338,16 +338,13 @@ fun OnboardingScreen(
                         }
                     }
                 }
-                SelectedTrackSummary(signatureTracks) { removed ->
-                    signatureTracks = signatureTracks
-                        .filterNot { it.providerTrackId == removed.providerTrackId }
-                        .mapIndexed { index, track -> track.copy(rank = index + 1) }
-                }
                 MusicCatalogSearch(
                     state = musicSearchState,
                     placeholder = "곡 또는 아티스트 검색",
                     onSearch = onSearchMusic,
                     onClear = onClearMusicSearch,
+                    selectedCount = signatureTracks.size,
+                    onOpenSelected = { selectionDialogSection = "TRACKS" },
                 )
                 val trackResults = (musicSearchState as? MusicSearchUiState.Success)?.results.orEmpty().take(6)
                 trackResults.forEach { result ->
@@ -402,6 +399,27 @@ fun OnboardingScreen(
         ) {
             Text(if (page < 4) "계속" else "시작하기")
         }
+    }
+
+    selectionDialogSection?.let { section ->
+        SelectedCurationDialog(
+            section = section,
+            tracks = signatureTracks,
+            artists = favoriteArtists,
+            onRemoveTrack = { removed ->
+                signatureTracks = signatureTracks
+                    .filterNot { it.providerTrackId == removed.providerTrackId }
+                    .mapIndexed { index, track -> track.copy(rank = index + 1) }
+            },
+            onRemoveArtist = { removed ->
+                favoriteArtists = favoriteArtists
+                    .filterNot {
+                        it.providerArtistId == removed.providerArtistId && it.name == removed.name
+                    }
+                    .mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+            },
+            onDismiss = { selectionDialogSection = null },
+        )
     }
 }
 
@@ -1002,17 +1020,17 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size, messages.lastOrNull()?.clientMessageId) {
+    LaunchedEffect(messages.lastOrNull()?.clientMessageId, inputFocused, imeBottom) {
         if (messages.isNotEmpty()) {
-            // The first LazyColumn item is the chat notice, so the last message index is size.
-            messageListState.animateScrollToItem(messages.size)
-        }
-    }
-
-    LaunchedEffect(inputFocused, imeBottom, messages.size) {
-        if (inputFocused && messages.isNotEmpty()) {
-            // Keep the newest bubble visible while the keyboard changes the list viewport.
-            messageListState.scrollToItem(messages.size)
+            // The first item is the chat notice. A new AnimatedVisibility row starts at zero
+            // height, so one early scroll leaves the fully-expanded bubble below the viewport.
+            // Follow the entry/IME animation until layout settles and pin the actual last item.
+            val latestItemIndex = messages.size
+            messageListState.animateScrollToItem(latestItemIndex)
+            repeat(CHAT_LATEST_SCROLL_SETTLE_ATTEMPTS) {
+                delay(CHAT_LATEST_SCROLL_SETTLE_DELAY_MILLIS)
+                messageListState.scrollToItem(latestItemIndex)
+            }
         }
     }
 
@@ -1053,7 +1071,7 @@ fun ChatScreen(
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             item {
                 Text(
@@ -1086,6 +1104,7 @@ fun ChatScreen(
                 placeholder = { Text("메시지 입력") },
                 modifier = Modifier
                     .weight(1f)
+                    .testTag("chat_input")
                     .onFocusChanged { inputFocused = it.isFocused },
                 shape = RoundedCornerShape(22.dp),
                 maxLines = 4,
@@ -1153,23 +1172,35 @@ private fun ChatMessageRow(
                     bottomEnd = if (message.isMine) 5.dp else 18.dp,
                 ),
                 color = if (message.isMine) SignalGreen.copy(alpha = 0.22f) else MossSurfaceHigh,
-                modifier = Modifier.fillMaxWidth(if (message.isMine) 0.76f else 0.68f),
+                modifier = Modifier
+                    .widthIn(max = 278.dp)
+                    .testTag("chat_message_${message.clientMessageId}"),
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    Text(message.content)
-                    Spacer(Modifier.height(5.dp))
-                    if (message.isMine) {
+                Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
+                    Text(message.content, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(3.dp))
+                    Row(
+                        modifier = Modifier.align(Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         Text(
-                            when (message.deliveryState) {
-                                DeliveryState.PENDING -> "전송 중"
-                                DeliveryState.SENT -> "안 읽음"
-                                DeliveryState.READ -> "읽음"
-                                DeliveryState.FAILED -> "실패 · 다시 시도"
-                            },
+                            message.sentAtLabel,
                             color = MutedMint,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.align(Alignment.End),
+                            style = MaterialTheme.typography.labelSmall,
                         )
+                        if (message.isMine) {
+                            Text(
+                                when (message.deliveryState) {
+                                    DeliveryState.PENDING -> "전송 중"
+                                    DeliveryState.SENT -> "안 읽음"
+                                    DeliveryState.READ -> "읽음"
+                                    DeliveryState.FAILED -> "실패 · 다시 시도"
+                                },
+                                color = MutedMint,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
                     }
                 }
             }
@@ -2708,13 +2739,10 @@ private fun GenreCatalogPicker(
     onChange: (List<String>) -> Unit,
     onRetry: () -> Unit,
 ) {
-    val options = (selected + state.genres).distinct()
+    val options = stableProfileTagOptions(state.genres, selected)
     Column(Modifier.fillMaxWidth()) {
         if (title != null) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(title, Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                Text("Melon 기준", color = MutedMint, style = MaterialTheme.typography.labelSmall)
-            }
+            Text(title, fontWeight = FontWeight.Bold)
         }
         if (state.loading) {
             Spacer(Modifier.height(10.dp))
@@ -2733,6 +2761,14 @@ private fun GenreCatalogPicker(
         }
     }
 }
+
+internal fun stableProfileTagOptions(catalog: List<String>, selected: List<String>): List<String> {
+    val catalogSet = catalog.toSet()
+    return (catalog + selected.filterNot(catalogSet::contains)).distinct()
+}
+
+private const val CHAT_LATEST_SCROLL_SETTLE_ATTEMPTS = 3
+private const val CHAT_LATEST_SCROLL_SETTLE_DELAY_MILLIS = 90L
 
 @Composable
 private fun ProfileTagEditor(

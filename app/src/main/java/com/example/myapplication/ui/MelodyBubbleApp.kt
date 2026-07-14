@@ -702,8 +702,12 @@ private fun MainShell(
                 profile = state.profile,
                 profileSaving = state.profileSaving,
                 feedbackMessage = state.feedbackMessage,
-                followingCount = maxOf(state.profile.stats.followingCount, state.following.size),
-                followerCount = maxOf(state.profile.stats.followerCount, state.followers.size),
+                followingCount = if (state.socialConnectionsLoaded) {
+                    state.following.size
+                } else state.profile.stats.followingCount,
+                followerCount = if (state.socialConnectionsLoaded) {
+                    state.followers.size
+                } else state.profile.stats.followerCount,
                 nowPlayingTrack = state.detectedTrack,
                 nowPlayingActive = state.detectedTrackPlaying,
                 onLoadConnections = viewModel::loadSocialConnections,

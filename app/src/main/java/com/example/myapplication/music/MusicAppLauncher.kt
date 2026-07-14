@@ -193,6 +193,14 @@ internal fun orderedMusicPackages(
     }.distinct()
 }
 
+/**
+ * MediaSession metadata does not identify whether the media is music or video. Restrict automatic
+ * presence detection to packages that are known to be music-first players; this prevents regular
+ * YouTube, browsers, streaming-video apps, and gallery players from appearing as "듣는 중".
+ */
+internal fun isRecognizedMusicPlaybackPackage(packageName: String): Boolean =
+    packageName.lowercase() in RECOGNIZED_MUSIC_PLAYBACK_PACKAGES
+
 private fun isSafeWebUrl(url: String): Boolean = runCatching {
     Uri.parse(url).scheme.equals("https", ignoreCase = true)
 }.getOrDefault(false)
@@ -217,12 +225,18 @@ internal val KNOWN_MUSIC_PACKAGES = listOf(
     "skplanet.musicmate",
     "com.neowiz.android.bugs",
     "com.nhn.android.music",
+    "com.nhn.android.vibe",
+    "com.dreamus.flo",
     "com.sec.android.app.music",
     "com.amazon.mp3",
     "com.aspiro.tidal",
     "deezer.android.app",
     "com.soundcloud.android",
 )
+
+private val RECOGNIZED_MUSIC_PLAYBACK_PACKAGES = KNOWN_MUSIC_PACKAGES
+    .map(String::lowercase)
+    .toSet()
 
 private val NON_MUSIC_PACKAGES = setOf(
     "android",

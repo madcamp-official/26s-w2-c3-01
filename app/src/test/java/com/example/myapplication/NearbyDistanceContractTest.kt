@@ -113,16 +113,34 @@ class NearbyDistanceContractTest {
     }
 
     @Test
+    fun explicitDepartureBypassesMissingBubbleRetention() {
+        val stabilizer = NearbyProximityStabilizer(
+            confirmationsRequired = 1,
+            missingRetentionMillis = 15_000L,
+        )
+        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+
+        stabilizer.stabilize(current, emptyList())
+        val withoutDeparted = stabilizer.remove(current, listOf(current.single().nearbyHandle))
+
+        assertTrue(stabilizer.stabilize(withoutDeparted, emptyList()).isEmpty())
+    }
+
+    @Test
     fun locationPolicyUsesFastVisibleProfileAndRejectsStaleOrInaccurateFixes() {
-        assertEquals(0L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
-        assertEquals(0f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
-        assertEquals(0L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
-        assertEquals(0f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
+        assertEquals(1_000L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
+        assertEquals(500L, NearbyLocationPolicy.INTERACTIVE.minIntervalMillis)
+        assertEquals(0.5f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
+        assertEquals(2_500L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
+        assertEquals(1_000L, NearbyLocationPolicy.EFFICIENT.minIntervalMillis)
+        assertEquals(1f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
 
         val now = 100_000L
         assertTrue(NearbyLocationPolicy.isUsable(now - 5_000L, 8f, now))
-        assertFalse(NearbyLocationPolicy.isUsable(now - 16_000L, 8f, now))
-        assertFalse(NearbyLocationPolicy.isUsable(now - 5_000L, 21f, now))
+        assertTrue(NearbyLocationPolicy.isUsable(now - 16_000L, 8f, now))
+        assertFalse(NearbyLocationPolicy.isUsable(now - 21_000L, 8f, now))
+        assertTrue(NearbyLocationPolicy.isUsable(now - 5_000L, 30f, now))
+        assertFalse(NearbyLocationPolicy.isUsable(now - 5_000L, 36f, now))
         assertFalse(NearbyLocationPolicy.isUsable(now - 5_000L, null, now))
 
         assertTrue(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 20_000L, 45f, now))

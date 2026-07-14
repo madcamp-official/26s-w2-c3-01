@@ -10,8 +10,8 @@
         </shape>
     </item>
     <item
-        android:width="19dp"
-        android:height="19dp"
+        android:width="16dp"
+        android:height="16dp"
         android:gravity="center">
         <bitmap
             android:gravity="fill"

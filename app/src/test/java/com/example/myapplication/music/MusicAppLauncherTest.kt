@@ -1,6 +1,8 @@
 package com.example.myapplication.music
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MusicAppLauncherTest {
@@ -39,5 +41,20 @@ class MusicAppLauncherTest {
         )
 
         assertEquals(listOf("example.device.music", "com.spotify.music"), result)
+    }
+
+    @Test
+    fun `automatic playback presence accepts music apps only`() {
+        assertTrue(isRecognizedMusicPlaybackPackage("com.spotify.music"))
+        assertTrue(isRecognizedMusicPlaybackPackage("com.google.android.apps.youtube.music"))
+        assertTrue(isRecognizedMusicPlaybackPackage("com.iloen.melon"))
+
+        assertFalse(isRecognizedMusicPlaybackPackage("com.google.android.youtube"))
+        assertFalse(isRecognizedMusicPlaybackPackage("com.google.android.videos"))
+        assertFalse(isRecognizedMusicPlaybackPackage("com.android.chrome"))
+        assertFalse(isRecognizedMusicPlaybackPackage("com.netflix.mediaclient"))
+        assertFalse(isRecognizedMusicPlaybackPackage("com.samsung.android.video"))
+        assertFalse(isRecognizedMusicPlaybackPackage("com.iloen.melonticket"))
+        assertFalse(isRecognizedMusicPlaybackPackage("com.sec.android.gallery3d"))
     }
 }

@@ -28,7 +28,8 @@ data class RemoteNearbyBubble(
 data class RemoteNearbySnapshot(
     val generatedAt: String,
     val radiusMeters: Int?,
-    val items: List<RemoteNearbyBubble>
+    val items: List<RemoteNearbyBubble>,
+    val removedNearbyHandles: List<String>? = null,
 )
 data class RemotePopularTrack(
     val title: String,

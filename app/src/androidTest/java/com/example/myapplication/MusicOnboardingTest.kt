@@ -1,9 +1,11 @@
 package com.example.myapplication
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.ui.GenreCatalogUiState
@@ -58,8 +60,12 @@ class MusicOnboardingTest {
         composeRule.onNodeWithText("K-Pop").performClick()
         composeRule.onNodeWithText("계속").performClick()
         composeRule.onNodeWithText("아이유").performClick()
+        composeRule.onNodeWithTag("music_selected_button").assertIsDisplayed()
+        composeRule.onAllNodesWithText("선택한 아티스트 1/3").assertCountEquals(0)
         composeRule.onNodeWithText("계속").performClick()
         composeRule.onNodeWithText("밤편지").performClick()
+        composeRule.onNodeWithTag("music_selected_button").assertIsDisplayed()
+        composeRule.onAllNodesWithText("선택한 대표곡 1/3").assertCountEquals(0)
         composeRule.onNodeWithText("계속").performClick()
         composeRule.onNodeWithText("시작하기").performClick()
 

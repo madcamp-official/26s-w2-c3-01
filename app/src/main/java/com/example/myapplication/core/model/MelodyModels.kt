@@ -410,6 +410,7 @@ data class MelodyUiState(
     val following: List<SocialConnection> = emptyList(),
     val followers: List<SocialConnection> = emptyList(),
     val socialConnectionsLoading: Boolean = false,
+    val socialConnectionsLoaded: Boolean = false,
     val selectedPublicProfile: PublicProfile? = null,
     val publicProfileLoading: Boolean = false,
     val publicProfileError: String? = null,

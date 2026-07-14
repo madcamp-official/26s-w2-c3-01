@@ -49,6 +49,7 @@ class SharingForegroundService : Service() {
     private val locationHandler = Handler(Looper.getMainLooper())
     private val locationSelector = AccuracyFirstLocationSelector()
     private var locationSelectionScheduled = false
+    private var hasPublishedLocation = false
 
     private val preferences by lazy(LazyThreadSafetyMode.NONE) {
         getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -76,6 +77,8 @@ class SharingForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            preferences.edit().putBoolean(KEY_SHARING_ACTIVE, false).apply()
+            publishSharingState(active = false)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -158,7 +161,7 @@ class SharingForegroundService : Service() {
                 .setMaxUpdateAgeMillis(0L)
                 .setMaxUpdateDelayMillis(0L)
                 .setGranularity(Granularity.GRANULARITY_FINE)
-                .setWaitForAccurateLocation(true)
+                .setWaitForAccurateLocation(false)
                 .build()
             try {
                 fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
@@ -211,7 +214,12 @@ class SharingForegroundService : Service() {
     private fun queueLocationIfUsable(location: Location, source: String) {
         val accuracy = location.accuracy.takeIf { location.hasAccuracy() && it.isFinite() }
         val now = System.currentTimeMillis()
-        if (!NearbyLocationPolicy.isUsable(location.time, accuracy, now)) return
+        val usable = if (hasPublishedLocation) {
+            NearbyLocationPolicy.isUsable(location.time, accuracy, now)
+        } else {
+            NearbyLocationPolicy.isUsableForInitialDiscovery(location.time, accuracy, now)
+        }
+        if (!usable) return
         locationSelector.offer(
             NearbyLocationSample(
                 latitude = location.latitude,
@@ -232,6 +240,7 @@ class SharingForegroundService : Service() {
     }
 
     private fun publishLocation(sample: NearbyLocationSample) {
+        hasPublishedLocation = true
         val now = System.currentTimeMillis()
         android.util.Log.d(
             "MelodyLocation",
@@ -316,6 +325,7 @@ class SharingForegroundService : Service() {
             .setContentTitle("Sync 주변 공유 중")
             .setContentText("현재 음악과 대략적인 위치가 주변에 공유돼요")
             .setContentIntent(contentPendingIntent)
+            .setDeleteIntent(stopPendingIntent)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setPriority(Notification.PRIORITY_LOW)
             .setVisibility(Notification.VISIBILITY_PRIVATE)
@@ -395,9 +405,14 @@ class SharingForegroundService : Service() {
             }
         }
 
-        /** Stops sharing from an explicit UI action. */
-        fun stop(context: Context): Boolean =
-            context.stopService(Intent(context, SharingForegroundService::class.java))
+        /** Stops sharing from an explicit UI action and prevents a later session restore. */
+        fun stop(context: Context): Boolean {
+            context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_SHARING_ACTIVE, false)
+                .apply()
+            return context.stopService(Intent(context, SharingForegroundService::class.java))
+        }
 
         fun setInteractive(context: Context, interactive: Boolean): Boolean {
             if (!isSharingActive(context)) return false

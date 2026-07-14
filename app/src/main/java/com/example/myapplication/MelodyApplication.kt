@@ -7,6 +7,7 @@ import com.example.myapplication.data.local.SecureTokenStore
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
 import com.example.myapplication.data.realtime.RealtimeSystemNotifier
 import com.example.myapplication.data.realtime.RealtimeInboxStore
+import com.example.myapplication.data.realtime.RealtimeEvent
 import com.example.myapplication.data.realtime.StompRealtimeClient
 import com.example.myapplication.data.remote.ApiClient
 import kotlinx.coroutines.CoroutineScope
@@ -53,7 +54,9 @@ class MelodyApplication : Application() {
         applicationScope.launch {
             realtimeClient.events.collect { event ->
                 realtimeInboxStore.record(event)
-                if (!isAppInForeground) notifier.present(event)
+                if (!isAppInForeground || event is RealtimeEvent.NearbyReactionCreated) {
+                    notifier.present(event)
+                }
             }
         }
         coordinator.restoreSession()

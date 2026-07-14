@@ -46,6 +46,8 @@ import java.util.UUID
 import retrofit2.HttpException
 import java.io.IOException
 
+private const val NEARBY_PREVIEW_TRACK_STABILITY_MILLIS = 1_500L
+
 sealed interface LoginUiState {
     data object Idle : LoginUiState
     data object Loading : LoginUiState
@@ -133,6 +135,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var musicSearchJob: Job? = null
     private var nowPlayingPreviewJob: Job? = null
     private var previewLookupJob: Job? = null
+    private var followedNearbyTransitionJob: Job? = null
     private var followedNearbyHandle: String? = null
     private var followedNearbyTrackKey: String? = null
 
@@ -189,18 +192,33 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     ?.currentTrack
                 val preview = musicPreviewPlayer.state.value
                 val previewActive = preview.isPlaying || preview.isPaused || preview.isLoading
-                if (!previewActive) return@collect
-                if (track == null) {
-                    stopMusicPreview()
+                if (!previewActive) {
+                    followedNearbyTransitionJob?.cancel()
+                    followedNearbyTransitionJob = null
                     return@collect
                 }
-                val trackKey = track.previewFollowKey()
-                if (trackKey != followedNearbyTrackKey) {
-                    playMusicPreview(
-                        title = track.title,
-                        artist = track.artist,
-                        sourceNearbyHandle = handle,
-                    )
+                val trackKey = track?.previewFollowKey()
+                if (trackKey == followedNearbyTrackKey) {
+                    followedNearbyTransitionJob?.cancel()
+                    followedNearbyTransitionJob = null
+                    return@collect
+                }
+                followedNearbyTransitionJob?.cancel()
+                followedNearbyTransitionJob = viewModelScope.launch {
+                    delay(NEARBY_PREVIEW_TRACK_STABILITY_MILLIS)
+                    val latestTrack = repository.state.value.nearbyListeners
+                        .firstOrNull { it.nearbyHandle == handle }
+                        ?.currentTrack
+                    followedNearbyTransitionJob = null
+                    if (latestTrack == null) {
+                        stopMusicPreview()
+                    } else if (latestTrack.previewFollowKey() != followedNearbyTrackKey) {
+                        playMusicPreview(
+                            title = latestTrack.title,
+                            artist = latestTrack.artist,
+                            sourceNearbyHandle = handle,
+                        )
+                    }
                 }
             }
         }
@@ -573,6 +591,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         sourceNearbyHandle: String? = null,
     ) {
         previewLookupJob?.cancel()
+        followedNearbyTransitionJob?.cancel()
+        followedNearbyTransitionJob = null
         if (sourceNearbyHandle == null) {
             clearFollowedNearbyPreview()
         } else {
@@ -611,6 +631,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleMusicPreviewPause() = musicPreviewPlayer.togglePauseResume()
 
     private fun clearFollowedNearbyPreview() {
+        followedNearbyTransitionJob?.cancel()
+        followedNearbyTransitionJob = null
         followedNearbyHandle = null
         followedNearbyTrackKey = null
     }

@@ -57,6 +57,18 @@ class NearbyProximityStabilizer(
         return stabilizedIncoming + retainedMissing
     }
 
+    /** Explicit server-side departures must bypass transient radio/location-loss retention. */
+    @Synchronized
+    fun remove(
+        current: List<NearbyListener>,
+        handles: Collection<String>,
+    ): List<NearbyListener> {
+        val removed = handles.toSet()
+        pendingByHandle.keys.removeAll(removed)
+        missingSinceByHandle.keys.removeAll(removed)
+        return current.filterNot { it.nearbyHandle in removed }
+    }
+
     @Synchronized
     fun clear() {
         pendingByHandle.clear()

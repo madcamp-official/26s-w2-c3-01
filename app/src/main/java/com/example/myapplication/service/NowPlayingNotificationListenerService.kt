@@ -16,6 +16,7 @@ import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
 import com.example.myapplication.music.MusicPlaybackAppPreference
+import com.example.myapplication.music.isRecognizedMusicPlaybackPackage
 
 /**
  * Reads current playback from active MediaSessions exposed to this enabled notification listener.
@@ -95,6 +96,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
     private fun refreshDetectedPlayback() {
         val observed = activeControllers
             .asSequence()
+            .filter { controller -> isRecognizedMusicPlaybackPackage(controller.packageName) }
             .mapNotNull { controller ->
                 val state = runCatching { controller.playbackState }.getOrNull() ?: return@mapNotNull null
                 controller.mediaText(state)?.let {
@@ -106,7 +108,12 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
                     )
                 }
             }
-            .maxByOrNull(ObservedPlayback::positionUpdatedAt)
+            .maxWithOrNull(
+                compareBy<ObservedPlayback>(
+                    { it.isPlaying },
+                    { it.positionUpdatedAt },
+                )
+            )
 
         when {
             observed != null -> publish(
@@ -124,7 +131,10 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         val newest = runCatching {
             activeNotifications
                 .asSequence()
-                .filter { it.isTransportNotification() }
+                .filter {
+                    it.isTransportNotification() &&
+                        isRecognizedMusicPlaybackPackage(it.packageName)
+                }
                 .mapNotNull { notification ->
                     notification.fallbackText()?.let { text ->
                         TimestampedFallback(notification.postTime, text, notification.packageName)

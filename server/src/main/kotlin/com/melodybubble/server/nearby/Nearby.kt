@@ -119,6 +119,7 @@ data class NearbySnapshot(
     val generatedAt: Instant = Instant.now(),
     val radiusMeters: Int,
     val items: List<NearbyBubble>,
+    val removedNearbyHandles: List<String> = emptyList(),
 )
 data class LocationUpdate(
     val requestId: String,
@@ -534,6 +535,12 @@ class NearbyService(
     fun stop(userId: UUID, clientSessionId: String) {
         val previousViewers = nearbyViewerIds(userId)
         val normalizedSessionId = clientSessionId.take(128)
+        val removedHandles = jdbc.queryForList(
+            "select nearby_handle from presence_sessions where user_id=? and client_session_id=?",
+            String::class.java,
+            userId,
+            normalizedSessionId,
+        )
         jdbc.update(
             "delete from presence_sessions where user_id=? and client_session_id=?",
             userId,
@@ -557,16 +564,22 @@ class NearbyService(
             userId,
         )
         locationLounges.reconcileAfterLocationChange()
-        publishNearbySnapshotsAfterCommit(previousViewers)
+        publishNearbySnapshotsAfterCommit(previousViewers, removedHandles.toSet())
     }
 
-    private fun publishNearbySnapshotsAfterCommit(viewerIds: Set<UUID>) {
+    private fun publishNearbySnapshotsAfterCommit(
+        viewerIds: Set<UUID>,
+        removedNearbyHandles: Set<String> = emptySet(),
+    ) {
         viewerIds.forEach { viewerId ->
+            val nextSnapshot = snapshot(viewerId, enforceRateLimit = false).copy(
+                removedNearbyHandles = removedNearbyHandles.sorted(),
+            )
             realtime.toUserAfterCommit(
                 viewerId,
                 RealtimeQueues.NEARBY,
                 RealtimeEventTypes.NEARBY_SNAPSHOT,
-                snapshot(viewerId, enforceRateLimit = false),
+                nextSnapshot,
             )
         }
     }

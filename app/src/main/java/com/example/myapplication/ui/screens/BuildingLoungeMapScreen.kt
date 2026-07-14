@@ -122,7 +122,7 @@ import kotlin.math.sqrt
 import java.util.Locale
 
 private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap building footprint")
-private const val MAP_LOCATION_MAX_AGE_MILLIS = 30_000L
+private const val MAP_LOCATION_MAX_AGE_MILLIS = 2 * 60_000L
 private const val MAP_PRECISE_LOCATION_MAX_ACCURACY_METERS = 50f
 private const val MAP_APPROXIMATE_LOCATION_MAX_ACCURACY_METERS = 5_000f
 
@@ -157,6 +157,7 @@ fun BuildingLoungeMapScreen(
     var hasLocationPermission by remember { mutableStateOf(context.hasLocationPermission()) }
     var recenterRequestId by remember { mutableStateOf(0L) }
     var recenterTarget by remember { mutableStateOf<LatLng?>(null) }
+    val latestHasKnownLocation by rememberUpdatedState(state.userLocation != null)
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -192,7 +193,7 @@ fun BuildingLoungeMapScreen(
                 onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
                 recenterTarget = LatLng(location.latitude, location.longitude)
                 recenterRequestId += 1L
-            } ?: onLocationUnavailable()
+            } ?: run { if (!latestHasKnownLocation) onLocationUnavailable() }
         }
     }
 
@@ -206,7 +207,7 @@ fun BuildingLoungeMapScreen(
                 } else {
                     onHeartbeat(location.latitude, location.longitude, location.accuracyOrNull())
                 }
-            } ?: onLocationUnavailable()
+            } ?: run { if (!latestHasKnownLocation) onLocationUnavailable() }
         }
     }
 
@@ -243,7 +244,7 @@ fun BuildingLoungeMapScreen(
                                     onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
                                     recenterTarget = LatLng(location.latitude, location.longitude)
                                     recenterRequestId += 1L
-                                } ?: onLocationUnavailable()
+                                } ?: run { if (!latestHasKnownLocation) onLocationUnavailable() }
                             }
                         } else {
                             permissionLauncher.launch(
