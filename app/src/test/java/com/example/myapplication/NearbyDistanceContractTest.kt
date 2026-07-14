@@ -49,16 +49,20 @@ class NearbyDistanceContractTest {
 
     @Test
     fun locationPolicyUsesFastVisibleProfileAndRejectsStaleOrInaccurateFixes() {
-        assertEquals(5_000L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
-        assertEquals(5f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
-        assertEquals(30_000L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
-        assertEquals(10f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
+        assertEquals(1_000L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
+        assertEquals(0f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
+        assertEquals(2_000L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
+        assertEquals(0f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
 
         val now = 100_000L
         assertTrue(NearbyLocationPolicy.isUsable(now - 5_000L, 8f, now))
         assertFalse(NearbyLocationPolicy.isUsable(now - 16_000L, 8f, now))
         assertFalse(NearbyLocationPolicy.isUsable(now - 5_000L, 21f, now))
         assertFalse(NearbyLocationPolicy.isUsable(now - 5_000L, null, now))
+
+        assertTrue(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 20_000L, 45f, now))
+        assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 31_000L, 45f, now))
+        assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 5_000L, 51f, now))
     }
 
     private fun listener(proximity: Proximity, position: DisplayPosition) = NearbyListener(
