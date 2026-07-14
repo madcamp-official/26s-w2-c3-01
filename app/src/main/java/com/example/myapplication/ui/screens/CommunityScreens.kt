@@ -400,10 +400,27 @@ private fun MusicCatalogSearch(
     placeholder: String,
     onSearch: (String) -> Unit,
     onClear: () -> Unit = {},
+    selectedCount: Int = 0,
+    onOpenSelected: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     Column(Modifier.fillMaxWidth()) {
-        Text("음악 검색", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("음악 검색", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.weight(1f))
+            if (selectedCount > 0 && onOpenSelected != null) {
+                OutlinedButton(
+                    onClick = onOpenSelected,
+                    modifier = Modifier.height(40.dp).testTag("music_selected_button"),
+                    shape = RoundedCornerShape(14.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 11.dp),
+                ) {
+                    Icon(Icons.Outlined.CheckCircle, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text("선택 $selectedCount", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
         Spacer(Modifier.height(7.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
@@ -532,10 +549,11 @@ private fun MusicCatalogResultRow(
 @Composable
 private fun SelectedArtistSummary(
     artists: List<ProfileArtist>,
+    showHeading: Boolean = true,
     onRemove: (ProfileArtist) -> Unit,
 ) {
     if (artists.isEmpty()) return
-    Text("선택한 아티스트 ${artists.size}/3", fontWeight = FontWeight.Bold)
+    if (showHeading) Text("선택한 아티스트 ${artists.size}/3", fontWeight = FontWeight.Bold)
     artists.forEach { artist ->
         Surface(
             modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
@@ -557,10 +575,11 @@ private fun SelectedArtistSummary(
 @Composable
 private fun SelectedTrackSummary(
     tracks: List<ProfileTrack>,
+    showHeading: Boolean = true,
     onRemove: (ProfileTrack) -> Unit,
 ) {
     if (tracks.isEmpty()) return
-    Text("선택한 대표곡 ${tracks.size}/3", fontWeight = FontWeight.Bold)
+    if (showHeading) Text("선택한 대표곡 ${tracks.size}/3", fontWeight = FontWeight.Bold)
     tracks.forEach { track ->
         Surface(
             modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
@@ -580,6 +599,48 @@ private fun SelectedTrackSummary(
             }
         }
     }
+}
+
+@Composable
+private fun SelectedCurationDialog(
+    section: String,
+    tracks: List<ProfileTrack>,
+    artists: List<ProfileArtist>,
+    onRemoveTrack: (ProfileTrack) -> Unit,
+    onRemoveArtist: (ProfileArtist) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val isTrackSection = section == "TRACKS"
+    val count = if (isTrackSection) tracks.size else artists.size
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag("selected_curation_dialog"),
+        title = {
+            Column {
+                Text(if (isTrackSection) "선택한 대표곡" else "선택한 아티스트")
+                Text(
+                    "$count/3 선택됨",
+                    color = MutedMint,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Normal,
+                )
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                if (count == 0) {
+                    Text("아직 선택한 항목이 없어요.", color = MutedMint)
+                } else if (isTrackSection) {
+                    SelectedTrackSummary(tracks, showHeading = false, onRemove = onRemoveTrack)
+                } else {
+                    SelectedArtistSummary(artists, showHeading = false, onRemove = onRemoveArtist)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("검색으로 돌아가기", fontWeight = FontWeight.Bold) }
+        },
+    )
 }
 
 private fun MusicSearchResult.toProfileTrack(rank: Int) = ProfileTrack(
