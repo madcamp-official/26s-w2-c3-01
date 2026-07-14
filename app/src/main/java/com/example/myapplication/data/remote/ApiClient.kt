@@ -136,9 +136,9 @@ private object SessionRuntime {
         val tokenStore = store ?: return@synchronized null
         val current = tokenStore.load() ?: return@synchronized null
         if (rejectedAccessToken != null && current.accessToken != rejectedAccessToken) return@synchronized current.accessToken
-        // The currently deployed compatibility server issues access-only sessions.
-        // A 401 from a newer optional endpoint must not sign that user out immediately.
-        val refreshToken = current.refreshToken ?: return@synchronized null
+        // Production issues refreshable sessions. An old access-only session cannot recover from
+        // a 401, so surface reauthentication instead of leaving nearby sharing in a fake retry loop.
+        val refreshToken = current.refreshToken ?: return@synchronized expire(tokenStore)
         val body = Gson().toJson(RefreshRequest(refreshToken)).toRequestBody("application/json".toMediaType())
         val request = okhttp3.Request.Builder()
             .url(environment.apiBaseUrl.trimEnd('/') + "/api/v1/auth/refresh")
