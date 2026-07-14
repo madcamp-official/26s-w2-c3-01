@@ -32,6 +32,18 @@ class NearbyDistanceContractTest {
         assertTrue(fifteen.radius() in 0.30f..0.41f)
     }
 
+    @Test
+    fun `distance confidence is high only when uncertainty stays inside one band`() {
+        val accuracy = combinedHorizontalAccuracyMeters(1.0, 1.0)
+
+        assertEquals(DistanceConfidence.HIGH, distanceConfidence(2.5, accuracy))
+        assertEquals(DistanceConfidence.HIGH, distanceConfidence(7.5, accuracy))
+        assertEquals(DistanceConfidence.HIGH, distanceConfidence(12.5, accuracy))
+        assertEquals(DistanceConfidence.LOW, distanceConfidence(5.0, accuracy))
+        assertEquals(DistanceConfidence.LOW, distanceConfidence(10.0, accuracy))
+        assertEquals(DistanceConfidence.UNKNOWN, distanceConfidence(7.5, null))
+    }
+
     private fun AbstractPosition.radius(): Float {
         val dx = x - 0.5f
         val dy = y - 0.5f

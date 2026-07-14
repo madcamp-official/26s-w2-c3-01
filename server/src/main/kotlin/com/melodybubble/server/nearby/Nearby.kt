@@ -25,6 +25,7 @@ import java.time.Instant
 import java.util.UUID
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 internal const val NEARBY_RADIUS_METERS = 15
@@ -35,12 +36,43 @@ internal enum class ProximityBand {
     WITHIN_15M,
 }
 
+internal enum class DistanceConfidence {
+    HIGH,
+    LOW,
+    UNKNOWN,
+}
+
 internal fun proximityBand(distanceMeters: Double): ProximityBand? = when {
     distanceMeters < 0.0 || !distanceMeters.isFinite() -> null
     distanceMeters <= 5.0 -> ProximityBand.WITHIN_5M
     distanceMeters <= 10.0 -> ProximityBand.WITHIN_10M
     distanceMeters <= NEARBY_RADIUS_METERS.toDouble() -> ProximityBand.WITHIN_15M
     else -> null
+}
+
+internal fun combinedHorizontalAccuracyMeters(
+    viewerAccuracyMeters: Double?,
+    targetAccuracyMeters: Double?,
+): Double? {
+    if (viewerAccuracyMeters == null || targetAccuracyMeters == null) return null
+    if (!viewerAccuracyMeters.isFinite() || !targetAccuracyMeters.isFinite()) return null
+    if (viewerAccuracyMeters < 0.0 || targetAccuracyMeters < 0.0) return null
+    return hypot(viewerAccuracyMeters, targetAccuracyMeters)
+}
+
+internal fun distanceConfidence(
+    distanceMeters: Double,
+    combinedAccuracyMeters: Double?,
+): DistanceConfidence {
+    val accuracy = combinedAccuracyMeters ?: return DistanceConfidence.UNKNOWN
+    val band = proximityBand(distanceMeters) ?: return DistanceConfidence.LOW
+    val lowerBand = proximityBand((distanceMeters - accuracy).coerceAtLeast(0.0))
+    val upperBand = proximityBand(distanceMeters + accuracy)
+    return if (lowerBand == band && upperBand == band) {
+        DistanceConfidence.HIGH
+    } else {
+        DistanceConfidence.LOW
+    }
 }
 
 /**
