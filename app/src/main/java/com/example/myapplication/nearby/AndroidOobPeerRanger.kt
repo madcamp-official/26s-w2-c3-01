@@ -26,7 +26,7 @@ class AndroidOobPeerRanger(context: Context) : PlatformConnectedRanger {
         val session: RangingSession,
     )
 
-    private val manager = requireNotNull(context.getSystemService(RangingManager::class.java))
+    private val manager = context.getSystemService(RangingManager::class.java)
     private val executor = context.mainExecutor
     private val activeByEndpoint = mutableMapOf<String, Active>()
     private val _measurements = MutableStateFlow<Map<String, PeerProximityMeasurement>>(emptyMap())
@@ -56,7 +56,7 @@ class AndroidOobPeerRanger(context: Context) : PlatformConnectedRanger {
         } else {
             OobResponderRangingConfig.Builder(handle).build()
         }
-        val session = manager.createRangingSession(executor, callback(endpointId, remoteBeaconId)) ?: return
+        val session = manager?.createRangingSession(executor, callback(endpointId, remoteBeaconId)) ?: return
         activeByEndpoint[endpointId] = Active(remoteBeaconId, transport, session)
         val role = if (initiator) {
             RangingPreference.DEVICE_ROLE_INITIATOR
