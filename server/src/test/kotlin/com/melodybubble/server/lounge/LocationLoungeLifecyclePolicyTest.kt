@@ -7,6 +7,22 @@ import java.util.UUID
 
 class LocationLoungeLifecyclePolicyTest {
     @Test
+    fun `outside presence is retained for one continuous minute`() {
+        val outsideSince = Instant.parse("2026-07-14T00:00:00Z")
+
+        assertThat(LocationLoungePolicy.shouldRetainPresence(false, null, outsideSince)).isTrue()
+        assertThat(
+            LocationLoungePolicy.shouldRetainPresence(false, outsideSince, outsideSince.plusSeconds(59)),
+        ).isTrue()
+        assertThat(
+            LocationLoungePolicy.shouldRetainPresence(false, outsideSince, outsideSince.plusSeconds(60)),
+        ).isFalse()
+        assertThat(
+            LocationLoungePolicy.shouldRetainPresence(true, outsideSince, outsideSince.plusSeconds(600)),
+        ).isTrue()
+    }
+
+    @Test
     fun `creation is allowed outside every lounge`() {
         assertThat(LocationLoungePolicy.canCreateLounge(0)).isTrue()
     }

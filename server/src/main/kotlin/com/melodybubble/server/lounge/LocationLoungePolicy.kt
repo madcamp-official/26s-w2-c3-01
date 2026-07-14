@@ -24,6 +24,7 @@ object LocationLoungePolicy {
     const val INITIAL_RADIUS_METERS = 20
     const val MAX_RADIUS_METERS = 20
     const val INITIAL_RADIUS_GRACE_SECONDS = 60L
+    const val EXIT_GRACE_SECONDS = 60L
     const val OVERLAP_THRESHOLD = 0.70
     const val MAX_CHAT_ROOMS = 5
 
@@ -31,6 +32,12 @@ object LocationLoungePolicy {
 
     fun isIncluded(distanceMeters: Double, radiusMeters: Int, locationFresh: Boolean): Boolean =
         locationFresh && distanceMeters <= radiusMeters + 1e-7
+
+    fun shouldRetainPresence(
+        currentlyInside: Boolean,
+        outsideSince: Instant?,
+        now: Instant,
+    ): Boolean = currentlyInside || outsideSince == null || outsideSince.plusSeconds(EXIT_GRACE_SECONDS).isAfter(now)
 
     fun canCreateChatRoom(activeRoomCount: Int, loungeStatus: LocationLoungeStatus): Boolean =
         loungeStatus == LocationLoungeStatus.ACTIVE && activeRoomCount < MAX_CHAT_ROOMS

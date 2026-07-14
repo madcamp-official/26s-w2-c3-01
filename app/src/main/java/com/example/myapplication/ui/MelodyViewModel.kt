@@ -106,6 +106,25 @@ data class BuildingLoungeUiState(
     val message: String? = null
 )
 
+internal class LoungeExitGraceTracker(
+    private val graceMillis: Long = 60_000L,
+) {
+    private var outsideSinceMillis: Long? = null
+
+    fun shouldExit(inside: Boolean, nowMillis: Long): Boolean {
+        if (inside) {
+            reset()
+            return false
+        }
+        val outsideSince = outsideSinceMillis ?: nowMillis.also { outsideSinceMillis = it }
+        return nowMillis - outsideSince >= graceMillis
+    }
+
+    fun reset() {
+        outsideSinceMillis = null
+    }
+}
+
 class MelodyViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: MelodyRepository = DemoMelodyRepository(application)
     private val authRepository by lazy { AuthRepository() }
@@ -125,6 +144,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var loungeSnapshotJob: Job? = null
     private var latestSubLoungeSnapshotAt: String? = null
     private var pendingAutoPlaySubLoungeId: String? = null
+    private val loungeExitGraceTracker = LoungeExitGraceTracker()
     private val tokenStore = SecureTokenStore(application)
     private val sessionProfileApi by lazy { ApiClient.createProfileApi() }
     private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
@@ -692,6 +712,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 location.latitude,
                 location.longitude,
             ).onSuccess { entry ->
+                loungeExitGraceTracker.reset()
                 _buildingLoungeState.value = _buildingLoungeState.value.copy(
                     enteredLoungeId = loungeId,
                     subLounges = entry.rooms,
@@ -715,14 +736,23 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             locationLoungeRepository.isInside(token, loungeId, latitude, longitude)
                 .onSuccess { inside ->
-                    if (!inside) clearSelectedSubLounge()
+                    if (_buildingLoungeState.value.enteredLoungeId != loungeId) return@onSuccess
+                    val shouldExit = loungeExitGraceTracker.shouldExit(
+                        inside = inside,
+                        nowMillis = android.os.SystemClock.elapsedRealtime(),
+                    )
+                    if (shouldExit) clearSelectedSubLounge()
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         userLocation = UserMapLocation(latitude, longitude, accuracyMeters),
-                        enteredLoungeId = if (inside) loungeId else null,
-                        subLounges = if (inside) _buildingLoungeState.value.subLounges else emptyList(),
-                        selectedSubLoungeId = if (inside) _buildingLoungeState.value.selectedSubLoungeId else null,
-                        subLoungeSnapshot = if (inside) _buildingLoungeState.value.subLoungeSnapshot else null,
-                        message = if (inside) null else "라운지 반경을 벗어나 자동 퇴장했어요."
+                        enteredLoungeId = if (shouldExit) null else loungeId,
+                        subLounges = if (shouldExit) emptyList() else _buildingLoungeState.value.subLounges,
+                        selectedSubLoungeId = if (shouldExit) null else _buildingLoungeState.value.selectedSubLoungeId,
+                        subLoungeSnapshot = if (shouldExit) null else _buildingLoungeState.value.subLoungeSnapshot,
+                        message = when {
+                            shouldExit -> "라운지 반경 밖에 1분 이상 머물러 자동 퇴장했어요."
+                            inside -> null
+                            else -> "라운지 반경 밖이에요. 1분 안에 돌아오면 입장이 유지돼요."
+                        },
                     )
                 }
                 .onFailure {
@@ -737,6 +767,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun leaveBuildingLounge() {
         if (_buildingLoungeState.value.enteredLoungeId == null) return
         viewModelScope.launch {
+            loungeExitGraceTracker.reset()
             clearSelectedSubLounge()
             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                 enteredLoungeId = null,
@@ -892,7 +923,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val subLoungeId = _buildingLoungeState.value.selectedSubLoungeId ?: return
         viewModelScope.launch {
             _buildingLoungeState.value = _buildingLoungeState.value.copy(cardSubmitting = true, message = null)
-            buildingLoungeRepository.addCard(
+            locationLoungeRepository.addCard(
                 token,
                 subLoungeId,
                 CreateLoungeCardRequestDto(
@@ -926,7 +957,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteLoungeCard(cardId: String) {
         val token = accessToken ?: return
         viewModelScope.launch {
-            buildingLoungeRepository.deleteCard(token, cardId)
+            locationLoungeRepository.deleteCard(token, cardId)
                 .onSuccess { refreshSelectedSubLounge(silent = true) }
                 .onFailure {
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "추천 카드를 삭제하지 못했어요.")
@@ -937,7 +968,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun reactToLoungeCard(cardId: String, reactionType: String = "LIKE") {
         val token = accessToken ?: return
         viewModelScope.launch {
-            buildingLoungeRepository.reactToCard(token, cardId, reactionType)
+            locationLoungeRepository.reactToCard(token, cardId, reactionType)
                 .onSuccess { refreshSelectedSubLounge(silent = true) }
                 .onFailure {
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "리액션을 반영하지 못했어요.")

@@ -84,6 +84,32 @@ interface LocationLoungeApi {
         @Header("Authorization") authorization: String,
         @Path("roomId") roomId: String,
     )
+
+    @GET("api/v1/location-lounges/chat-rooms/{roomId}/cards")
+    suspend fun cards(
+        @Header("Authorization") authorization: String,
+        @Path("roomId") roomId: String,
+    ): List<LoungeRecommendationCardDto>
+
+    @POST("api/v1/location-lounges/chat-rooms/{roomId}/cards")
+    suspend fun addCard(
+        @Header("Authorization") authorization: String,
+        @Path("roomId") roomId: String,
+        @Body request: CreateLoungeCardRequestDto,
+    ): LoungeRecommendationCardDto
+
+    @POST("api/v1/location-lounges/cards/{cardId}/reactions")
+    suspend fun reactToCard(
+        @Header("Authorization") authorization: String,
+        @Path("cardId") cardId: String,
+        @Body request: LoungeReactionRequestDto,
+    ): LoungeRecommendationCardDto
+
+    @DELETE("api/v1/location-lounges/cards/{cardId}")
+    suspend fun deleteCard(
+        @Header("Authorization") authorization: String,
+        @Path("cardId") cardId: String,
+    )
 }
 
 class LocationLoungeRepository(
@@ -140,10 +166,30 @@ class LocationLoungeRepository(
 
     suspend fun roomSnapshot(token: String, loungeId: String, roomId: String): Result<SubLoungeSnapshotDto> =
         runCatching {
-            api.chatRooms("Bearer $token", loungeId)
+            val authorization = "Bearer $token"
+            val room = api.chatRooms(authorization, loungeId)
                 .first { it.chatRoomId == roomId }
-                .asSubLoungeSnapshot()
+            room.asSubLoungeSnapshot(api.cards(authorization, roomId))
         }
+
+    suspend fun addCard(
+        token: String,
+        roomId: String,
+        request: CreateLoungeCardRequestDto,
+    ): Result<LoungeRecommendationCardDto> =
+        runCatching { api.addCard("Bearer $token", roomId, request) }
+
+    suspend fun reactToCard(
+        token: String,
+        cardId: String,
+        reactionType: String,
+    ): Result<LoungeRecommendationCardDto> =
+        runCatching {
+            api.reactToCard("Bearer $token", cardId, LoungeReactionRequestDto(reactionType))
+        }
+
+    suspend fun deleteCard(token: String, cardId: String): Result<Unit> =
+        runCatching { api.deleteCard("Bearer $token", cardId) }
 
     suspend fun leaveChatRoom(token: String, roomId: String): Result<Unit> =
         runCatching { api.leaveChatRoom("Bearer $token", roomId) }
@@ -176,7 +222,9 @@ class LocationLoungeRepository(
         createdAt = createdAt,
     )
 
-    private fun LocationLoungeChatRoomDto.asSubLoungeSnapshot() = SubLoungeSnapshotDto(
+    private fun LocationLoungeChatRoomDto.asSubLoungeSnapshot(
+        recommendationCards: List<LoungeRecommendationCardDto> = emptyList(),
+    ) = SubLoungeSnapshotDto(
         id = chatRoomId,
         buildingLoungeId = loungeId,
         title = title,
@@ -185,7 +233,7 @@ class LocationLoungeRepository(
         joined = joined,
         canDelete = false,
         listeningStatuses = emptyList(),
-        cards = emptyList(),
+        cards = recommendationCards,
         poll = LoungePollStateDto(emptyList(), null),
         generatedAt = updatedAt,
         members = emptyList(),

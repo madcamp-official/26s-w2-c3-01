@@ -44,6 +44,12 @@ class NearbyTransportHandle(
     private fun dispatch(block: (TransportHandle.ReceiveCallback) -> Unit) {
         val currentCallback = callback ?: return
         val currentExecutor = executor ?: return
-        currentExecutor.execute { block(currentCallback) }
+        runCatching {
+            currentExecutor.execute {
+                // Android 16 ranging may reject a framework callback after the app-side
+                // transport has already disconnected. That framework race must not crash app.
+                runCatching { block(currentCallback) }
+            }
+        }
     }
 }
