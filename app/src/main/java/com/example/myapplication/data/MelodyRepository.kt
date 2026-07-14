@@ -1656,17 +1656,82 @@ class DemoMelodyRepository(
         )
     }
 
-    private suspend fun syncPresence(fix: LocationFix? = null): Boolean {
+    private fun startHybridDiscovery(token: String) {
+        if (token.isBlank() || hybridDiscoveryJob?.isActive == true) return
+        hybridDiscoveryJob = scope.launch {
+            while (isActive && isCurrentSession(token) &&
+                _state.value.sharingState in setOf(SharingState.STARTING, SharingState.ACTIVE)
+            ) {
+                val beacon = runCatching {
+                    nearbyApi.issueBeacon("Bearer $token", NearbyBeaconRequest(clientSessionId))
+                }.getOrNull()
+                if (beacon != null) {
+                    if (!passiveDiscoveryStarted) {
+                        passiveNearbyDiscovery.start(beacon.beaconId)
+                        passiveDiscoveryStarted = true
+                    } else {
+                        passiveNearbyDiscovery.rotate(beacon.beaconId)
+                    }
+                }
+                delay(30_000L)
+            }
+        }
+    }
+
+    private fun resolveDirectBeacons(beaconIds: Set<String>) {
+        val token = accessToken ?: return
+        if (beaconIds.isEmpty()) {
+            directNearbyByHandle = emptyMap()
+            refreshNearbySnapshot()
+            return
+        }
+        scope.launch {
+            runCatching {
+                nearbyApi.resolveBeacons(
+                    "Bearer $token",
+                    ResolveNearbyBeaconsRequest(beaconIds.toList()),
+                )
+            }.onSuccess { resolved ->
+                if (!isCurrentSession(token)) return@onSuccess
+                directNearbyByHandle = resolved.associate { item ->
+                    item.user.nearbyHandle to item.user.toDomain().copy(isDirectlyDetected = true)
+                }
+                refreshNearbySnapshot()
+            }
+        }
+    }
+
+    private fun mergeDirectNearby(
+        locationUsers: List<com.example.myapplication.core.model.NearbyListener>,
+    ): List<com.example.myapplication.core.model.NearbyListener> {
+        val locationHandles = locationUsers.mapTo(mutableSetOf()) { it.nearbyHandle }
+        return locationUsers + directNearbyByHandle.values.filterNot { it.nearbyHandle in locationHandles }
+    }
+
+    private suspend fun syncPresence(
+        fix: LocationFix? = null,
+        requirePrecise: Boolean = false,
+    ): Boolean = presenceSyncMutex.withLock { syncPresenceLocked(fix, requirePrecise) }
+
+    private suspend fun syncLatestLocationPresence(): Boolean =
+        presenceSyncMutex.withLock {
+            val fix = latestLocationFix ?: return@withLock false
+            syncPresenceLocked(fix, requirePrecise = true)
+        }
+
+    private suspend fun syncPresenceLocked(
+        fix: LocationFix? = null,
+        requirePrecise: Boolean = false,
+    ): Boolean {
         val token = accessToken ?: return false
         val nearbyVersionAtRequest = nearbyRealtimeVersion.get()
-        val location = fix ?: currentLocation()?.let {
+        val location = fix ?: currentLocation(allowInitialCoarseLocation = !requirePrecise)?.let {
             LocationFix(it.latitude, it.longitude, it.accuracy.takeIf(Float::isFinite))
         } ?: run {
             _state.update {
                 it.copy(
-                    connectionState = ConnectionState.RECONNECTING,
                     nearbyLoadState = NearbyLoadState.LOADING,
-                    nearbyErrorMessage = "현재 위치를 확인하고 있어요. 잠시만 기다려 주세요.",
+                    nearbyErrorMessage = "Nearby로 주변을 찾는 중이에요. 위치가 확인되면 거리 정보도 갱신돼요.",
                 )
             }
             return false
@@ -1685,7 +1750,7 @@ class DemoMelodyRepository(
             if (!isCurrentSession(token)) return@runCatching false
             val stabilizedListeners = nearbyProximityStabilizer.stabilize(
                 _state.value.nearbyListeners,
-                snapshot.items.map { it.toDomain() },
+                mergeDirectNearby(snapshot.items.map { it.toDomain() }),
             )
             _state.update { current ->
                 val listeners = if (nearbyRealtimeVersion.get() == nearbyVersionAtRequest) {
@@ -1712,6 +1777,10 @@ class DemoMelodyRepository(
                     dataSourceLabel = "SERVER LIVE",
                 )
             }
+            Log.d(
+                "MelodyLocation",
+                "presence uploaded accuracy=${location.accuracyMeters?.toInt()}m users=${snapshot.items.size}",
+            )
             refreshPopularTracks(token)
             true
         }.getOrElse { error ->
@@ -2080,7 +2149,7 @@ class DemoMelodyRepository(
         val snapshot = event.envelope.payload
         val listeners = nearbyProximityStabilizer.stabilize(
             _state.value.nearbyListeners,
-            snapshot.items.map { it.toDomain() },
+            mergeDirectNearby(snapshot.items.map { it.toDomain() }),
         )
         _state.update { current ->
             current.copy(
@@ -2250,7 +2319,7 @@ class DemoMelodyRepository(
                     if (!isCurrentSession(token)) return@onSuccess
                     val stabilizedListeners = nearbyProximityStabilizer.stabilize(
                         _state.value.nearbyListeners,
-                        snapshot.items.map { it.toDomain() },
+                        mergeDirectNearby(snapshot.items.map { it.toDomain() }),
                     )
                     _state.update { current ->
                         val listeners = if (nearbyRealtimeVersion.get() == versionAtRequest) {
