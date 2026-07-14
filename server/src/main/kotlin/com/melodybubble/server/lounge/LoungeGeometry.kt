@@ -21,7 +21,7 @@ internal object LoungeGeometry {
             val component = mutableListOf(remaining.removeAt(0))
             var index = 0
             while (index < component.size) {
-                val source = component[index++] 
+                val source = component[index++]
                 val connected = remaining.filter {
                     distanceMeters(source.latitude, source.longitude, it.latitude, it.longitude) <= BUBBLE_RADIUS_METERS
                 }
@@ -70,4 +70,3 @@ internal object LoungeGeometry {
         return earthRadius * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 }
-

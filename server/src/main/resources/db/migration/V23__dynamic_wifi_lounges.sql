@@ -20,4 +20,3 @@ UPDATE building_lounges lounge
 SET active = false
 FROM lounge_buildings building
 WHERE lounge.building_id = building.id AND building.category = 'WIFI';
-
