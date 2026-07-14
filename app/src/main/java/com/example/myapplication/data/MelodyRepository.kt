@@ -42,6 +42,7 @@ import com.example.myapplication.core.model.TasteFingerprint
 import com.example.myapplication.core.model.TasteMetric
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.abstractDisplayPosition
+import com.example.myapplication.core.model.randomDisplayPosition
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
 import com.example.myapplication.data.realtime.RealtimeConnectionState
 import com.example.myapplication.data.realtime.RealtimeEvent
@@ -204,7 +205,13 @@ internal fun preferDirectNearbyUsers(
                 proximity = existing.proximity,
                 displayPosition = existing.displayPosition,
             )
-        } else preferred.user
+        } else if (existing != null && preferred.user.proximity == existing.proximity) {
+            preferred.user.copy(displayPosition = existing.displayPosition)
+        } else {
+            preferred.user.copy(
+                displayPosition = randomDisplayPosition(preferred.user.proximity),
+            )
+        }
     }
 
 internal fun shouldApplyDirectResolveResult(
@@ -356,7 +363,6 @@ class DemoMelodyRepository(
     private val musicSearchRepository = MusicSearchRepository()
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationContext)
     @Volatile private var accessToken: String? = null
-    private var liveTick = 0
     private var locationReceiverRegistered = false
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -481,14 +487,6 @@ class DemoMelodyRepository(
                         detectedTrack = playback.track,
                         detectedTrackPlaying = playback.isPlaying,
                     )
-                }
-            }
-        }
-        scope.launch {
-            while (isActive) {
-                delay(3_500)
-                if (_state.value.sharingState == SharingState.ACTIVE && accessToken == null) {
-                    applyLiveTick()
                 }
             }
         }
@@ -3022,25 +3020,6 @@ class DemoMelodyRepository(
         }
         if (ownsRealtimeClient) realtimeClient.close()
         scope.coroutineContext[Job]?.cancel()
-    }
-
-    private fun applyLiveTick() {
-        liveTick += 1
-        _state.update { current ->
-            val movedListeners = current.nearbyListeners.mapIndexed { index, listener ->
-                val delta = if ((liveTick + index) % 2 == 0) 0.008f else -0.008f
-                listener.copy(
-                    displayPosition = listener.displayPosition.copy(
-                        x = (listener.displayPosition.x + delta).coerceIn(0.14f, 0.86f)
-                    ),
-                    isNew = false
-                )
-            }
-            current.copy(
-                snapshotSequence = current.snapshotSequence + 1,
-                nearbyListeners = movedListeners,
-            )
-        }
     }
 
     private fun setActiveOwner(ownerUserId: String?) {

@@ -4,6 +4,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 const val MAX_NEARBY_RADIUS_METERS = 20
 
@@ -17,6 +18,28 @@ fun abstractDisplayPosition(handle: String, proximity: Proximity): DisplayPositi
         Proximity.WITHIN_10M -> 0.05f + jitter * 0.15f
         Proximity.WITHIN_20M -> 0.27f + jitter * 0.14f
     }
+    return DisplayPosition(
+        x = (0.5 + cos(angle) * radius).toFloat(),
+        y = (0.5 + sin(angle) * radius).toFloat(),
+    )
+}
+
+/** Picks a privacy-preserving point inside a band; callers keep it until the band changes. */
+fun randomDisplayPosition(
+    proximity: Proximity,
+    random: Random = Random.Default,
+): DisplayPosition {
+    val angle = random.nextDouble(0.0, 2.0 * PI)
+    val (innerRadius, outerRadius) = when (proximity) {
+        Proximity.WITHIN_10M -> 0.05 to 0.20
+        Proximity.WITHIN_20M -> 0.27 to 0.41
+    }
+    val radius = sqrt(
+        random.nextDouble(
+            innerRadius * innerRadius,
+            outerRadius * outerRadius,
+        ),
+    )
     return DisplayPosition(
         x = (0.5 + cos(angle) * radius).toFloat(),
         y = (0.5 + sin(angle) * radius).toFloat(),

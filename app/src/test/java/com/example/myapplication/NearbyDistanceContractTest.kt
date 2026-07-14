@@ -50,7 +50,12 @@ class NearbyDistanceContractTest {
 
     @Test
     fun existingBubbleNeedsTwoMatchingSnapshotsBeforeChangingRings() {
-        val stabilizer = NearbyProximityStabilizer()
+        val stabilizer = NearbyProximityStabilizer(
+            positionForBand = { _, proximity ->
+                if (proximity == Proximity.WITHIN_10M) DisplayPosition(0.55f, 0.5f)
+                else DisplayPosition(0.80f, 0.5f)
+            },
+        )
         val current = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f)))
         val incoming = listOf(listener(Proximity.WITHIN_20M, DisplayPosition(0.80f, 0.5f)))
 
@@ -61,6 +66,24 @@ class NearbyDistanceContractTest {
         assertEquals(current.single().displayPosition, first.single().displayPosition)
         assertEquals(Proximity.WITHIN_20M, second.single().proximity)
         assertEquals(incoming.single().displayPosition, second.single().displayPosition)
+    }
+
+    @Test
+    fun sameBandKeepsItsPinnedPointEvenWhenIncomingCoordinatesChange() {
+        val stabilizer = NearbyProximityStabilizer(
+            confirmationsRequired = 1,
+            positionForBand = { _, _ -> DisplayPosition(0.60f, 0.5f) },
+        )
+        val initial = stabilizer.stabilize(
+            current = emptyList(),
+            incoming = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.51f, 0.5f))),
+        )
+        val refreshed = stabilizer.stabilize(
+            current = initial,
+            incoming = listOf(listener(Proximity.WITHIN_10M, DisplayPosition(0.69f, 0.5f))),
+        )
+
+        assertEquals(DisplayPosition(0.60f, 0.5f), refreshed.single().displayPosition)
     }
 
     @Test
@@ -130,12 +153,12 @@ class NearbyDistanceContractTest {
 
     @Test
     fun locationPolicyUsesFastVisibleProfileAndRejectsStaleOrInaccurateFixes() {
-        assertEquals(1_000L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
-        assertEquals(500L, NearbyLocationPolicy.INTERACTIVE.minIntervalMillis)
-        assertEquals(0.5f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
-        assertEquals(2_500L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
-        assertEquals(1_000L, NearbyLocationPolicy.EFFICIENT.minIntervalMillis)
-        assertEquals(1f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
+        assertEquals(5_000L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
+        assertEquals(3_000L, NearbyLocationPolicy.INTERACTIVE.minIntervalMillis)
+        assertEquals(3f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
+        assertEquals(30_000L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
+        assertEquals(15_000L, NearbyLocationPolicy.EFFICIENT.minIntervalMillis)
+        assertEquals(10f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
 
         val now = 100_000L
         assertTrue(NearbyLocationPolicy.isUsable(now - 5_000L, 8f, now))
@@ -277,6 +300,22 @@ class NearbyDistanceContractTest {
         )
 
         assertEquals(Proximity.WITHIN_10M, result.getValue(base.nearbyHandle).proximity)
+    }
+
+    @Test
+    fun directMeasurementKeepsThePinnedPointWhileItStaysInTheSameBand() {
+        val current = listener(Proximity.WITHIN_10M, DisplayPosition(0.55f, 0.5f))
+        val refreshed = current.copy(
+            displayPosition = DisplayPosition(0.70f, 0.5f),
+            isDirectlyDetected = true,
+        )
+
+        val result = preferDirectNearbyUsers(
+            candidates = listOf(DirectNearbyCandidate("beacon", refreshed, null)),
+            currentByHandle = mapOf(current.nearbyHandle to current),
+        ).getValue(current.nearbyHandle)
+
+        assertEquals(current.displayPosition, result.displayPosition)
     }
 
     @Test

@@ -5,6 +5,9 @@ class NearbyProximityStabilizer(
     private val confirmationsRequired: Int = 2,
     private val missingRetentionMillis: Long = 15_000L,
     private val nowMillis: () -> Long = System::currentTimeMillis,
+    private val positionForBand: (String, Proximity) -> DisplayPosition = { _, proximity ->
+        randomDisplayPosition(proximity)
+    },
 ) {
     private data class Pending(val proximity: Proximity, val count: Int)
 
@@ -24,9 +27,15 @@ class NearbyProximityStabilizer(
         incomingHandles.forEach(missingSinceByHandle::remove)
         val stabilizedIncoming = incoming.map { next ->
             val previous = currentByHandle[next.nearbyHandle]
-            if (previous == null || previous.proximity == next.proximity) {
+            if (previous == null) {
                 pendingByHandle.remove(next.nearbyHandle)
-                return@map next
+                return@map next.copy(
+                    displayPosition = positionForBand(next.nearbyHandle, next.proximity),
+                )
+            }
+            if (previous.proximity == next.proximity) {
+                pendingByHandle.remove(next.nearbyHandle)
+                return@map next.copy(displayPosition = previous.displayPosition)
             }
             if (next.proximityConfidence == NearbyProximityConfidence.LOW) {
                 return@map next.copy(
@@ -38,7 +47,9 @@ class NearbyProximityStabilizer(
             val count = if (pending?.proximity == next.proximity) pending.count + 1 else 1
             if (count >= confirmationsRequired) {
                 pendingByHandle.remove(next.nearbyHandle)
-                next
+                next.copy(
+                    displayPosition = positionForBand(next.nearbyHandle, next.proximity),
+                )
             } else {
                 pendingByHandle[next.nearbyHandle] = Pending(next.proximity, count)
                 next.copy(
