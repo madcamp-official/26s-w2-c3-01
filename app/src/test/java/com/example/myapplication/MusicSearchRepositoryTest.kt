@@ -102,4 +102,91 @@ class MusicSearchRepositoryTest {
         }
         assertEquals(listOf("록", "팝"), MusicSearchRepository(api, artistApi).genres())
     }
+
+    @Test
+    fun keepsRealDeezerArtistPhotoWhenDuplicateNameHasPlaceholder() = runBlocking {
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ) = ITunesSearchResponse(
+                resultCount = 1,
+                results = listOf(
+                    ITunesSongDto(
+                        trackId = 1L,
+                        artistId = 2L,
+                        trackName = "Magnetic",
+                        artistName = "ILLIT",
+                    ),
+                ),
+            )
+        }
+        val realImage = "https://cdn-images.dzcdn.net/images/artist/real/56x56.jpg"
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String) = DeezerArtistSearchResponse(
+                data = listOf(
+                    DeezerArtistDto(name = "ILLIT ", picture_small = realImage),
+                    DeezerArtistDto(
+                        name = "ILLit",
+                        picture_small = "https://cdn-images.dzcdn.net/images/artist/d41d8cd98f00b204e9800998ecf8427e/56x56.jpg",
+                    ),
+                ),
+            )
+        }
+
+        val repository = MusicSearchRepository(api, artistApi)
+
+        assertEquals(realImage, repository.search("ILLIT").single().artistImageUrl)
+        assertEquals(realImage, repository.artistImage("ILLIT"))
+    }
+
+    @Test
+    fun usesFirstRealDeezerPhotoWhenLocalizedArtistNameDiffers() = runBlocking {
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ) = ITunesSearchResponse(
+                resultCount = 1,
+                results = listOf(
+                    ITunesSongDto(
+                        trackId = 1L,
+                        artistId = 2L,
+                        trackName = "Love wins all",
+                        artistName = "아이유",
+                    ),
+                ),
+            )
+        }
+        val realImage = "https://cdn-images.dzcdn.net/images/artist/iu/56x56.jpg"
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String) = DeezerArtistSearchResponse(
+                data = listOf(DeezerArtistDto(name = "IU", picture_small = realImage)),
+            )
+        }
+
+        val result = MusicSearchRepository(api, artistApi).search("iu").single()
+
+        assertEquals(realImage, result.artistImageUrl)
+    }
 }
