@@ -214,6 +214,53 @@ class MyProfileScreenTest {
         composeRule.onNodeWithText("대표곡 저장").assertIsDisplayed()
     }
 
+    @Test
+    fun selectedItemsOpenInASeparateDialogWithoutShrinkingSearchResults() {
+        val profile = emptyProfile().copy(
+            signatureTracks = listOf(
+                ProfileTrack(rank = 1, title = "새벽의 온도", artist = "Clouded Steps"),
+            ),
+        )
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                MyScreen(
+                    profile = profile,
+                    profileSaving = false,
+                    feedbackMessage = null,
+                    followingCount = 0,
+                    followerCount = 0,
+                    verifiedOfflineExchangeCount = 0,
+                    offlineExchangeGenres = emptyList(),
+                    offlineExchangeMoods = emptyList(),
+                    nowPlayingTrack = null,
+                    nowPlayingActive = false,
+                    onLoadConnections = {},
+                    onOpenFollowing = {},
+                    onOpenFollowers = {},
+                    onOpenSettings = {},
+                    onOpenBubbleMode = {},
+                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileCurationUpdate = { _, _ -> },
+                    musicSearchState = MusicSearchUiState.Idle,
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
+                    onSearchMusic = {},
+                    onClearMusicSearch = {},
+                    onPreviewMusic = {},
+                    onRandomizeAvatar = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("my_profile_list").performScrollToIndex(4)
+        composeRule.onNodeWithText("새벽의 온도").performClick()
+        composeRule.onNodeWithTag("music_selected_button").assertIsDisplayed().performClick()
+
+        composeRule.onNodeWithTag("selected_curation_dialog").assertIsDisplayed()
+        composeRule.onNodeWithText("선택한 대표곡").assertIsDisplayed()
+        composeRule.onNodeWithText("1/3 선택됨").assertIsDisplayed()
+    }
+
     private fun emptyProfile() = ProfileSettings(
         accountAlias = "테스트 리스너",
         nearbyDisplayAlias = "테스트 리스너",

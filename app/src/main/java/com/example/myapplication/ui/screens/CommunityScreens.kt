@@ -1212,6 +1212,7 @@ fun MyScreen(
 ) {
     LaunchedEffect(Unit) { onLoadConnections() }
     var editorSection by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectionDialogSection by rememberSaveable { mutableStateOf<String?>(null) }
     var awaitingProfileSave by rememberSaveable { mutableStateOf(false) }
     var profileSaveStarted by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
@@ -1231,6 +1232,7 @@ fun MyScreen(
     if (editorSection != null) CenteredProfileEditorDialog(
         onDismissRequest = {
             editorSection = null
+            selectionDialogSection = null
             onClearMusicSearch()
         },
         scrollable = editorSection == "BASIC",
@@ -1257,6 +1259,7 @@ fun MyScreen(
                 }
                 TextButton(onClick = {
                     editorSection = null
+                    selectionDialogSection = null
                     onClearMusicSearch()
                 }) { Text("닫기") }
             }
@@ -1314,16 +1317,13 @@ fun MyScreen(
             }
             }
             if (editorSection == "TRACKS") {
-                SelectedTrackSummary(signatureTracks) { removed ->
-                    signatureTracks = signatureTracks
-                        .filterNot { it.providerTrackId == removed.providerTrackId }
-                        .mapIndexed { index, track -> track.copy(rank = index + 1) }
-                }
                 MusicCatalogSearch(
                     state = musicSearchState,
                     placeholder = "곡 또는 아티스트 검색",
                     onSearch = onSearchMusic,
                     onClear = onClearMusicSearch,
+                    selectedCount = signatureTracks.size,
+                    onOpenSelected = { selectionDialogSection = "TRACKS" },
                 )
                 val trackResults = (musicSearchState as? MusicSearchUiState.Success)
                     ?.results.orEmpty().take(30)
@@ -1354,22 +1354,20 @@ fun MyScreen(
                     onClick = {
                         onProfileCurationUpdate(signatureTracks, favoriteArtists)
                         editorSection = null
+                        selectionDialogSection = null
                         onClearMusicSearch()
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) { Text("대표곡 저장", fontWeight = FontWeight.Bold) }
             }
             if (editorSection == "ARTISTS") {
-                SelectedArtistSummary(favoriteArtists) { removed ->
-                    favoriteArtists = favoriteArtists
-                        .filterNot { it.providerArtistId == removed.providerArtistId && it.name == removed.name }
-                        .mapIndexed { index, artist -> artist.copy(rank = index + 1) }
-                }
                 MusicCatalogSearch(
                     state = musicSearchState,
                     placeholder = "아티스트 이름 · 예: 아이유",
                     onSearch = onSearchMusic,
                     onClear = onClearMusicSearch,
+                    selectedCount = favoriteArtists.size,
+                    onOpenSelected = { selectionDialogSection = "ARTISTS" },
                 )
                 val artistResults = (musicSearchState as? MusicSearchUiState.Success)
                     ?.results
@@ -1410,12 +1408,32 @@ fun MyScreen(
                     onClick = {
                         onProfileCurationUpdate(signatureTracks, favoriteArtists)
                         editorSection = null
+                        selectionDialogSection = null
                         onClearMusicSearch()
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                 ) { Text("아티스트 저장", fontWeight = FontWeight.Bold) }
             }
             Spacer(Modifier.height(28.dp))
+    }
+
+    selectionDialogSection?.let { section ->
+        SelectedCurationDialog(
+            section = section,
+            tracks = signatureTracks,
+            artists = favoriteArtists,
+            onRemoveTrack = { removed ->
+                signatureTracks = signatureTracks
+                    .filterNot { it.providerTrackId == removed.providerTrackId }
+                    .mapIndexed { index, track -> track.copy(rank = index + 1) }
+            },
+            onRemoveArtist = { removed ->
+                favoriteArtists = favoriteArtists
+                    .filterNot { it.providerArtistId == removed.providerArtistId && it.name == removed.name }
+                    .mapIndexed { index, artist -> artist.copy(rank = index + 1) }
+            },
+            onDismiss = { selectionDialogSection = null },
+        )
     }
 
     val canvas = MelodyBubbleColors.Background
