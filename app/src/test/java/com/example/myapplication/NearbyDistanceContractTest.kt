@@ -3,12 +3,14 @@ package com.example.myapplication
 import com.example.myapplication.core.model.DisplayPosition
 import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.NearbyLoadState
+import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NearbyRingFractions
 import com.example.myapplication.core.model.Proximity
 import com.example.myapplication.core.model.abstractDisplayPosition
 import com.example.myapplication.core.model.radiusFromCenter
 import com.example.myapplication.data.keepSettledDuringRefresh
+import com.example.myapplication.data.toMeasurementMethod
 import com.example.myapplication.service.NearbyLocationPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -85,6 +87,13 @@ class NearbyDistanceContractTest {
             NearbyLoadState.ERROR,
             NearbyLoadState.IDLE.keepSettledDuringRefresh(NearbyLoadState.ERROR),
         )
+    }
+
+    @Test
+    fun locationProviderMapsToSafeDiagnosticMethod() {
+        assertEquals(NearbyMeasurementMethod.GPS, "gps".toMeasurementMethod())
+        assertEquals(NearbyMeasurementMethod.FUSED, "fused".toMeasurementMethod())
+        assertEquals(NearbyMeasurementMethod.UNKNOWN, "network".toMeasurementMethod())
     }
 
     private fun listener(proximity: Proximity, position: DisplayPosition) = NearbyListener(

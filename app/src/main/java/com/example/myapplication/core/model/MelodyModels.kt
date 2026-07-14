@@ -31,6 +31,22 @@ enum class NearbyLoadState {
     ERROR
 }
 
+enum class NearbyMeasurementMethod(val label: String) {
+    UWB("UWB"),
+    WIFI_RTT("Wi-Fi RTT"),
+    BLUETOOTH("Bluetooth"),
+    GPS("GPS"),
+    FUSED("Fused"),
+    UNKNOWN("위치"),
+}
+
+data class NearbyMeasurementDiagnostics(
+    val method: NearbyMeasurementMethod,
+    val accuracyMeters: Float?,
+    val observedAtEpochMillis: Long,
+    val uploadLatencyMillis: Long?,
+)
+
 enum class Proximity(
     val label: String,
     val outerRadiusFraction: Float,
@@ -444,6 +460,7 @@ data class MelodyUiState(
     val musicVisibility: String = "TITLE_ARTIST",
     val nearbyLoadState: NearbyLoadState = NearbyLoadState.IDLE,
     val nearbyErrorMessage: String? = null,
+    val nearbyMeasurementDiagnostics: NearbyMeasurementDiagnostics? = null,
     val selectedNearbyHandle: String? = null,
     val profileSaving: Boolean = false,
     val feedbackMessage: String? = null,

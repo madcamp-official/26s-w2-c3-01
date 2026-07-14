@@ -217,6 +217,7 @@ class SharingForegroundService : Service() {
                 .putExtra(EXTRA_LONGITUDE, location.longitude)
                 .putExtra(EXTRA_ACCURACY_METERS, accuracy ?: Float.NaN)
                 .putExtra(EXTRA_LOCATION_TIME_EPOCH_MS, location.time)
+                .putExtra(EXTRA_LOCATION_SOURCE, source)
         )
     }
 
@@ -319,6 +320,7 @@ class SharingForegroundService : Service() {
         const val EXTRA_LONGITUDE = "longitude"
         const val EXTRA_ACCURACY_METERS = "accuracy_meters"
         const val EXTRA_LOCATION_TIME_EPOCH_MS = "location_time_epoch_ms"
+        const val EXTRA_LOCATION_SOURCE = "location_source"
 
         const val ACCURACY_EXCELLENT = "excellent"
         const val ACCURACY_GOOD = "good"

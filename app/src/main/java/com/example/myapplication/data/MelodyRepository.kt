@@ -17,6 +17,8 @@ import com.example.myapplication.core.model.MAX_NEARBY_RADIUS_METERS
 import com.example.myapplication.core.model.MelodyReducers
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.NearbyLoadState
+import com.example.myapplication.core.model.NearbyMeasurementDiagnostics
+import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NotificationType
 import com.example.myapplication.core.model.OfflineExchangeRecord
@@ -283,11 +285,16 @@ class DemoMelodyRepository(
             val longitude = intent.getDoubleExtra(SharingForegroundService.EXTRA_LONGITUDE, Double.NaN)
             val accuracy = intent.getFloatExtra(SharingForegroundService.EXTRA_ACCURACY_METERS, Float.NaN)
                 .takeIf(Float::isFinite)
+            val observedAt = intent.getLongExtra(
+                SharingForegroundService.EXTRA_LOCATION_TIME_EPOCH_MS,
+                System.currentTimeMillis(),
+            )
+            val source = intent.getStringExtra(SharingForegroundService.EXTRA_LOCATION_SOURCE).orEmpty()
             if (!latitude.isFinite() || !longitude.isFinite()) return
             if (_state.value.sharingState == SharingState.STARTING ||
                 _state.value.sharingState == SharingState.ACTIVE
             ) {
-                latestLocationFix = LocationFix(latitude, longitude, accuracy)
+                latestLocationFix = LocationFix(latitude, longitude, accuracy, source, observedAt)
                 locationSyncSignal.trySend(Unit)
             }
         }
@@ -1739,7 +1746,13 @@ class DemoMelodyRepository(
         val token = accessToken ?: return false
         val nearbyVersionAtRequest = nearbyRealtimeVersion.get()
         val location = fix ?: currentLocation(allowInitialCoarseLocation = !requirePrecise)?.let {
-            LocationFix(it.latitude, it.longitude, it.accuracy.takeIf(Float::isFinite))
+            LocationFix(
+                it.latitude,
+                it.longitude,
+                it.accuracy.takeIf(Float::isFinite),
+                it.provider.orEmpty(),
+                it.time,
+            )
         } ?: run {
             _state.update { current ->
                 val loadState = current.nearbyLoadState.keepSettledDuringRefresh(
@@ -1795,6 +1808,13 @@ class DemoMelodyRepository(
                     nearbyLoadState = if (listeners.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
                     nearbyErrorMessage = null,
                     dataSourceLabel = "SERVER LIVE",
+                    nearbyMeasurementDiagnostics = NearbyMeasurementDiagnostics(
+                        method = location.source.toMeasurementMethod(),
+                        accuracyMeters = location.accuracyMeters,
+                        observedAtEpochMillis = location.observedAtEpochMillis,
+                        uploadLatencyMillis = (System.currentTimeMillis() - location.observedAtEpochMillis)
+                            .coerceAtLeast(0L),
+                    ),
                 )
             }
             Log.d(
@@ -2804,5 +2824,13 @@ class DemoMelodyRepository(
         val latitude: Double,
         val longitude: Double,
         val accuracyMeters: Float?,
+        val source: String,
+        val observedAtEpochMillis: Long,
     )
+}
+
+internal fun String.toMeasurementMethod(): NearbyMeasurementMethod = when (lowercase()) {
+    "gps" -> NearbyMeasurementMethod.GPS
+    "fused" -> NearbyMeasurementMethod.FUSED
+    else -> NearbyMeasurementMethod.UNKNOWN
 }
