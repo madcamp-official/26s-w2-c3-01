@@ -1,0 +1,85 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "861706acbb0484fe138b8cbbe27bd140",
+    "entities": [
+      {
+        "tableName": "melody_alias_candidates",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `mood` TEXT NOT NULL, `tone` TEXT NOT NULL, `tempo` INTEGER NOT NULL, `energy` TEXT NOT NULL, `notesCsv` TEXT NOT NULL, `rhythmCsv` TEXT NOT NULL, `toneJsPreset` TEXT NOT NULL, `melodyId` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mood",
+            "columnName": "mood",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tone",
+            "columnName": "tone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tempo",
+            "columnName": "tempo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "energy",
+            "columnName": "energy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notesCsv",
+            "columnName": "notesCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rhythmCsv",
+            "columnName": "rhythmCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toneJsPreset",
+            "columnName": "toneJsPreset",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "melodyId",
+            "columnName": "melodyId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '861706acbb0484fe138b8cbbe27bd140')"
+    ]
+  }
+}

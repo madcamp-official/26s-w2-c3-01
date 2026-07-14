@@ -30,9 +30,6 @@ data class TasteFingerprint(
 data class ProfileStats(
     val followingCount: Int,
     val followerCount: Int,
-    val verifiedExchangeCount: Int,
-    val uniqueExchangeUserCount: Int,
-    val receivedCardCount: Int,
 )
 data class MelodyAliasProfile(
     val id: String,
@@ -67,8 +64,6 @@ data class ProfilePrivacy(
     val currentMusicVisibility: String = "EVERYONE",
     val listeningInsightsEnabled: Boolean = false,
     val listeningInsightsVisibility: String = "PRIVATE",
-    val exchangeInsightsVisibility: String = "EXCHANGED",
-    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
 )
 
 data class NowPlayingProfile(
@@ -116,7 +111,6 @@ data class ProfileResponse(
     val moods: List<String>,
     val discoverable: Boolean,
     val shareMusic: Boolean,
-    val offlineExchangeEnabled: Boolean,
     val melodyAlias: MelodyAliasProfile?,
     val stats: ProfileStats,
     val tasteFingerprint: TasteFingerprint,
@@ -124,10 +118,6 @@ data class ProfileResponse(
     val signatureTracks: List<ProfileTrack> = emptyList(),
     val favoriteArtists: List<ProfileArtist> = emptyList(),
     val privacy: ProfilePrivacy = ProfilePrivacy(),
-    // Kept during the Android contract migration.
-    val offlineExchangeCount: Int = stats.verifiedExchangeCount,
-    val offlineExchangeGenres: List<String> = tasteFingerprint.genres.map(TasteMetric::label),
-    val offlineExchangeMoods: List<String> = tasteFingerprint.moods.map(TasteMetric::label),
 )
 
 data class PublicProfileResponse(
@@ -145,7 +135,6 @@ data class PublicProfileResponse(
     val relationship: String,
     val following: Boolean,
     val mutual: Boolean,
-    val sharedVerifiedExchangeCount: Int,
     val sharedFollowers: List<SharedFollowerPreview> = emptyList(),
     val sharedFollowerCount: Int = 0,
     val signatureTracks: List<ProfileTrack> = emptyList(),
@@ -165,7 +154,6 @@ data class ProfileUpdate(
 data class PrivacyUpdate(
     val discoverable: Boolean,
     val shareMusic: Boolean,
-    val offlineExchangeEnabled: Boolean = true,
 )
 data class ProfileCurationUpdate(
     val signatureTracks: List<ProfileTrack> = emptyList(),
@@ -176,8 +164,6 @@ data class ProfilePrivacyUpdate(
     val currentMusicVisibility: String = "EVERYONE",
     val listeningInsightsEnabled: Boolean = false,
     val listeningInsightsVisibility: String = "PRIVATE",
-    val exchangeInsightsVisibility: String = "EXCHANGED",
-    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
 )
 private data class StoredProfile(
     val userId: UUID,
@@ -190,7 +176,6 @@ private data class StoredProfile(
     val moods: List<String>,
     val discoverable: Boolean,
     val shareMusic: Boolean,
-    val offlineExchangeEnabled: Boolean,
     val profileRevision: Long,
     val privacy: ProfilePrivacy,
     val melodyAlias: MelodyAliasProfile?,
@@ -216,7 +201,6 @@ class ProfileQueryService(
             moods = stored.moods,
             discoverable = stored.discoverable,
             shareMusic = stored.shareMusic,
-            offlineExchangeEnabled = stored.offlineExchangeEnabled,
             melodyAlias = stored.melodyAlias,
             stats = stats,
             tasteFingerprint = taste,
@@ -245,24 +229,15 @@ class ProfileQueryService(
             followsMe -> "FOLLOWS_ME"
             else -> "NONE"
         }
-        val sharedExchangeCount = sharedExchangeCount(viewerId, target.userId)
         val currentMusicVisible = canView(
             target.privacy.currentMusicVisibility,
             isSelf = viewerId == target.userId,
             mutual = mutual,
-            exchanged = sharedExchangeCount > 0,
-        )
-        val exchangeInsightsVisible = canView(
-            target.privacy.exchangeInsightsVisibility,
-            isSelf = viewerId == target.userId,
-            mutual = mutual,
-            exchanged = sharedExchangeCount > 0,
         )
         val nowPlaying = if (currentMusicVisible) nowPlaying(target.userId) else null
         val commonTaste = if (viewerId == target.userId) null else commonTaste(
             viewerId = viewerId,
             targetId = target.userId,
-            includeTargetExchangeInsights = exchangeInsightsVisible,
         )
         val sharedFollowers = sharedFollowers(viewerId, target.userId)
         return PublicProfileResponse(
@@ -276,13 +251,10 @@ class ProfileQueryService(
             moods = target.moods,
             melodyAlias = target.melodyAlias,
             stats = stats(target.userId),
-            tasteFingerprint = if (exchangeInsightsVisible) {
-                tasteFingerprint(target.userId, limit = 3)
-            } else TasteFingerprint(),
+            tasteFingerprint = tasteFingerprint(target.userId, limit = 3),
             relationship = relationship,
             following = following,
             mutual = mutual,
-            sharedVerifiedExchangeCount = sharedExchangeCount,
             sharedFollowers = sharedFollowers.previews,
             sharedFollowerCount = sharedFollowers.totalCount,
             signatureTracks = signatureTracks(target.userId),
@@ -300,29 +272,8 @@ class ProfileQueryService(
                     commonTaste == null -> "INSUFFICIENT_DATA"
                     else -> "VISIBLE"
                 })
-                put("EXCHANGE_INSIGHTS", if (exchangeInsightsVisible) "VISIBLE" else "PRIVATE")
-                put("BUBBLE_PRESENCE", "NO_DATA")
             },
         )
-    }
-
-    fun publicProfileByExchange(viewerId: UUID, exchangeId: UUID): PublicProfileResponse {
-        val peerHandle = jdbc.query(
-            """
-            select peer_user.profile_handle
-            from offline_exchange_events e
-            join offline_credentials peer_credential on peer_credential.id=e.peer_credential_id
-            join users peer_user on peer_user.id=peer_credential.user_id
-            where e.participant_user_id=? and e.exchange_id=? and e.verification_state='VERIFIED'
-            """.trimIndent(),
-            { rs, _ -> rs.getString(1) },
-            viewerId,
-            exchangeId,
-        ).firstOrNull() ?: throw ResponseStatusException(
-            HttpStatus.NOT_FOUND,
-            "확인된 교환 상대 프로필을 찾을 수 없습니다.",
-        )
-        return publicProfile(viewerId, peerHandle)
     }
 
     private fun storedByUserId(userId: UUID): StoredProfile = jdbc.query(
@@ -366,14 +317,11 @@ class ProfileQueryService(
             moods = splitTags(rs.getString("mood_tags")),
             discoverable = rs.getBoolean("discoverable"),
             shareMusic = rs.getBoolean("share_music"),
-            offlineExchangeEnabled = rs.getBoolean("offline_exchange_enabled"),
             profileRevision = rs.getLong("profile_revision"),
             privacy = ProfilePrivacy(
                 currentMusicVisibility = rs.getString("current_music_visibility"),
                 listeningInsightsEnabled = rs.getBoolean("listening_insights_enabled"),
                 listeningInsightsVisibility = rs.getString("listening_insights_visibility"),
-                exchangeInsightsVisibility = rs.getString("exchange_insights_visibility"),
-                bubblePresenceVisibility = rs.getString("bubble_presence_visibility"),
             ),
             melodyAlias = melodyAlias,
         )
@@ -383,36 +331,25 @@ class ProfileQueryService(
         """
         select
           (select count(*) from user_follows where follower_id=?),
-          (select count(*) from user_follows where followed_id=?),
-          (select count(*) from offline_exchange_events where participant_user_id=? and verification_state='VERIFIED'),
-          (select count(distinct peer.user_id)
-             from offline_exchange_events e join offline_credentials peer on peer.id=e.peer_credential_id
-            where e.participant_user_id=? and e.verification_state='VERIFIED')
+          (select count(*) from user_follows where followed_id=?)
         """.trimIndent(),
-        { rs, _ -> ProfileStats(rs.getInt(1), rs.getInt(2), rs.getInt(3), rs.getInt(4), rs.getInt(3)) },
-        userId, userId, userId, userId,
-    ) ?: ProfileStats(0, 0, 0, 0, 0)
+        { rs, _ -> ProfileStats(rs.getInt(1), rs.getInt(2)) },
+        userId, userId,
+    ) ?: ProfileStats(0, 0)
 
-    private fun tasteFingerprint(userId: UUID, limit: Int = 8): TasteFingerprint = TasteFingerprint(
-        genres = tasteMetrics(userId, "genreTags", limit),
-        moods = tasteMetrics(userId, "moodTags", limit),
-    )
-
-    private fun tasteMetrics(userId: UUID, jsonKey: String, limit: Int): List<TasteMetric> {
-        val rows = jdbc.query(
-            """
-            select tag, count(*)::int
-            from offline_exchange_events e
-            cross join lateral jsonb_array_elements_text(coalesce(e.received_card_json->?, '[]'::jsonb)) tag
-            where e.participant_user_id=? and e.verification_state='VERIFIED'
-            group by tag order by count(*) desc, tag asc limit ?
-            """.trimIndent(),
-            { rs, _ -> rs.getString(1) to rs.getInt(2) },
-            jsonKey, userId, limit,
+    private fun tasteFingerprint(userId: UUID, limit: Int = 8): TasteFingerprint {
+        val evidence = tasteEvidence(userId)
+        return TasteFingerprint(
+            genres = evidence.genres.toTasteMetrics(limit),
+            moods = evidence.moods.toTasteMetrics(limit),
         )
-        val total = rows.sumOf { it.second }.coerceAtLeast(1)
-        return rows.map { (label, count) ->
-            TasteMetric(label, count, (count.toDouble() / total).roundRatio())
+    }
+
+    private fun Map<String, Double>.toTasteMetrics(limit: Int): List<TasteMetric> {
+        val sorted = entries.sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key }).take(limit)
+        val total = sorted.sumOf { it.value }.coerceAtLeast(1.0)
+        return sorted.map { (label, weight) ->
+            TasteMetric(label, weight.toInt().coerceAtLeast(1), (weight / total).roundRatio())
         }
     }
 
@@ -482,20 +419,17 @@ class ProfileQueryService(
     private fun commonTaste(
         viewerId: UUID,
         targetId: UUID,
-        includeTargetExchangeInsights: Boolean,
     ): CommonTasteSummary? {
-        val viewer = tasteEvidence(viewerId, includeExchangeInsights = true)
-        val target = tasteEvidence(targetId, includeExchangeInsights = includeTargetExchangeInsights)
+        val viewer = tasteEvidence(viewerId)
+        val target = tasteEvidence(targetId)
         if (viewer.evidenceCount < 3 || target.evidenceCount < 3) return null
 
         val genreScore = weightedJaccard(viewer.genres, target.genres)
         val moodScore = weightedJaccard(viewer.moods, target.moods)
         val artistScore = weightedJaccard(viewer.artists, target.artists)
         val trackScore = weightedJaccard(viewer.tracks, target.tracks)
-        val exchangeScore = (sharedExchangeCount(viewerId, targetId).coerceAtMost(5) * 20).toDouble()
         val total = (
-            genreScore * 0.30 + moodScore * 0.30 + artistScore * 0.20 +
-                trackScore * 0.10 + exchangeScore * 0.10
+            genreScore * 0.35 + moodScore * 0.35 + artistScore * 0.20 + trackScore * 0.10
             ).toInt().coerceIn(0, 100)
 
         val metrics = buildList {
@@ -515,7 +449,7 @@ class ProfileQueryService(
         )
     }
 
-    private fun tasteEvidence(userId: UUID, includeExchangeInsights: Boolean): TasteEvidence {
+    private fun tasteEvidence(userId: UUID): TasteEvidence {
         val profile = storedByUserId(userId)
         val tracks = signatureTracks(userId)
         val artists = favoriteArtists(userId)
@@ -535,10 +469,6 @@ class ProfileQueryService(
         artists.forEach { artist ->
             artist.genreTags.forEach { genres.addWeight(it, 1.0) }
             artistWeights.addWeight(artist.name, 1.5)
-        }
-        if (includeExchangeInsights) {
-            tasteMetrics(userId, "genreTags", 24).forEach { genres.addWeight(it.label, it.count.toDouble()) }
-            tasteMetrics(userId, "moodTags", 24).forEach { moods.addWeight(it.label, it.count.toDouble()) }
         }
         return TasteEvidence(genres, moods, artistWeights, trackWeights)
     }
@@ -575,26 +505,11 @@ class ProfileQueryService(
         this[existingKey] = (this[existingKey] ?: 0.0) + weight
     }
 
-    private fun canView(scope: String, isSelf: Boolean, mutual: Boolean, exchanged: Boolean): Boolean = when {
+    private fun canView(scope: String, isSelf: Boolean, mutual: Boolean): Boolean = when {
         isSelf -> true
         scope == "EVERYONE" -> true
         scope == "MUTUALS" -> mutual
-        scope == "EXCHANGED" -> exchanged
         else -> false
-    }
-
-    private fun sharedExchangeCount(viewerId: UUID, targetId: UUID): Int = if (viewerId == targetId) 0 else {
-        jdbc.queryForObject(
-            """
-            select count(distinct e.exchange_id)
-            from offline_exchange_events e
-            join offline_credentials peer on peer.id=e.peer_credential_id
-            where e.participant_user_id=? and peer.user_id=? and e.verification_state='VERIFIED'
-            """.trimIndent(),
-            Int::class.java,
-            viewerId,
-            targetId,
-        ) ?: 0
     }
 
     private data class SharedFollowers(
@@ -673,12 +588,9 @@ class ProfileQueryService(
               u.melody_alias_notes::text melody_alias_notes,u.melody_alias_tone,u.melody_alias_mood,
               u.melody_alias_tempo,u.profile_revision,coalesce(p.discoverable,true) discoverable,
               coalesce(p.share_music,true) share_music,
-              coalesce(p.offline_exchange_enabled,true) offline_exchange_enabled,
               coalesce(p.current_music_visibility,'EVERYONE') current_music_visibility,
               coalesce(p.listening_insights_enabled,false) listening_insights_enabled,
-              coalesce(p.listening_insights_visibility,'PRIVATE') listening_insights_visibility,
-              coalesce(p.exchange_insights_visibility,'EXCHANGED') exchange_insights_visibility,
-              coalesce(p.bubble_presence_visibility,'PARTICIPANTS_ONLY') bubble_presence_visibility
+              coalesce(p.listening_insights_visibility,'PRIVATE') listening_insights_visibility
             from users u left join user_privacy_settings p on p.user_id=u.id
         """.trimIndent()
     }
@@ -727,11 +639,11 @@ class ProfileController(
         val userId = principal.userId()
         val previousAudience = nearby.musicAudienceSnapshot(userId)
         jdbc.update(
-            """insert into user_privacy_settings(user_id,discoverable,share_music,offline_exchange_enabled)
-               values (?,?,?,?) on conflict(user_id) do update set discoverable=excluded.discoverable,
-               share_music=excluded.share_music,offline_exchange_enabled=excluded.offline_exchange_enabled,
+            """insert into user_privacy_settings(user_id,discoverable,share_music)
+               values (?,?,?) on conflict(user_id) do update set discoverable=excluded.discoverable,
+               share_music=excluded.share_music,
                updated_at=now()""",
-            userId, request.discoverable, request.shareMusic, request.offlineExchangeEnabled,
+            userId, request.discoverable, request.shareMusic,
         )
         jdbc.update(
             """
@@ -827,30 +739,22 @@ class ProfileController(
         val listening = request.listeningInsightsVisibility.requireOneOf(
             "listeningInsightsVisibility", setOf("EVERYONE", "MUTUALS", "PRIVATE"),
         )
-        val exchange = request.exchangeInsightsVisibility.requireOneOf(
-            "exchangeInsightsVisibility", setOf("EVERYONE", "MUTUALS", "EXCHANGED", "PRIVATE"),
-        )
-        val bubble = request.bubblePresenceVisibility.requireOneOf(
-            "bubblePresenceVisibility", setOf("PARTICIPANTS_ONLY", "MUTUALS", "PRIVATE"),
-        )
         val previousAudience = nearby.musicAudienceSnapshot(userId)
         jdbc.update(
             """
             insert into user_privacy_settings(
               user_id,current_music_visibility,listening_insights_enabled,listening_insights_visibility,
-              exchange_insights_visibility,bubble_presence_visibility,music_visibility,share_music
-            ) values (?,?,?,?,?,?,?,?)
+              music_visibility,share_music
+            ) values (?,?,?,?,?,?)
             on conflict(user_id) do update set
               current_music_visibility=excluded.current_music_visibility,
               listening_insights_enabled=excluded.listening_insights_enabled,
               listening_insights_visibility=excluded.listening_insights_visibility,
-              exchange_insights_visibility=excluded.exchange_insights_visibility,
-              bubble_presence_visibility=excluded.bubble_presence_visibility,
               music_visibility=excluded.music_visibility,
               share_music=excluded.share_music,
               updated_at=now()
             """.trimIndent(),
-            userId, currentMusic, request.listeningInsightsEnabled, listening, exchange, bubble,
+            userId, currentMusic, request.listeningInsightsEnabled, listening,
             currentMusic.toLegacyMusicVisibility(), currentMusic != "PRIVATE",
         )
         nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
@@ -879,10 +783,6 @@ class ProfileController(
 @RestController
 @RequestMapping("/api/v1/profiles")
 class PublicProfileController(private val profiles: ProfileQueryService) {
-    @GetMapping("/exchange/{exchangeId}")
-    fun exchangeProfile(principal: Principal, @PathVariable exchangeId: UUID): PublicProfileResponse =
-        profiles.publicProfileByExchange(principal.userId(), exchangeId)
-
     @GetMapping("/{profileHandle}")
     fun profile(principal: Principal, @PathVariable profileHandle: String): PublicProfileResponse =
         profiles.publicProfile(principal.userId(), profileHandle)

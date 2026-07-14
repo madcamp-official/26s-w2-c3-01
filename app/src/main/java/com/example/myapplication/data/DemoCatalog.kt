@@ -201,7 +201,6 @@ object DemoCatalog {
                 musicVisibilityLabel = "제목·아티스트 공개",
                 discoverable = true,
                 allowReactions = true,
-                offlineExchangeEnabled = true
             )
         )
     }

@@ -9,7 +9,7 @@ enum class MainTab(val label: String) {
 }
 
 enum class ConnectionState {
-    OFFLINE,
+    DISCONNECTED,
     CONNECTING,
     LIVE,
     RECONNECTING
@@ -92,24 +92,6 @@ enum class DeliveryState {
     SENT,
     READ,
     FAILED
-}
-
-enum class SyncState {
-    PENDING,
-    UPLOADING,
-    SYNCED,
-    FAILED
-}
-
-enum class SessionMode {
-    ONLINE,
-    OFFLINE,
-    SIGNED_OUT,
-}
-
-enum class PresenceMode {
-    NORMAL,
-    BUBBLE,
 }
 
 data class DisplayPosition(
@@ -221,7 +203,6 @@ data class ProfileSettings(
     val musicVisibilityLabel: String,
     val discoverable: Boolean,
     val allowReactions: Boolean,
-    val offlineExchangeEnabled: Boolean,
     val profileHandle: String = "",
     val stats: ProfileStats = ProfileStats(),
     val tasteFingerprint: TasteFingerprint = TasteFingerprint(),
@@ -281,8 +262,6 @@ data class ProfilePrivacySettings(
     val currentMusicVisibility: String = "EVERYONE",
     val listeningInsightsEnabled: Boolean = false,
     val listeningInsightsVisibility: String = "PRIVATE",
-    val exchangeInsightsVisibility: String = "EXCHANGED",
-    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
 )
 
 data class ProfileNowPlaying(
@@ -327,9 +306,6 @@ data class TasteFingerprint(
 data class ProfileStats(
     val followingCount: Int = 0,
     val followerCount: Int = 0,
-    val verifiedExchangeCount: Int = 0,
-    val uniqueExchangeUserCount: Int = 0,
-    val receivedCardCount: Int = 0,
 )
 
 data class ProfileMelodyAlias(
@@ -362,7 +338,6 @@ data class PublicProfile(
     val relationship: RelationshipStatus,
     val following: Boolean,
     val mutual: Boolean,
-    val sharedVerifiedExchangeCount: Int,
     val sharedFollowers: List<SharedFollowerPreview> = emptyList(),
     val sharedFollowerCount: Int = 0,
     val signatureTracks: List<ProfileTrack> = emptyList(),
@@ -383,27 +358,6 @@ data class MelodyAliasCandidate(
     val rhythm: List<Int>,
     val toneJsPreset: String,
     val melodyId: String
-)
-
-data class OfflineExchangeRecord(
-    val id: String,
-    val ownerUserId: String,
-    val localSessionId: String,
-    val credentialId: String?,
-    val peerCredentialId: String?,
-    val peerDisplayAlias: String,
-    val trackTitle: String,
-    val trackArtist: String,
-    val melodyAlias: String,
-    val sentCardJson: String,
-    val receivedCardJson: String,
-    val exchangedAt: Long,
-    val syncState: SyncState,
-    val retryCount: Int,
-    val lastError: String?,
-    val payloadHash: String,
-    val protocolVersion: Int,
-    val recordSignature: String,
 )
 
 data class BlockedUser(
@@ -436,7 +390,7 @@ enum class ReportReason(val label: String) {
 data class MelodyUiState(
     val isOnboardingComplete: Boolean = false,
     val selectedTab: MainTab = MainTab.HOME,
-    val connectionState: ConnectionState = ConnectionState.OFFLINE,
+    val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val sharingState: SharingState = SharingState.STOPPED,
     val scopeLabel: String = "캠퍼스 주변",
     val snapshotSequence: Long = 1,
@@ -451,10 +405,6 @@ data class MelodyUiState(
     val chatMessages: Map<String, List<ChatMessage>>,
     val profile: ProfileSettings,
     val melodyAliasCandidates: List<MelodyAliasCandidate> = emptyList(),
-    val offlineExchanges: List<OfflineExchangeRecord> = emptyList(),
-    val verifiedOfflineExchangeCount: Int = 0,
-    val offlineExchangeGenres: List<String> = emptyList(),
-    val offlineExchangeMoods: List<String> = emptyList(),
     val blockedUsers: List<BlockedUser> = emptyList(),
     val following: List<SocialConnection> = emptyList(),
     val followers: List<SocialConnection> = emptyList(),
@@ -472,8 +422,6 @@ data class MelodyUiState(
     val profileSaving: Boolean = false,
     val feedbackMessage: String? = null,
     val dataSourceLabel: String = "DEMO LIVE",
-    val sessionMode: SessionMode = SessionMode.SIGNED_OUT,
-    val presenceMode: PresenceMode = PresenceMode.NORMAL,
     val activeAccountId: String? = null,
 ) {
     val selectedNearby: NearbyListener?

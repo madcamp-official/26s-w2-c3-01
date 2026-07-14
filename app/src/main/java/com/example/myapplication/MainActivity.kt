@@ -88,8 +88,7 @@ class MainActivity : ComponentActivity() {
 
     private fun reconcileSharingService() {
         val serviceActive = SharingForegroundService.isSharingActive(this)
-        val onlineSessionReady = (viewModel.loginState.value as? LoginUiState.Success)
-            ?.mode == com.example.myapplication.core.model.SessionMode.ONLINE
+        val onlineSessionReady = viewModel.loginState.value is LoginUiState.Success
 
         when {
             shouldResumeSharing(serviceActive, onlineSessionReady, viewModel.uiState.value.sharingState) -> {

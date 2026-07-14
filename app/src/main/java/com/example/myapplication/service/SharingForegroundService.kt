@@ -20,6 +20,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import com.example.myapplication.MainActivity
+import com.example.myapplication.R
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.Granularity
 import com.google.android.gms.location.LocationCallback
@@ -310,8 +311,9 @@ class SharingForegroundService : Service() {
         }
 
         return builder
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("Melody Bubble 주변 공유 중")
+            .setSmallIcon(R.drawable.ic_notification_sync)
+            .setColor(getColor(R.color.sync_violet_glow))
+            .setContentTitle("Sync 주변 공유 중")
             .setContentText("현재 음악과 대략적인 위치가 주변에 공유돼요")
             .setContentIntent(contentPendingIntent)
             .setCategory(Notification.CATEGORY_SERVICE)

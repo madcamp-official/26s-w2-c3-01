@@ -97,9 +97,6 @@ object ApiClient {
     fun createSocialApi(environment: ApiEnvironment = ApiEnvironment()): SocialApi =
         authenticatedRetrofit(environment).create(SocialApi::class.java)
 
-    fun createOfflineExchangeApi(environment: ApiEnvironment = ApiEnvironment()): OfflineExchangeApi =
-        authenticatedRetrofit(environment).create(OfflineExchangeApi::class.java)
-
     fun createBuildingLoungeApi(environment: ApiEnvironment = ApiEnvironment()): BuildingLoungeApi =
         retrofit(environment).create(BuildingLoungeApi::class.java)
 

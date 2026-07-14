@@ -16,9 +16,6 @@ data class RemoteTasteFingerprint(
 data class RemoteProfileStats(
     val followingCount: Int,
     val followerCount: Int,
-    val verifiedExchangeCount: Int,
-    val uniqueExchangeUserCount: Int,
-    val receivedCardCount: Int,
 )
 data class RemoteProfileMelodyAlias(
     val id: String,
@@ -53,8 +50,6 @@ data class RemoteProfilePrivacy(
     val currentMusicVisibility: String = "EVERYONE",
     val listeningInsightsEnabled: Boolean = false,
     val listeningInsightsVisibility: String = "PRIVATE",
-    val exchangeInsightsVisibility: String = "EXCHANGED",
-    val bubblePresenceVisibility: String = "PARTICIPANTS_ONLY",
 )
 
 data class RemoteProfileNowPlaying(
@@ -96,13 +91,9 @@ data class RemoteProfile(
     val moods: List<String>?,
     val discoverable: Boolean,
     val shareMusic: Boolean,
-    val offlineExchangeEnabled: Boolean?,
     val melodyAlias: RemoteProfileMelodyAlias?,
     val stats: RemoteProfileStats?,
     val tasteFingerprint: RemoteTasteFingerprint?,
-    val offlineExchangeCount: Int = 0,
-    val offlineExchangeGenres: List<String>? = emptyList(),
-    val offlineExchangeMoods: List<String>? = emptyList(),
     val profileRevision: Long = 0,
     val signatureTracks: List<RemoteProfileTrack>? = emptyList(),
     val favoriteArtists: List<RemoteProfileArtist>? = emptyList(),
@@ -124,7 +115,6 @@ data class RemotePublicProfile(
     val relationship: String,
     val following: Boolean,
     val mutual: Boolean,
-    val sharedVerifiedExchangeCount: Int,
     val sharedFollowers: List<RemoteSharedFollowerPreview>? = emptyList(),
     val sharedFollowerCount: Int = 0,
     val signatureTracks: List<RemoteProfileTrack>? = emptyList(),
@@ -149,7 +139,6 @@ data class ProfileUpdateRequest(
 data class PrivacyUpdateRequest(
     val discoverable: Boolean,
     val shareMusic: Boolean,
-    val offlineExchangeEnabled: Boolean,
 )
 data class ProfileCurationUpdateRequest(
     val signatureTracks: List<RemoteProfileTrack>,
@@ -160,8 +149,6 @@ data class ProfilePrivacyUpdateRequest(
     val currentMusicVisibility: String,
     val listeningInsightsEnabled: Boolean,
     val listeningInsightsVisibility: String,
-    val exchangeInsightsVisibility: String,
-    val bubblePresenceVisibility: String,
 )
 interface ProfileApi {
     @GET("api/v1/me") suspend fun me(@Header("Authorization") authorization: String): RemoteProfile
@@ -187,9 +174,5 @@ interface ProfileApi {
     @GET("api/v1/profiles/{profileHandle}") suspend fun publicProfile(
         @Header("Authorization") authorization: String,
         @Path("profileHandle") profileHandle: String,
-    ): RemotePublicProfile
-    @GET("api/v1/profiles/exchange/{exchangeId}") suspend fun exchangeProfile(
-        @Header("Authorization") authorization: String,
-        @Path("exchangeId") exchangeId: String,
     ): RemotePublicProfile
 }

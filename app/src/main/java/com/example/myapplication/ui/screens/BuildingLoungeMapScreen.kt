@@ -67,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,6 +90,8 @@ import com.example.myapplication.ui.theme.MossSurfaceHigh
 import com.example.myapplication.ui.theme.MutedMint
 import com.example.myapplication.ui.theme.PaleMint
 import com.example.myapplication.ui.theme.SignalGreen
+import com.example.myapplication.ui.theme.CurrentSyncPalette
+import com.example.myapplication.ui.theme.SyncPalette
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.maps.CameraUpdateFactory
@@ -108,6 +111,7 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
+import java.util.Locale
 
 private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap building footprint")
 
@@ -275,13 +279,18 @@ private fun BuildingGoogleMap(
     var googleMap by remember { mutableStateOf<GoogleMap?>(null) }
     val latestUserLocation by rememberUpdatedState(userLocation)
     val visibleLounges = remember(lounges) { lounges.visibleMapLounges() }
+    val palette = CurrentSyncPalette
+    val mapStyleOptions = remember(palette) { MapStyleOptions(syncMapStyleJson(palette)) }
+    val markerHue = remember(palette.primary) {
+        FloatArray(3).also { android.graphics.Color.colorToHSV(palette.primary.toArgb(), it) }[0]
+    }
 
     AndroidView(
         factory = {
             mapView.apply {
                 getMapAsync { map ->
                     googleMap = map
-                    map.setMapStyle(MapStyleOptions.loadRawResourceStyle(context, R.raw.map_style_melody))
+                    map.setMapStyle(mapStyleOptions)
                     map.uiSettings.isCompassEnabled = false
                     map.uiSettings.isMapToolbarEnabled = false
                     map.uiSettings.isMyLocationButtonEnabled = false
@@ -301,8 +310,9 @@ private fun BuildingGoogleMap(
         modifier = modifier
     )
 
-    LaunchedEffect(googleMap, visibleLounges, latestUserLocation, hasLocationPermission) {
+    LaunchedEffect(googleMap, visibleLounges, latestUserLocation, hasLocationPermission, palette) {
         val map = googleMap ?: return@LaunchedEffect
+        map.setMapStyle(mapStyleOptions)
         map.clear()
         @SuppressLint("MissingPermission")
         if (hasLocationPermission && context.hasLocationPermission()) {
@@ -310,8 +320,16 @@ private fun BuildingGoogleMap(
         }
         visibleLounges.forEach { lounge ->
             val center = LatLng(lounge.latitude, lounge.longitude)
-            val fill = if (lounge.inside) 0x6637D67AL.toInt() else 0x184285F4
-            val stroke = if (lounge.inside) 0xFF25C76FL.toInt() else 0x664285F4
+            val fill = if (lounge.inside) {
+                palette.primary.copy(alpha = 0.4f).toArgb()
+            } else {
+                palette.primarySoft.copy(alpha = 0.12f).toArgb()
+            }
+            val stroke = if (lounge.inside) {
+                palette.primary.toArgb()
+            } else {
+                palette.primarySoft.copy(alpha = 0.4f).toArgb()
+            }
             map.addCircle(
                 CircleOptions()
                     .center(center)
@@ -325,7 +343,7 @@ private fun BuildingGoogleMap(
                     .position(center)
                     .title(lounge.name)
                     .snippet(if (lounge.inside) "Available now" else "${lounge.distanceMeters.roundToInt()}m away")
-                    .icon(BitmapDescriptorFactory.defaultMarker(if (lounge.inside) 140f else 150f))
+                    .icon(BitmapDescriptorFactory.defaultMarker(if (lounge.inside) markerHue else (markerHue + 12f) % 360f))
             )
         }
         val cameraTarget = latestUserLocation ?: visibleLounges.firstOrNull()?.let {
@@ -354,6 +372,33 @@ private fun BuildingGoogleMap(
         }
     }
 }
+
+private fun Color.mapHex(): String = String.format(Locale.US, "#%06X", toArgb() and 0xFFFFFF)
+
+private fun syncMapStyleJson(palette: SyncPalette): String = """
+[
+  {"elementType":"geometry","stylers":[{"color":"${palette.background.mapHex()}"}]},
+  {"elementType":"labels.icon","stylers":[{"visibility":"off"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"${palette.textMuted.mapHex()}"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"${palette.background.mapHex()}"}]},
+  {"featureType":"administrative","elementType":"geometry.stroke","stylers":[{"color":"${palette.border.mapHex()}"}]},
+  {"featureType":"administrative.locality","elementType":"labels.text.fill","stylers":[{"color":"${palette.text.mapHex()}"}]},
+  {"featureType":"landscape.man_made","elementType":"geometry.fill","stylers":[{"color":"${palette.surface.mapHex()}"}]},
+  {"featureType":"landscape.natural","elementType":"geometry","stylers":[{"color":"${palette.background.mapHex()}"}]},
+  {"featureType":"poi","elementType":"geometry","stylers":[{"color":"${palette.surfaceRaised.mapHex()}"}]},
+  {"featureType":"poi.business","stylers":[{"visibility":"off"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"${palette.surface.mapHex()}"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"${palette.surfaceRaised.mapHex()}"}]},
+  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"${palette.background.mapHex()}"}]},
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"${palette.textMuted.mapHex()}"}]},
+  {"featureType":"road.arterial","elementType":"geometry","stylers":[{"color":"${palette.border.mapHex()}"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"${palette.primary.mapHex()}"}]},
+  {"featureType":"transit","stylers":[{"visibility":"simplified"}]},
+  {"featureType":"transit.station","elementType":"labels.text.fill","stylers":[{"color":"${palette.primarySoft.mapHex()}"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"${palette.surface.mapHex()}"}]},
+  {"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"${palette.textMuted.mapHex()}"}]}
+]
+""".trimIndent()
 
 @Composable
 private fun LoungeBottomSheetPanel(
@@ -1007,7 +1052,7 @@ private fun CreateSubLoungeSheet(
 private fun MissingMapKeyPanel(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .background(Color(0xFF07140D))
+            .background(CurrentSyncPalette.background)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {

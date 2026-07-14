@@ -3,6 +3,7 @@ package com.example.myapplication.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -51,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -61,16 +63,22 @@ import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.PreviewPlaybackState
+import com.example.myapplication.ui.theme.CurrentSyncPalette
 
 @Composable
 fun PreviewNowPlayingBar(
     state: PreviewPlaybackState,
     onTogglePause: () -> Unit,
     onStop: () -> Unit,
+    onOpenInMusicApp: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .pointerInput(state.title, state.artist, onOpenInMusicApp) {
+                detectTapGestures(onDoubleTap = { onOpenInMusicApp() })
+            },
         color = MelodyBubbleColors.SurfaceRaised,
         contentColor = MelodyBubbleColors.Text,
         shape = RoundedCornerShape(14.dp),
@@ -131,20 +139,20 @@ private fun EqualizerBars(active: Boolean) {
 
 /** Palette shared by the handoff screens so they stay consistent even before app theming is wired. */
 object MelodyBubbleColors {
-    val Background = Color(0xFF06100B)
-    val Surface = Color(0xFF0D1A13)
-    val SurfaceRaised = Color(0xFF122119)
-    val SurfaceSelected = Color(0xFF173122)
-    val Border = Color(0xFF294638)
-    val BorderStrong = Color(0xFF3F6B53)
-    val Primary = Color(0xFF65E693)
-    val PrimarySoft = Color(0xFFBDF8CF)
-    val OnPrimary = Color(0xFF04200D)
-    val Text = Color(0xFFF2F5EE)
-    val TextMuted = Color(0xFFA4B3A8)
-    val TextFaint = Color(0xFF728279)
-    val Warning = Color(0xFFF5C96A)
-    val Danger = Color(0xFFFFA89D)
+    val Background: Color get() = CurrentSyncPalette.background
+    val Surface: Color get() = CurrentSyncPalette.surface
+    val SurfaceRaised: Color get() = CurrentSyncPalette.surfaceRaised
+    val SurfaceSelected: Color get() = CurrentSyncPalette.surfaceRaised
+    val Border: Color get() = CurrentSyncPalette.border
+    val BorderStrong: Color get() = CurrentSyncPalette.border
+    val Primary: Color get() = CurrentSyncPalette.primary
+    val PrimarySoft: Color get() = CurrentSyncPalette.primarySoft
+    val OnPrimary: Color get() = CurrentSyncPalette.background
+    val Text: Color get() = CurrentSyncPalette.text
+    val TextMuted: Color get() = CurrentSyncPalette.textMuted
+    val TextFaint: Color get() = CurrentSyncPalette.textMuted.copy(alpha = 0.6f)
+    val Warning: Color get() = CurrentSyncPalette.primarySoft
+    val Danger: Color get() = CurrentSyncPalette.error
 }
 
 private val CardShape = RoundedCornerShape(22.dp)
@@ -261,7 +269,7 @@ fun SharingStatusCard(
         SharingState.FAILED -> "공유 시작에 실패했어요"
     }
     val connectionLabel = when (connectionState) {
-        ConnectionState.OFFLINE -> "오프라인"
+        ConnectionState.DISCONNECTED -> "연결 안 됨"
         ConnectionState.CONNECTING -> "연결 중"
         ConnectionState.LIVE -> "실시간 연결"
         ConnectionState.RECONNECTING -> "다시 연결 중"

@@ -36,11 +36,10 @@
 | 라운지 상세 | 서버 하위 라운지 snapshot | 참가·퇴장·청취·카드·리액션·투표 REST | `/topic/sub-lounges/{subLoungeId}` | 별칭·공개 음악·추천 카드·집계 투표 |
 | 인박스 | 서버 리액션 이력·대화방 | `GET /api/v1/nearby/reactions`, `GET /api/v1/notifications`, `GET /api/v1/chat/rooms` | `/user/queue/notifications`, `/user/queue/reactions`, `/user/queue/chat` | 본인에게 전달된 알림·대화 미리보기 |
 | 1:1 채팅 | 서버 대화 | `GET /api/v1/chat/rooms`, `GET`·`POST /api/v1/chat/rooms/{roomId}/messages`, `PUT /api/v1/chat/rooms/{roomId}/read` | `/user/queue/chat`의 생성·메시지·읽음·방 갱신 이벤트 | 맞팔이며 차단되지 않은 대화방의 텍스트와 전송 상태 |
-| 마이·설정 | 캐시된 계정별 프로필 | `GET /api/v1/me`, `PATCH /api/v1/me`, `POST /api/v1/me/avatar/randomize`, `PUT /api/v1/me/privacy`, `PUT /api/v1/me/melody-alias` | 설정 반영 알림은 개인 Queue 선택 | DiceBear 아바타·본인 프로필·취향·공개 범위·멜로디 별칭·검증된 교환 통계 |
+| 마이·설정 | 캐시된 계정별 프로필 | `GET /api/v1/me`, `PATCH /api/v1/me`, `POST /api/v1/me/avatar/randomize`, `PUT /api/v1/me/privacy`, `PUT /api/v1/me/melody-alias` | 설정 반영 알림은 개인 Queue 선택 | DiceBear 아바타·본인 프로필·취향·공개 범위·멜로디 별칭 |
 | 현재 음악 선택 | 앱 공용 `PresenceSyncCoordinator`가 MediaSession 감지, 세션 미제공 앱만 알림 문자열 폴백 | `POST /api/v1/nearby/music` | 변경 수신은 `/user/queue/nearby` | 제목·아티스트·source·재생 여부; 앱 계정·원본 알림 전체 제외 |
-| 오프라인 기록 | 계정별 Room `offline_exchange_local`·`sync_outbox` | `POST /api/v1/offline-credentials`, `POST /api/v1/offline-exchanges/batch`, `GET`·`DELETE /api/v1/offline-exchanges/**` | Google Nearby Connections로 1:1 카드·서명 교환; STOMP와 별도 | 양쪽이 승인한 음악 카드, 검증 상태, 동기화 상태 |
 
-`nearbyHandle`은 현재 Presence 범위에서만 쓰는 불투명 식별자입니다. 공개 프로필 이동에는 별도의 안정적인 `profileHandle`을 사용하며 서버의 영구 UUID는 노출하지 않습니다. 교환 기록에서 프로필로 이동할 때는 클라이언트 표시 이름이 아니라 서버의 `VERIFIED` 교환과 peer credential 소유자를 기준으로 해석합니다.
+`nearbyHandle`은 현재 Presence 범위에서만 쓰는 불투명 식별자입니다. 공개 프로필 이동에는 별도의 안정적인 `profileHandle`을 사용하며 서버의 영구 UUID는 노출하지 않습니다.
 
 ## 3. REST 공통 규칙
 
@@ -182,20 +181,18 @@ PUT /api/v1/me/presence-settings
   "privacy": {
     "currentMusicVisibility": "MUTUALS",
     "listeningInsightsEnabled": false,
-    "listeningInsightsVisibility": "PRIVATE",
-    "exchangeInsightsVisibility": "EXCHANGED",
-    "bubblePresenceVisibility": "PARTICIPANTS_ONLY"
+    "listeningInsightsVisibility": "PRIVATE"
   }
 }
 ```
 
 아바타는 서버가 생성한 불투명 `avatarSeed`로 결정되며 파일 업로드를 받지 않습니다. `avatar/randomize`는 seed와 `profileRevision`을 갱신하고 새 DiceBear Thumbs URL을 반환합니다.
 
-공개 프로필은 인증된 요청자와 대상의 차단·팔로우·음악 공개 범위를 적용합니다. `sharedVerifiedExchangeCount`는 양쪽 서명 기록이 일치한 교환만 포함하고, 개별 상대 목록이나 정확한 장소는 공개하지 않습니다.
+공개 프로필은 인증된 요청자와 대상의 차단·팔로우·음악 공개 범위를 적용합니다.
 
 공개 프로필 응답은 공개가 허용된 `nowPlaying`, 사용자 지정 `signatureTracks`·`favoriteArtists`, 요청자와 대상 사이에서 계산한 `commonTaste`를 포함할 수 있습니다. `sectionStates`는 각 섹션을 `VISIBLE`, `NO_DATA`, `PRIVATE`, `INSUFFICIENT_DATA`, `NOT_APPLICABLE`로 구분합니다. 현재 음악은 TTL이 유효한 `music_statuses` 한 건만 반환하며 청취 이력으로 간주하지 않습니다.
 
-`profile-curation`은 대표곡·최애 아티스트를 각각 최대 3개까지 순서대로 저장합니다. 요청의 `profileRevision`이 서버와 다르면 `409 Conflict`를 반환합니다. `profile-privacy`는 현재 음악, 청취 분석, 교환 기반 취향, 버블 참여 상태의 공개 범위를 독립적으로 저장하며 서버가 수신자별로 집행합니다.
+`profile-curation`은 대표곡·최애 아티스트를 각각 최대 3개까지 순서대로 저장합니다. 요청의 `profileRevision`이 서버와 다르면 `409 Conflict`를 반환합니다. `profile-privacy`는 현재 음악과 청취 분석의 공개 범위를 독립적으로 저장하며 서버가 수신자별로 집행합니다.
 
 Presence 설정은 `discoverabilityScope`(`NEARBY`, `MUTUALS`, `HIDDEN`),
 `musicVisibility`(`TITLE_ARTIST`, `MUTUALS`, `HIDDEN`), 고정된 `discoveryRadiusMeters`(`15`),
@@ -208,8 +205,7 @@ Presence 설정은 `discoverabilityScope`(`NEARBY`, `MUTUALS`, `HIDDEN`),
   "discoverability": "NEARBY",
   "musicVisibility": "TITLE_ARTIST",
   "minMatchScore": 60,
-  "allowReactions": true,
-  "offlineExchangeEnabled": false
+  "allowReactions": true
 }
 ```
 
@@ -326,59 +322,6 @@ PUT /api/v1/chat/rooms/{roomId}/read
     "readByPeer": false
   }
 ]
-```
-
-### 오프라인 교환 인증서와 동기화
-
-온라인 상태에서 계정과 Android Keystore 기기 공개키를 묶은 30일짜리 서버 서명 인증서를 받습니다. 서버의 `publicSubject`는 계정 UUID를 그대로 노출하지 않는 안정적인 불투명 값입니다.
-
-```http
-POST /api/v1/offline-credentials
-```
-
-```json
-{
-  "devicePublicKey": "base64-x509-ec-public-key"
-}
-```
-
-오프라인에서는 두 기기가 Nearby Connections로 인증서와 공개 음악 카드를 교환하고, 동일한 숫자 인증 코드를 사용자가 양쪽에서 승인합니다. 각 기기는 합의된 payload hash와 교환 ID를 기기 키로 서명한 뒤 양방향 ACK까지 완료된 기록만 Room에 저장합니다.
-
-인터넷 연결이 복구되면 WorkManager가 계정별 outbox를 최대 50건씩 전송합니다.
-
-```http
-POST /api/v1/offline-exchanges/batch
-```
-
-```json
-{
-  "items": [
-    {
-      "exchangeId": "exchange-uuid",
-      "credentialId": "my-credential-uuid",
-      "peerCredentialId": "peer-credential-uuid",
-      "sentCardJson": "{...}",
-      "receivedCardJson": "{...}",
-      "deviceOccurredAt": 1783693800000,
-      "payloadHash": "sha256-hex",
-      "protocolVersion": 1,
-      "recordSignature": "base64-ecdsa-signature"
-    }
-  ]
-}
-```
-
-```json
-[
-  { "exchangeId": "exchange-uuid", "state": "UNCONFIRMED" }
-]
-```
-
-첫 번째 참가자의 업로드는 `UNCONFIRMED`, 반대편의 동일한 hash·역방향 credential 쌍까지 도착하면 양쪽 기록은 `VERIFIED`가 됩니다. 같은 `(exchangeId, participant)`의 동일 요청은 멱등 처리하며 내용이 다른 재사용은 `400`으로 거절합니다.
-
-```http
-GET /api/v1/offline-exchanges
-DELETE /api/v1/offline-exchanges/{exchangeId}
 ```
 
 ## 4. STOMP 연결

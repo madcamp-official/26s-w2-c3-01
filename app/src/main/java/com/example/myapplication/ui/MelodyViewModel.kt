@@ -1,15 +1,12 @@
 package com.example.myapplication.ui
 
 import android.app.Application
-import android.net.ConnectivityManager
-import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.ConnectionState
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.ReportReason
-import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.ProfilePrivacySettings
@@ -33,14 +30,6 @@ import com.example.myapplication.data.remote.LoungeMusicSearchResultDto
 import com.example.myapplication.data.remote.TokenResponse
 import com.example.myapplication.data.local.SecureTokenStore
 import com.example.myapplication.data.local.StoredSession
-import com.example.myapplication.data.local.CachedAccount
-import com.example.myapplication.data.local.OfflineAccountStore
-import com.example.myapplication.data.remote.OfflineCredentialRequest
-import com.example.myapplication.data.remote.jwtSubject
-import com.example.myapplication.offlineexchange.ExchangeCrypto
-import com.example.myapplication.offlineexchange.ExchangeMusicCard
-import com.example.myapplication.offlineexchange.NearbyExchangeManager
-import com.example.myapplication.offlineexchange.OfflineExchangeIdentity
 import com.example.myapplication.data.network.WifiFingerprintProvider
 import com.example.myapplication.data.network.WifiIdentityResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,22 +51,9 @@ sealed interface LoginUiState {
         val expiresInSeconds: Long,
         val isNewUser: Boolean = false,
         val onboardingComplete: Boolean = false,
-        val mode: SessionMode = SessionMode.ONLINE,
-    ) : LoginUiState
-    data class OfflineAvailable(
-        val account: CachedAccount,
-        val message: String = "인터넷에 연결할 수 없어 저장된 계정으로 오프라인 모드를 사용할 수 있어요.",
     ) : LoginUiState
     data class ReauthenticationRequired(val accountAlias: String?) : LoginUiState
     data class Error(val message: String) : LoginUiState
-}
-
-sealed interface SessionState {
-    data object SignedOut : SessionState
-    data object Restoring : SessionState
-    data class Online(val account: CachedAccount) : SessionState
-    data class Offline(val account: CachedAccount) : SessionState
-    data class ReauthenticationRequired(val account: CachedAccount?) : SessionState
 }
 
 sealed interface EmailAvailabilityUiState {
@@ -122,7 +98,7 @@ data class BuildingLoungeUiState(
     val detailLoading: Boolean = false,
     val trackSearchLoading: Boolean = false,
     val trackSearchResults: List<LoungeMusicSearchResultDto> = emptyList(),
-    val realtimeState: ConnectionState = ConnectionState.OFFLINE,
+    val realtimeState: ConnectionState = ConnectionState.DISCONNECTED,
     val message: String? = null
 )
 
@@ -135,7 +111,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private val presenceCoordinator = PresenceSyncCoordinator.get(application)
     private val musicPreviewPlayer = MusicPreviewPlayer(application)
     private val _loginState = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
-    private val _sessionState = MutableStateFlow<SessionState>(SessionState.SignedOut)
     private val _emailAvailabilityState = MutableStateFlow<EmailAvailabilityUiState>(EmailAvailabilityUiState.Idle)
     @Volatile private var accessToken: String? = null
     private var refreshToken: String? = null
@@ -144,23 +119,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var loungeFallbackJob: Job? = null
     private var loungeSnapshotJob: Job? = null
     private var latestSubLoungeSnapshotAt: String? = null
-    @Volatile private var offlineCredentialPreparing = false
     private val tokenStore = SecureTokenStore(application)
-    private val offlineAccountStore = OfflineAccountStore(application)
-    private val exchangeCrypto = ExchangeCrypto()
-    private val offlineExchangeApi by lazy { ApiClient.createOfflineExchangeApi() }
     private val sessionProfileApi by lazy { ApiClient.createProfileApi() }
-    private val connectivityManager = application.getSystemService(ConnectivityManager::class.java)
-    private val connectivityCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            viewModelScope.launch { restoreOnlineAfterOfflineMode() }
-        }
-    }
-    private val nearbyExchangeManager = NearbyExchangeManager(application, exchangeCrypto) { result ->
-        offlineAccountStore.load()?.offlineCredential?.let { credential ->
-            repository.saveOfflineExchange(result, credential.credentialId)
-        }
-    }
     private val _buildingLoungeState = MutableStateFlow(BuildingLoungeUiState())
     private val _musicSearchState = MutableStateFlow<MusicSearchUiState>(MusicSearchUiState.Idle)
     private val _genreCatalogState = MutableStateFlow(GenreCatalogUiState())
@@ -172,87 +132,40 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
-    val sessionState = _sessionState.asStateFlow()
     val emailAvailabilityState = _emailAvailabilityState.asStateFlow()
     val buildingLoungeState = _buildingLoungeState.asStateFlow()
     val musicSearchState = _musicSearchState.asStateFlow()
     val genreCatalogState = _genreCatalogState.asStateFlow()
     val previewPlaybackState = musicPreviewPlayer.state
-    val exchangeState = nearbyExchangeManager.state
 
     init {
         loadGenreCatalog()
-        connectivityManager.registerDefaultNetworkCallback(connectivityCallback)
         removeAccessTokenListener = ApiClient.addAccessTokenListener { refreshedToken ->
             viewModelScope.launch {
                 accessToken = refreshedToken
-                val currentLogin = _loginState.value as? LoginUiState.Success
-                if (currentLogin?.mode == SessionMode.OFFLINE) {
-                    repository.authenticate(refreshedToken)
-                    repository.completeOnboarding()
-                    val cached = offlineAccountStore.load()
-                    _loginState.value = LoginUiState.Success(
-                        expiresInSeconds = 0,
-                        onboardingComplete = true,
-                        mode = SessionMode.ONLINE,
-                    )
-                    if (cached != null) _sessionState.value = SessionState.Online(cached)
-                } else {
-                    repository.refreshSession(refreshedToken)
-                }
+                repository.refreshSession(refreshedToken)
                 restoreSubLoungeSession(refreshedToken)
             }
         }
         ApiClient.configureSession(tokenStore) {
             viewModelScope.launch {
-                val cached = offlineAccountStore.load()
                 repository.logout()
                 accessToken = null
                 refreshToken = null
-                _loginState.value = LoginUiState.ReauthenticationRequired(cached?.displayAlias)
-                _sessionState.value = SessionState.ReauthenticationRequired(cached)
+                _loginState.value = LoginUiState.ReauthenticationRequired(null)
             }
         }
         tokenStore.load()?.let { stored ->
-            _sessionState.value = SessionState.Restoring
-            val cachedAccount = offlineAccountStore.load()
             val storedRefresh = stored.refreshToken
             if (storedRefresh == null) {
-                restoreAccessOnlySession(stored, cachedAccount, showLoading = true)
+                restoreAccessOnlySession(stored, showLoading = true)
             } else {
                 _loginState.value = LoginUiState.Loading
                 viewModelScope.launch {
                     authRepository.refresh(storedRefresh)
                         .onSuccess(::acceptSession)
-                        .onFailure { error ->
-                            handleSessionRestoreFailure(error, cachedAccount, storedRefresh)
-                        }
+                        .onFailure(::handleSessionRestoreFailure)
                 }
-            }
-        }
-        if (tokenStore.load() == null) {
-            offlineAccountStore.load()?.let { cached ->
-                _loginState.value = LoginUiState.ReauthenticationRequired(cached.displayAlias)
-                _sessionState.value = SessionState.ReauthenticationRequired(cached)
-            }
-        }
-        viewModelScope.launch {
-            repository.state.collect { state ->
-                val accountId = state.activeAccountId ?: return@collect
-                val existing = offlineAccountStore.load()?.takeIf { it.accountId == accountId }
-                    ?: return@collect
-                offlineAccountStore.save(existing.copy(
-                    displayAlias = state.profile.accountAlias,
-                    avatarUrl = state.profile.avatarUrl,
-                    colorHex = state.profile.colorHex,
-                    melodyAlias = "",
-                    musicCard = state.toExchangeMusicCard(),
-                ))
-                val credential = existing.offlineCredential
-                val shouldRenew = credential == null ||
-                    credential.displayAlias != state.profile.accountAlias ||
-                    credential.expiresAt - System.currentTimeMillis() < 24 * 60 * 60 * 1_000L
-                if (shouldRenew) accessToken?.let(::prepareOfflineCredential)
             }
         }
         viewModelScope.launch {
@@ -316,7 +229,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             realtimeClient.connectionState.collect { state ->
                 val connection = when (state) {
-                    RealtimeConnectionState.Disconnected -> ConnectionState.OFFLINE
+                    RealtimeConnectionState.Disconnected -> ConnectionState.DISCONNECTED
                     is RealtimeConnectionState.Connecting -> ConnectionState.CONNECTING
                     is RealtimeConnectionState.Connected -> ConnectionState.LIVE
                     is RealtimeConnectionState.Reconnecting -> ConnectionState.RECONNECTING
@@ -372,15 +285,10 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             response.isNewUser,
             response.onboardingComplete,
         )
-        offlineAccountStore.load()?.takeIf { it.accountId == jwtSubject(response.accessToken) }?.let {
-            _sessionState.value = SessionState.Online(it)
-        } ?: run { _sessionState.value = SessionState.Restoring }
-        if (response.onboardingComplete) prepareOfflineCredential(response.accessToken)
     }
 
     private fun restoreAccessOnlySession(
         stored: StoredSession,
-        cachedAccount: CachedAccount?,
         showLoading: Boolean,
     ) {
         if (showLoading) _loginState.value = LoginUiState.Loading
@@ -389,87 +297,27 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 .onSuccess {
                     accessToken = stored.accessToken
                     repository.authenticate(stored.accessToken)
-                    if (cachedAccount != null) repository.completeOnboarding()
                     restoreSubLoungeSession(stored.accessToken)
                     _loginState.value = LoginUiState.Success(
                         expiresInSeconds = 0,
-                        onboardingComplete = cachedAccount != null || repository.state.value.isOnboardingComplete,
+                        onboardingComplete = repository.state.value.isOnboardingComplete,
                     )
-                    if (cachedAccount != null) _sessionState.value = SessionState.Online(cachedAccount)
-                    else _sessionState.value = SessionState.Restoring
-                    if (cachedAccount != null) prepareOfflineCredential(stored.accessToken)
                 }
                 .onFailure { error ->
-                    if (showLoading) handleSessionRestoreFailure(error, cachedAccount, null)
+                    if (showLoading) handleSessionRestoreFailure(error)
                 }
         }
     }
 
-    private fun handleSessionRestoreFailure(
-        error: Throwable,
-        cachedAccount: CachedAccount?,
-        storedRefresh: String?,
-    ) {
-        when (decideSessionRestore(error, cachedAccount != null)) {
-            SessionRestoreDecision.OFFER_OFFLINE -> {
-                if (cachedAccount == null) {
-                    clearSession(clearOfflineAccount = false)
-                    return
-                }
-                accessToken = null
-                refreshToken = storedRefresh
-                _loginState.value = LoginUiState.OfflineAvailable(cachedAccount)
-                _sessionState.value = SessionState.Restoring
-            }
-            SessionRestoreDecision.REQUIRE_REAUTHENTICATION -> {
-                tokenStore.clear()
-                _loginState.value = LoginUiState.ReauthenticationRequired(cachedAccount?.displayAlias)
-                _sessionState.value = SessionState.ReauthenticationRequired(cachedAccount)
-            }
-            SessionRestoreDecision.SIGN_OUT -> clearSession(clearOfflineAccount = false)
+    private fun handleSessionRestoreFailure(error: Throwable) {
+        tokenStore.clear()
+        accessToken = null
+        refreshToken = null
+        _loginState.value = if (error is HttpException && error.code() in setOf(401, 403)) {
+            LoginUiState.ReauthenticationRequired(null)
+        } else {
+            LoginUiState.Error("온라인 세션을 복구하지 못했어요. 다시 로그인해 주세요.")
         }
-    }
-
-    fun startOfflineMode() {
-        val account = offlineAccountStore.load() ?: return
-        repository.authenticateOffline(account)
-        _sessionState.value = SessionState.Offline(account)
-        _loginState.value = LoginUiState.Success(
-            expiresInSeconds = 0,
-            onboardingComplete = true,
-            mode = SessionMode.OFFLINE,
-        )
-    }
-
-    fun retryOnlineSession() {
-        val stored = tokenStore.load()
-        val refresh = stored?.refreshToken ?: refreshToken
-        if (refresh == null) {
-            if (stored != null) restoreAccessOnlySession(stored, offlineAccountStore.load(), showLoading = true)
-            else _loginState.value = LoginUiState.Idle
-            return
-        }
-        viewModelScope.launch {
-            _loginState.value = LoginUiState.Loading
-            authRepository.refresh(refresh)
-                .onSuccess(::acceptSession)
-                .onFailure { error ->
-                    val cached = offlineAccountStore.load()
-                    _loginState.value = if (isNetworkFailure(error) && cached != null) {
-                        LoginUiState.OfflineAvailable(cached)
-                    } else LoginUiState.Error("온라인 세션을 복구하지 못했어요.")
-                }
-        }
-    }
-
-    private suspend fun restoreOnlineAfterOfflineMode() {
-        val current = _loginState.value as? LoginUiState.Success ?: return
-        if (current.mode != SessionMode.OFFLINE) return
-        val stored = tokenStore.load() ?: return
-        val refresh = stored.refreshToken ?: refreshToken
-        if (refresh != null) authRepository.refresh(refresh).onSuccess(::acceptSession)
-        else restoreAccessOnlySession(stored, offlineAccountStore.load(), showLoading = false)
-        com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(getApplication())
     }
 
     fun login(email: String, password: String) {
@@ -535,13 +383,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val stored = tokenStore.load()
         val access = stored?.accessToken ?: accessToken
         val refresh = stored?.refreshToken ?: refreshToken
-        clearSession(clearOfflineAccount = true)
+        clearSession()
         viewModelScope.launch {
             if (access != null) authRepository.logout(access, refresh)
         }
     }
 
-    private fun clearSession(clearOfflineAccount: Boolean = true) {
+    private fun clearSession() {
         clearSelectedSubLounge()
         repository.logout()
         accessToken = null
@@ -549,13 +397,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         latestSubLoungeSnapshotAt = null
         refreshToken = null
         tokenStore.clear()
-        if (clearOfflineAccount) {
-            com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.cancel(getApplication())
-            nearbyExchangeManager.stop()
-            offlineAccountStore.clear()
-            exchangeCrypto.deleteDeviceKey()
-        }
-        _sessionState.value = SessionState.SignedOut
         _loginState.value = LoginUiState.Idle
     }
 
@@ -567,83 +408,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 .onFailure { repository.clearFeedback() }
         }
     }
-
-    fun startOfflineExchange() {
-        val account = offlineAccountStore.load()
-        val credential = account?.offlineCredential
-        if (!repository.state.value.profile.offlineExchangeEnabled) {
-            nearbyExchangeManager.unavailable("설정에서 오프라인 음악 카드 교환을 먼저 켜 주세요.")
-            return
-        }
-        if (account == null || credential == null) {
-            nearbyExchangeManager.unavailable("인터넷 연결 상태에서 오프라인 교환 인증을 먼저 준비해 주세요.")
-            return
-        }
-        val state = repository.state.value
-        nearbyExchangeManager.start(
-            OfflineExchangeIdentity(
-                ownerUserId = account.accountId,
-                endpointName = state.profile.accountAlias,
-                credential = credential,
-                card = state.toExchangeMusicCard(),
-            )
-        )
-    }
-
-    fun connectOfflineEndpoint(endpointId: String) = nearbyExchangeManager.requestConnection(endpointId)
-    fun approveOfflineConnection() = nearbyExchangeManager.approveConnection()
-    fun rejectOfflineConnection() = nearbyExchangeManager.rejectConnection()
-    fun stopOfflineExchange() = nearbyExchangeManager.stop()
-    fun clearOfflineExchangeResult() = nearbyExchangeManager.clearResult()
-    fun offlineExchangePermissionDenied() = nearbyExchangeManager.permissionDenied()
-
-    private fun prepareOfflineCredential(token: String) {
-        val accountId = jwtSubject(token) ?: return
-        if (offlineCredentialPreparing) return
-        offlineCredentialPreparing = true
-        viewModelScope.launch {
-            val result = runCatching {
-                offlineExchangeApi.issueCredential(
-                    "Bearer $token",
-                    OfflineCredentialRequest(exchangeCrypto.publicKeyBase64()),
-                )
-            }.onSuccess { credential ->
-                val state = repository.state.value
-                val cached = CachedAccount(
-                    accountId = accountId,
-                    displayAlias = credential.displayAlias,
-                    avatarUrl = state.profile.avatarUrl,
-                    colorHex = state.profile.colorHex,
-                    melodyAlias = "",
-                    musicCard = state.toExchangeMusicCard(),
-                    lastAuthenticatedAt = System.currentTimeMillis(),
-                    offlineCredential = credential,
-                )
-                offlineAccountStore.save(cached)
-                _sessionState.value = SessionState.Online(cached)
-                com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(getApplication())
-            }
-            offlineCredentialPreparing = false
-            val error = result.exceptionOrNull()
-            val retryable = error != null && (
-                isNetworkFailure(error) ||
-                    error is HttpException && (error.code() >= 500 || error.code() == 429)
-                )
-            if (retryable && accessToken == token) {
-                delay(30_000)
-                prepareOfflineCredential(token)
-            }
-        }
-    }
-
-    private fun com.example.myapplication.core.model.MelodyUiState.toExchangeMusicCard() = ExchangeMusicCard(
-        displayAlias = profile.accountAlias,
-        trackTitle = currentTrack.title,
-        trackArtist = currentTrack.artist,
-        melodyAlias = "",
-        genreTags = currentTrack.genreTags.ifEmpty { profile.genres },
-        moodTags = currentTrack.moodTags.ifEmpty { profile.moods },
-    )
 
     private fun isNetworkFailure(error: Throwable): Boolean = error is IOException ||
         error.cause is IOException
@@ -741,15 +505,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val access = accessToken ?: return
         viewModelScope.launch {
             authRepository.completeOnboarding(access, genres, moods)
-                .onSuccess { prepareOfflineCredential(access) }
         }
     }
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
     fun selectNearby(handle: String?) {
         repository.selectNearby(handle)
     }
-    fun enterBubbleMode() = repository.enterBubbleMode()
-    fun exitBubbleMode() = repository.exitBubbleMode()
     fun openChat(roomId: String) = repository.openChat(roomId)
     fun closeChat(roomId: String) = repository.closeChat(roomId)
     fun leaveChat(roomId: String) = repository.leaveChat(roomId)
@@ -768,7 +529,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun loadSocialConnections() = repository.loadSocialConnections()
     fun unfollowRelationship(relationshipId: String) = repository.unfollowRelationship(relationshipId)
     fun loadPublicProfile(profileHandle: String) = repository.loadPublicProfile(profileHandle)
-    fun loadExchangeProfile(exchangeId: String) = repository.loadExchangeProfile(exchangeId)
     fun clearPublicProfile() = repository.clearPublicProfile()
     fun followPublicProfile() = repository.followPublicProfile()
     fun sendChat(roomId: String, content: String) = repository.sendChat(roomId, content)
@@ -777,7 +537,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun deleteNotification(notificationId: String) = repository.deleteNotification(notificationId)
     fun setDiscoverable(enabled: Boolean) = repository.setDiscoverable(enabled)
     fun setAllowReactions(enabled: Boolean) = repository.setAllowReactions(enabled)
-    fun setOfflineExchangeEnabled(enabled: Boolean) = repository.setOfflineExchangeEnabled(enabled)
     fun setMusicVisibility(label: String) = repository.setMusicVisibility(label)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String) =
         repository.updatePresenceSettings(radiusMeters, discoverabilityScope, musicVisibility)
@@ -1237,8 +996,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun syncExchange(exchangeId: String) = repository.syncExchange(exchangeId)
-    fun deleteExchange(exchangeId: String) = repository.deleteExchange(exchangeId)
     fun clearFeedback() = repository.clearFeedback()
 
     override fun onCleared() {
@@ -1247,8 +1004,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         removeAccessTokenListener?.invoke()
         removeAccessTokenListener = null
         musicPreviewPlayer.release()
-        nearbyExchangeManager.stop()
-        runCatching { connectivityManager.unregisterNetworkCallback(connectivityCallback) }
         repository.close()
         super.onCleared()
     }

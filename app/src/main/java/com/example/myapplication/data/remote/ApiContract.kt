@@ -22,7 +22,6 @@ object MelodyApiContract {
         const val ME = "/api/v1/me"
         const val PRIVACY = "/api/v1/me/privacy"
         const val PUBLIC_PROFILE = "/api/v1/profiles/{profileHandle}"
-        const val EXCHANGE_PROFILE = "/api/v1/profiles/exchange/{exchangeId}"
         const val NEARBY_SNAPSHOT = "/api/v1/nearby/snapshot"
         const val NEARBY_DETAIL = "/api/v1/nearby/{nearbyHandle}"
         const val NEARBY_REACTION = "/api/v1/nearby/{nearbyHandle}/reactions"
@@ -34,10 +33,6 @@ object MelodyApiContract {
         const val CHAT_HISTORY = "/api/v1/chat/rooms/{roomId}/messages"
         const val CHAT_READ = "/api/v1/chat/rooms/{roomId}/read"
         const val NOTIFICATIONS = "/api/v1/notifications"
-        const val OFFLINE_CREDENTIALS = "/api/v1/offline-credentials"
-        const val OFFLINE_EXCHANGE_BATCH = "/api/v1/offline-exchanges/batch"
-        const val OFFLINE_EXCHANGE_HISTORY = "/api/v1/offline-exchanges"
-        const val OFFLINE_EXCHANGE_DELETE = "/api/v1/offline-exchanges/{exchangeId}"
     }
 
     object Send {

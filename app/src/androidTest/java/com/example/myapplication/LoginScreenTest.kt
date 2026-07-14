@@ -37,8 +37,6 @@ class LoginScreenTest {
                     onCheckEmail = {},
                     onEmailChanged = {},
                     onGoogleLogin = {},
-                    onStartOffline = {},
-                    onRetryOnline = {},
                 )
             }
         }
@@ -66,8 +64,6 @@ class LoginScreenTest {
                     onCheckEmail = {},
                     onEmailChanged = {},
                     onGoogleLogin = {},
-                    onStartOffline = {},
-                    onRetryOnline = {},
                 )
             }
         }

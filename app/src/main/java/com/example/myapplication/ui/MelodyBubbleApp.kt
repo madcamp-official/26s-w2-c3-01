@@ -64,9 +64,7 @@ import androidx.navigation.navArgument
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.MelodyUiState
 import com.example.myapplication.core.model.SharingState
-import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.Track
-import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.ui.components.MelodyBottomNavigationBar
@@ -80,7 +78,6 @@ import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
 import com.example.myapplication.ui.screens.NearbyMusicFilter
 import com.example.myapplication.ui.screens.NotificationScreen
-import com.example.myapplication.ui.screens.OfflineExchangeScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.screens.PublicProfileScreen
 import com.example.myapplication.ui.screens.ReportUserScreen
@@ -93,7 +90,6 @@ private object Route {
     const val MAIN = "main"
     const val USER_DETAIL = "user-detail"
     const val CHAT = "chat/{roomId}"
-    const val OFFLINE_EXCHANGE = "offline-exchange"
     const val REPORT_USER = "report-user"
     const val BLOCKED_USERS = "blocked-users"
     const val NOTIFICATIONS = "notifications"
@@ -101,11 +97,9 @@ private object Route {
     const val FOLLOWING = "social-connections/following"
     const val FOLLOWERS = "social-connections/followers"
     const val PUBLIC_PROFILE = "profile/{profileHandle}"
-    const val EXCHANGE_PROFILE = "exchange-profile/{exchangeId}"
 
     fun chat(roomId: String) = "chat/$roomId"
     fun publicProfile(profileHandle: String) = "profile/$profileHandle"
-    fun exchangeProfile(exchangeId: String) = "exchange-profile/$exchangeId"
 }
 
 @Composable
@@ -120,7 +114,6 @@ fun MelodyBubbleApp(
     val genreCatalogState by viewModel.genreCatalogState.collectAsState()
     val previewPlaybackState by viewModel.previewPlaybackState.collectAsState()
     val buildingLoungeState by viewModel.buildingLoungeState.collectAsState()
-    val exchangeState by viewModel.exchangeState.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val permissionPreferences = remember {
@@ -133,12 +126,28 @@ fun MelodyBubbleApp(
         }
     }
 
-    fun openTrackOnDevice(track: Track) {
-        val externalUrl = track.externalUrl?.takeIf { it.startsWith("https://") } ?: return
+    fun openMusicOnDevice(title: String, artist: String, externalUrl: String? = null) {
+        val directIntent = externalUrl
+            ?.takeIf { it.startsWith("https://") }
+            ?.let { Intent(Intent.ACTION_VIEW, Uri.parse(it)) }
+        if (directIntent != null && runCatching { context.startActivity(directIntent) }.isSuccess) return
+
+        val query = "$title $artist".trim()
+        val searchIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_SEARCH)
+            .putExtra(SearchManager.QUERY, query)
+            .putExtra(MediaStore.EXTRA_MEDIA_TITLE, title)
+            .putExtra(MediaStore.EXTRA_MEDIA_ARTIST, artist)
+        if (runCatching { context.startActivity(searchIntent) }.isSuccess) return
+
         runCatching {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl)))
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/search?q=${Uri.encode(query)}"))
+            )
         }
     }
+
+    fun openTrackOnDevice(track: Track) =
+        openMusicOnDevice(track.title, track.artist, track.externalUrl)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -160,33 +169,6 @@ fun MelodyBubbleApp(
         contract = ActivityResultContracts.RequestPermission()
     ) {
         permissionPreferences.edit().putBoolean("realtime-notifications-requested", true).apply()
-    }
-
-    val offlineExchangePermissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions(),
-    ) { result ->
-        if (result.values.all { it }) viewModel.startOfflineExchange()
-        else viewModel.offlineExchangePermissionDenied()
-    }
-
-    fun requestOfflineExchangeStart() {
-        val permissions = buildList {
-            add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            add(Manifest.permission.ACCESS_FINE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                add(Manifest.permission.BLUETOOTH_SCAN)
-                add(Manifest.permission.BLUETOOTH_CONNECT)
-                add(Manifest.permission.BLUETOOTH_ADVERTISE)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            }
-        }
-        val missing = permissions.filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (missing.isEmpty()) viewModel.startOfflineExchange()
-        else offlineExchangePermissionLauncher.launch(missing.toTypedArray())
     }
 
     LaunchedEffect(loginState, state.isOnboardingComplete) {
@@ -259,8 +241,6 @@ fun MelodyBubbleApp(
             onCheckEmail = viewModel::checkEmailAvailability,
             onEmailChanged = viewModel::resetEmailAvailability,
             onGoogleLogin = viewModel::loginWithGoogle,
-            onStartOffline = viewModel::startOfflineMode,
-            onRetryOnline = viewModel::retryOnlineSession,
             modifier = modifier.safeDrawingPadding()
         )
         return
@@ -337,7 +317,6 @@ fun MelodyBubbleApp(
                     onOpenSettings = { navController.navigate(Route.SETTINGS) },
                     onOpenFollowing = { navController.navigate(Route.FOLLOWING) },
                     onOpenFollowers = { navController.navigate(Route.FOLLOWERS) },
-                    onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) },
                     onOpenTrack = ::openTrackOnDevice,
                 )
             }
@@ -402,17 +381,14 @@ fun MelodyBubbleApp(
             composable(Route.SETTINGS) {
                 SettingsScreen(
                     profile = state.profile,
-                    offlineExchangeCount = state.offlineExchanges.size,
                     onBack = { navController.popBackStack() },
                     onDiscoverableChange = viewModel::setDiscoverable,
                     onAllowReactionsChange = viewModel::setAllowReactions,
-                    onOfflineExchangeChange = viewModel::setOfflineExchangeEnabled,
                     onMusicVisibilityChange = viewModel::setMusicVisibility,
                     onProfilePrivacyChange = viewModel::updateProfilePrivacy,
                     onOpenNotificationAccess = {
                         context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                     },
-                    onOpenOfflineExchange = { navController.navigate(Route.OFFLINE_EXCHANGE) },
                     onOpenBlockedUsers = { navController.navigate(Route.BLOCKED_USERS) },
                     onLogout = viewModel::logout,
                     onDeleteAccount = viewModel::deleteAccount,
@@ -500,86 +476,17 @@ fun MelodyBubbleApp(
                         onPlayTrackPreview = { track ->
                             viewModel.playMusicPreview(track.title, track.artist, artworkUrl = track.artworkUrl)
                         },
+                        onOpenMusicApp = { title, artist -> openMusicOnDevice(title, artist) },
                         onShare = {
                             val name = state.selectedPublicProfile?.displayName ?: profileHandle
                             context.startActivity(
                                 Intent.createChooser(
                                     Intent(Intent.ACTION_SEND)
                                         .setType("text/plain")
-                                        .putExtra(Intent.EXTRA_TEXT, "$name 님의 Melody Bubble 음악 프로필 · @$profileHandle"),
+                                        .putExtra(Intent.EXTRA_TEXT, "$name 님의 Sync 음악 프로필 · @$profileHandle"),
                                     "음악 프로필 공유",
                                 )
                             )
-                        },
-                        modifier = Modifier.statusBarsPadding(),
-                    )
-                }
-            }
-            composable(
-                route = Route.EXCHANGE_PROFILE,
-                arguments = listOf(navArgument("exchangeId") { type = NavType.StringType }),
-            ) { entry ->
-                val exchangeId = entry.arguments?.getString("exchangeId")
-                if (exchangeId == null) {
-                    LaunchedEffect(Unit) { navController.popBackStack() }
-                } else {
-                    LaunchedEffect(exchangeId) { viewModel.loadExchangeProfile(exchangeId) }
-                    LaunchedEffect(
-                        exchangeId,
-                        state.selectedPublicProfile?.profileHandle,
-                        state.selectedPublicProfile?.nowPlaying?.title,
-                        state.selectedPublicProfile?.nowPlaying?.artist,
-                    ) {
-                        state.selectedPublicProfile?.let(viewModel::autoPlayPublicProfileNowPlaying)
-                    }
-                    DisposableEffect(exchangeId) {
-                        onDispose {
-                            viewModel.stopProfileAudio()
-                            viewModel.clearPublicProfile()
-                        }
-                    }
-                    PublicProfileScreen(
-                        profile = state.selectedPublicProfile,
-                        loading = state.publicProfileLoading,
-                        errorMessage = state.publicProfileError,
-                        onBack = { navController.popBackStack() },
-                        onRetry = { viewModel.loadExchangeProfile(exchangeId) },
-                        onFollow = viewModel::followPublicProfile,
-                        onMessage = {
-                            val profileHandle = state.selectedPublicProfile?.profileHandle
-                            val roomId = state.chats.firstOrNull { it.peerHandle == profileHandle }?.roomId
-                            if (roomId != null) {
-                                navController.navigate(Route.chat(roomId))
-                            } else {
-                                viewModel.selectTab(MainTab.INBOX)
-                                navController.popBackStack(Route.MAIN, inclusive = false)
-                            }
-                        },
-                        onPlayNowPlaying = { title, artist, artworkUrl ->
-                            val nearbyHandle = state.selectedPublicProfile?.profileHandle?.let { handle ->
-                                state.nearbyListeners.firstOrNull { it.profileHandle == handle }?.nearbyHandle
-                            }
-                            viewModel.playMusicPreview(
-                                title,
-                                artist,
-                                artworkUrl = artworkUrl,
-                                sourceNearbyHandle = nearbyHandle,
-                            )
-                        },
-                        onPlayTrackPreview = { track ->
-                            viewModel.playMusicPreview(track.title, track.artist, artworkUrl = track.artworkUrl)
-                        },
-                        onShare = {
-                            state.selectedPublicProfile?.let { selected ->
-                                context.startActivity(
-                                    Intent.createChooser(
-                                        Intent(Intent.ACTION_SEND)
-                                            .setType("text/plain")
-                                            .putExtra(Intent.EXTRA_TEXT, "${selected.displayName} 님의 Melody Bubble 음악 프로필 · @${selected.profileHandle}"),
-                                        "음악 프로필 공유",
-                                    )
-                                )
-                            }
                         },
                         modifier = Modifier.statusBarsPadding(),
                     )
@@ -614,35 +521,6 @@ fun MelodyBubbleApp(
                     )
                 }
             }
-            composable(Route.OFFLINE_EXCHANGE) {
-                DisposableEffect(Unit) {
-                    viewModel.enterBubbleMode()
-                    onDispose { viewModel.exitBubbleMode() }
-                }
-                OfflineExchangeScreen(
-                    records = state.offlineExchanges,
-                    myCard = ExchangeMusicCard(
-                        displayAlias = state.profile.accountAlias,
-                        trackTitle = state.currentTrack.title,
-                        trackArtist = state.currentTrack.artist,
-                        melodyAlias = "",
-                        genreTags = state.currentTrack.genreTags.ifEmpty { state.profile.genres },
-                        moodTags = state.currentTrack.moodTags.ifEmpty { state.profile.moods },
-                    ),
-                    exchangeState = exchangeState,
-                    onBack = { navController.popBackStack() },
-                    onStart = ::requestOfflineExchangeStart,
-                    onConnect = viewModel::connectOfflineEndpoint,
-                    onApprove = viewModel::approveOfflineConnection,
-                    onReject = viewModel::rejectOfflineConnection,
-                    onStop = viewModel::stopOfflineExchange,
-                    onClearResult = viewModel::clearOfflineExchangeResult,
-                    onSync = viewModel::syncExchange,
-                    onDelete = viewModel::deleteExchange,
-                    onOpenProfile = { navController.navigate(Route.exchangeProfile(it)) },
-                    modifier = Modifier.statusBarsPadding()
-                )
-            }
             composable(Route.NOTIFICATIONS) {
                 NotificationScreen(
                     notifications = state.notifications,
@@ -655,24 +533,6 @@ fun MelodyBubbleApp(
                     },
                     modifier = Modifier.statusBarsPadding(),
                 )
-            }
-        }
-
-        if (state.sessionMode == SessionMode.OFFLINE) {
-            Surface(
-                color = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .safeDrawingPadding()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .fillMaxWidth()
-                    .clickable { navController.navigate(Route.OFFLINE_EXCHANGE) },
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-            ) {
-                Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Text("오프라인 모드", modifier = Modifier.weight(1f))
-                    Text("주변 기기 찾기")
-                }
             }
         }
 
@@ -692,6 +552,9 @@ fun MelodyBubbleApp(
                 state = previewPlaybackState,
                 onTogglePause = viewModel::toggleMusicPreviewPause,
                 onStop = viewModel::stopMusicPreview,
+                onOpenInMusicApp = {
+                    openMusicOnDevice(previewPlaybackState.title, previewPlaybackState.artist)
+                },
                 modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 6.dp),
             )
@@ -715,7 +578,6 @@ private fun MainShell(
     onOpenSettings: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
-    onOpenOfflineExchange: () -> Unit,
     onOpenTrack: (Track) -> Unit,
 ) {
     val context = LocalContext.current
@@ -760,9 +622,7 @@ private fun MainShell(
                 onOpenTrack = onOpenTrack,
                 onPlayPreview = { viewModel.playMusicPreview(it.title, it.artist) },
             )
-            MainTab.NEARBY -> if (state.sessionMode == SessionMode.OFFLINE) {
-                OfflineServerFeatureScreen("온라인 주변 사용자", onOpenOfflineExchange, contentModifier)
-            } else NearbyScreen(
+            MainTab.NEARBY -> NearbyScreen(
                 state = state,
                 modifier = contentModifier,
                 similarityThreshold = similarityThreshold.toInt(),
@@ -802,9 +662,7 @@ private fun MainShell(
                     }
                 },
             )
-            MainTab.LOUNGE -> if (state.sessionMode == SessionMode.OFFLINE) {
-                OfflineServerFeatureScreen("음악 라운지", onOpenOfflineExchange, contentModifier)
-            } else BuildingLoungeMapScreen(
+            MainTab.LOUNGE -> BuildingLoungeMapScreen(
                 state = buildingLoungeState,
                 onLocationUpdate = viewModel::refreshBuildingLounges,
                 onLocationUnavailable = viewModel::setBuildingLoungeLocationUnavailable,
@@ -824,9 +682,7 @@ private fun MainShell(
                 onRefreshSubLounge = viewModel::refreshSubLounge,
                 modifier = contentModifier
             )
-            MainTab.INBOX -> if (state.sessionMode == SessionMode.OFFLINE) {
-                OfflineServerFeatureScreen("채팅", onOpenOfflineExchange, contentModifier)
-            } else InboxScreen(
+            MainTab.INBOX -> InboxScreen(
                 chats = state.chats,
                 onOpenChat = onOpenChat,
                 onLeaveChat = viewModel::leaveChat,
@@ -838,16 +694,12 @@ private fun MainShell(
                 feedbackMessage = state.feedbackMessage,
                 followingCount = maxOf(state.profile.stats.followingCount, state.following.size),
                 followerCount = maxOf(state.profile.stats.followerCount, state.followers.size),
-                verifiedOfflineExchangeCount = state.verifiedOfflineExchangeCount,
-                offlineExchangeGenres = state.offlineExchangeGenres,
-                offlineExchangeMoods = state.offlineExchangeMoods,
                 nowPlayingTrack = state.detectedTrack,
                 nowPlayingActive = state.detectedTrackPlaying,
                 onLoadConnections = viewModel::loadSocialConnections,
                 onOpenFollowing = onOpenFollowing,
                 onOpenFollowers = onOpenFollowers,
                 onOpenSettings = onOpenSettings,
-                onOpenBubbleMode = onOpenOfflineExchange,
                 onProfileUpdate = viewModel::updateProfile,
                 onRandomizeAvatar = viewModel::randomizeAvatar,
                 onProfileCurationUpdate = viewModel::updateProfileCuration,
@@ -859,25 +711,5 @@ private fun MainShell(
                 onPreviewMusic = { viewModel.playMusicPreview(it.title, it.artist, it.previewUrl, it.artworkUrl) },
                 modifier = contentModifier.statusBarsPadding()
             )
-    }
-}
-
-@Composable
-private fun OfflineServerFeatureScreen(
-    featureName: String,
-    onOpenOfflineExchange: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier.padding(28.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("$featureName 기능은 인터넷 연결 후 이용할 수 있어요", style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.height(10.dp))
-            Text("오프라인에서는 가까운 기기와 음악 카드를 직접 교환할 수 있어요.")
-            Spacer(Modifier.height(20.dp))
-            Button(onClick = onOpenOfflineExchange) { Text("주변 기기 찾기") }
-        }
     }
 }

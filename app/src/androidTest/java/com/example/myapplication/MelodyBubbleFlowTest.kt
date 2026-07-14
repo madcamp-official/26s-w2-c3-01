@@ -4,7 +4,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.platform.app.InstrumentationRegistry
-import com.example.myapplication.data.local.OfflineAccountStore
 import com.example.myapplication.data.local.SecureTokenStore
 import org.junit.Before
 import org.junit.Rule
@@ -18,7 +17,6 @@ class MelodyBubbleFlowTest {
     fun startFromSignedOutSession() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         SecureTokenStore(context).clear()
-        OfflineAccountStore(context).clear()
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
     }

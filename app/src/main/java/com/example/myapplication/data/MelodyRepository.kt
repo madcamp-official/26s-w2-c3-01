@@ -22,9 +22,7 @@ import com.example.myapplication.core.model.NearbyMeasurementDiagnostics
 import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NotificationType
-import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.PopularTrack
-import com.example.myapplication.core.model.PresenceMode
 import com.example.myapplication.core.model.ProfileMelodyAlias
 import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.ProfileNowPlaying
@@ -39,16 +37,10 @@ import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.SharedFollowerPreview
 import com.example.myapplication.core.model.SocialConnection
-import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.TasteFingerprint
 import com.example.myapplication.core.model.TasteMetric
-import com.example.myapplication.core.model.SessionMode
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.abstractDisplayPosition
-import com.example.myapplication.data.local.MelodyDatabase
-import com.example.myapplication.data.local.OfflineExchangeEntity
-import com.example.myapplication.data.local.SyncOutboxEntity
-import com.example.myapplication.data.local.CachedAccount
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
 import com.example.myapplication.data.realtime.RealtimeConnectionState
 import com.example.myapplication.data.realtime.RealtimeEvent
@@ -74,7 +66,6 @@ import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
 import com.example.myapplication.data.remote.ProfileCurationUpdateRequest
 import com.example.myapplication.data.remote.ProfilePrivacyUpdateRequest
-import com.example.myapplication.data.remote.PrivacyUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
 import com.example.myapplication.data.remote.RemoteProfileMelodyAlias
 import com.example.myapplication.data.remote.RemoteProfileStats
@@ -84,15 +75,11 @@ import com.example.myapplication.data.remote.RemotePublicProfile
 import com.example.myapplication.data.remote.RemoteTasteFingerprint
 import com.example.myapplication.data.remote.RemoteSocialConnection
 import com.example.myapplication.data.remote.jwtSubject
-import com.example.myapplication.offlineexchange.ExchangeProtocol
-import com.example.myapplication.offlineexchange.OfflineExchangeResult
-import com.example.myapplication.offlineexchange.OfflineExchangeSyncWorker
 import com.example.myapplication.nearby.PassiveNearbyDiscoveryManager
 import com.example.myapplication.nearby.PeerProximityMeasurement
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
-import androidx.room.withTransaction
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -166,8 +153,6 @@ interface MelodyRepository {
     fun completeOnboarding()
     fun selectTab(tab: MainTab)
     fun selectNearby(handle: String?)
-    fun enterBubbleMode()
-    fun exitBubbleMode()
     fun openChat(roomId: String)
     fun closeChat(roomId: String)
     fun leaveChat(roomId: String)
@@ -185,7 +170,6 @@ interface MelodyRepository {
     fun loadSocialConnections()
     fun unfollowRelationship(relationshipId: String)
     fun loadPublicProfile(profileHandle: String)
-    fun loadExchangeProfile(exchangeId: String)
     fun clearPublicProfile()
     fun followPublicProfile()
     fun sendChat(roomId: String, content: String)
@@ -194,19 +178,14 @@ interface MelodyRepository {
     fun deleteNotification(notificationId: String)
     fun setDiscoverable(enabled: Boolean)
     fun setAllowReactions(enabled: Boolean)
-    fun setOfflineExchangeEnabled(enabled: Boolean)
     fun setMusicVisibility(label: String)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
     fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>)
     fun randomizeAvatar()
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings)
-    fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String)
-    fun syncExchange(exchangeId: String)
-    fun deleteExchange(exchangeId: String)
     fun clearFeedback()
     fun authenticate(accessToken: String)
-    fun authenticateOffline(account: CachedAccount)
     fun refreshSession(accessToken: String)
     fun logout()
     fun close()
@@ -214,7 +193,6 @@ interface MelodyRepository {
 
 class DemoMelodyRepository(
     context: Context,
-    private val database: MelodyDatabase = MelodyDatabase.getInstance(context),
     environment: ApiEnvironment = ApiEnvironment()
 ) : MelodyRepository {
     private val applicationContext = context.applicationContext
@@ -259,7 +237,6 @@ class DemoMelodyRepository(
     @Volatile private var latestLocationFix: LocationFix? = null
     private var hybridDiscoveryJob: Job? = null
     private var chatSyncJob: Job? = null
-    private var exchangeObserveJob: Job? = null
     private val chatRealtimeVersion = AtomicLong(0)
     private val nearbyRealtimeVersion = AtomicLong(0)
     private val locationSequence = AtomicLong(System.currentTimeMillis() * 1_000L)
@@ -289,7 +266,6 @@ class DemoMelodyRepository(
     @Volatile private var accessToken: String? = null
     private var liveTick = 0
     private var locationReceiverRegistered = false
-    private var exchangeSyncReceiverRegistered = false
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != SharingForegroundService.ACTION_LOCATION_FIX) return
@@ -311,17 +287,6 @@ class DemoMelodyRepository(
             }
         }
     }
-    private val exchangeSyncReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != OfflineExchangeSyncWorker.ACTION_SYNC_COMPLETED) return
-            val token = accessToken ?: return
-            scope.launch {
-                runCatching { profileApi.me("Bearer $token") }
-                    .onSuccess { if (isCurrentSession(token)) applyRemoteProfile(it) }
-            }
-        }
-    }
-
     init {
         ContextCompat.registerReceiver(
             applicationContext,
@@ -330,13 +295,6 @@ class DemoMelodyRepository(
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         locationReceiverRegistered = true
-        ContextCompat.registerReceiver(
-            applicationContext,
-            exchangeSyncReceiver,
-            IntentFilter(OfflineExchangeSyncWorker.ACTION_SYNC_COMPLETED),
-            ContextCompat.RECEIVER_NOT_EXPORTED,
-        )
-        exchangeSyncReceiverRegistered = true
         scope.launch {
             realtimeClient.events.collect(::handleRealtimeEvent)
         }
@@ -419,16 +377,6 @@ class DemoMelodyRepository(
 
     override fun selectNearby(handle: String?) {
         _state.update { it.copy(selectedNearbyHandle = handle) }
-    }
-
-    override fun enterBubbleMode() {
-        _state.update {
-            it.copy(presenceMode = PresenceMode.BUBBLE, feedbackMessage = "버블 모드를 열었어요")
-        }
-    }
-
-    override fun exitBubbleMode() {
-        _state.update { it.copy(presenceMode = PresenceMode.NORMAL) }
     }
 
     override fun openChat(roomId: String) {
@@ -537,7 +485,7 @@ class DemoMelodyRepository(
         _state.update {
             it.copy(
                 sharingState = SharingState.STOPPED,
-                connectionState = ConnectionState.OFFLINE,
+                connectionState = ConnectionState.DISCONNECTED,
                 nearbyLoadState = NearbyLoadState.IDLE,
                 nearbyErrorMessage = null,
                 nearbyListeners = emptyList(),
@@ -551,7 +499,7 @@ class DemoMelodyRepository(
         _state.update {
             it.copy(
                 sharingState = SharingState.PERMISSION_REQUIRED,
-                connectionState = ConnectionState.OFFLINE,
+                connectionState = ConnectionState.DISCONNECTED,
                 nearbyLoadState = NearbyLoadState.IDLE,
                 feedbackMessage = "주변 공유를 시작하려면 위치 권한이 필요해요"
             )
@@ -562,7 +510,7 @@ class DemoMelodyRepository(
         _state.update {
             it.copy(
                 sharingState = SharingState.FAILED,
-                connectionState = ConnectionState.OFFLINE,
+                connectionState = ConnectionState.DISCONNECTED,
                 nearbyLoadState = NearbyLoadState.ERROR,
                 nearbyErrorMessage = "공유 서비스를 시작하지 못했어요. 권한과 시스템 설정을 확인한 뒤 다시 시도해 주세요.",
                 feedbackMessage = "주변 공유를 시작하지 못했어요",
@@ -809,36 +757,6 @@ class DemoMelodyRepository(
         }
     }
 
-    override fun loadExchangeProfile(exchangeId: String) {
-        val token = accessToken ?: return
-        _state.update {
-            it.copy(selectedPublicProfile = null, publicProfileLoading = true, publicProfileError = null)
-        }
-        scope.launch {
-            runCatching { profileApi.exchangeProfile("Bearer $token", exchangeId) }
-                .onSuccess { remote ->
-                    if (!isCurrentSession(token)) return@onSuccess
-                    val profile = remote.toDomain()
-                    _state.update {
-                        it.copy(selectedPublicProfile = profile, publicProfileLoading = false)
-                    }
-                    resolvePublicProfileArtwork(profile)
-                }
-                .onFailure { error ->
-                    if (!isCurrentSession(token)) return@onFailure
-                    _state.update {
-                        it.copy(
-                            selectedPublicProfile = null,
-                            publicProfileLoading = false,
-                            publicProfileError = if (error is HttpException && error.code() == 404) {
-                                "양쪽에서 확인된 교환 후 프로필을 볼 수 있어요."
-                            } else "교환 상대 프로필을 불러오지 못했어요.",
-                        )
-                    }
-                }
-        }
-    }
-
     override fun clearPublicProfile() {
         _state.update {
             it.copy(selectedPublicProfile = null, publicProfileLoading = false, publicProfileError = null)
@@ -1054,33 +972,6 @@ class DemoMelodyRepository(
         syncPresenceSettings()
     }
 
-    override fun setOfflineExchangeEnabled(enabled: Boolean) {
-        _state.update { it.copy(profile = it.profile.copy(offlineExchangeEnabled = enabled)) }
-        persistProfile(_state.value.profile)
-        val token = accessToken ?: return
-        val state = _state.value
-        scope.launch {
-            runCatching {
-                profileApi.privacy(
-                    "Bearer $token",
-                    PrivacyUpdateRequest(
-                        discoverable = state.discoverabilityScope != "HIDDEN",
-                        shareMusic = state.musicVisibility != "HIDDEN",
-                        offlineExchangeEnabled = enabled,
-                    ),
-                )
-            }.onSuccess { if (isCurrentSession(token)) applyRemoteProfile(it, "교환 설정을 저장했어요") }
-                .onFailure { error ->
-                    if (!isCurrentSession(token)) return@onFailure
-                    _state.update { current ->
-                        current.copy(profile = current.profile.copy(offlineExchangeEnabled = !enabled))
-                    }
-                    persistProfile(_state.value.profile)
-                    showRequestError(error, "교환 설정을 저장하지 못했어요")
-                }
-        }
-    }
-
     override fun setMusicVisibility(label: String) {
         _state.update { it.copy(profile = it.profile.copy(musicVisibilityLabel = label)) }
         persistProfile(_state.value.profile)
@@ -1285,8 +1176,6 @@ class DemoMelodyRepository(
                     currentMusicVisibility = settings.currentMusicVisibility,
                     listeningInsightsEnabled = settings.listeningInsightsEnabled,
                     listeningInsightsVisibility = settings.listeningInsightsVisibility,
-                    exchangeInsightsVisibility = settings.exchangeInsightsVisibility,
-                    bubblePresenceVisibility = settings.bubblePresenceVisibility,
                 ),
             )
         }.onSuccess { remote ->
@@ -1298,72 +1187,6 @@ class DemoMelodyRepository(
             _state.update {
                 it.copy(profileSaving = false, feedbackMessage = "공개 범위를 기기에 보관했어요. 연결되면 다시 시도해요")
             }
-        }
-    }
-
-    override fun saveOfflineExchange(result: OfflineExchangeResult, credentialId: String) {
-        val ownerUserId = _state.value.activeAccountId ?: return
-        scope.launch(Dispatchers.IO) {
-            database.withTransaction {
-                database.offlineExchangeDao().insert(OfflineExchangeEntity(
-                    id = result.exchangeId,
-                    ownerUserId = ownerUserId,
-                    localSessionId = UUID.randomUUID().toString(),
-                    credentialId = credentialId,
-                    peerCredentialId = result.peerCredentialId,
-                    peerDisplayAlias = result.peerCard.displayAlias,
-                    trackTitle = result.peerCard.trackTitle,
-                    trackArtist = result.peerCard.trackArtist,
-                    melodyAlias = result.peerCard.melodyAlias,
-                    sentCardJson = ExchangeProtocol.cardJson(result.sentCard),
-                    receivedCardJson = ExchangeProtocol.cardJson(result.peerCard),
-                    exchangedAt = result.exchangedAt,
-                    syncState = SyncState.PENDING.name,
-                    expiresAt = null,
-                    payloadHash = result.payloadHash,
-                    protocolVersion = result.protocolVersion,
-                    recordSignature = result.recordSignature,
-                ))
-                database.syncOutboxDao().insert(SyncOutboxEntity(
-                    id = "outbox-${result.exchangeId}",
-                    ownerUserId = ownerUserId,
-                    kind = "OFFLINE_EXCHANGE",
-                    requestId = result.exchangeId,
-                    payloadJson = "{\"exchangeId\":\"${result.exchangeId}\"}",
-                    createdAt = result.exchangedAt,
-                ))
-            }
-            com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
-            _state.update { it.copy(feedbackMessage = "${result.peerCard.displayAlias} 님의 음악 카드를 저장했어요") }
-        }
-    }
-
-    override fun syncExchange(exchangeId: String) {
-        com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
-        _state.update { it.copy(feedbackMessage = "인터넷 연결 시 교환 기록을 동기화할게요") }
-    }
-
-    override fun deleteExchange(exchangeId: String) {
-        val ownerUserId = _state.value.activeAccountId ?: return
-        val record = _state.value.offlineExchanges.firstOrNull { it.id == exchangeId } ?: return
-        scope.launch(Dispatchers.IO) {
-            if (record.syncState == SyncState.SYNCED || record.syncState == SyncState.UPLOADING) {
-                database.syncOutboxDao().insert(
-                    SyncOutboxEntity(
-                        id = "delete-$exchangeId",
-                        ownerUserId = ownerUserId,
-                        kind = "OFFLINE_EXCHANGE_DELETE",
-                        requestId = exchangeId,
-                        payloadJson = "{\"exchangeId\":\"$exchangeId\"}",
-                        createdAt = System.currentTimeMillis(),
-                    )
-                )
-            } else {
-                database.syncOutboxDao().delete(ownerUserId, "outbox-$exchangeId")
-            }
-            database.offlineExchangeDao().delete(ownerUserId, exchangeId)
-            com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
-            _state.update { it.copy(feedbackMessage = "교환 기록을 삭제했어요") }
         }
     }
 
@@ -1400,8 +1223,6 @@ class DemoMelodyRepository(
                 detectedTrackPlaying = detectedPlayback.isPlaying,
                 selectedNearbyHandle = null,
                 dataSourceLabel = "SERVER LIVE",
-                sessionMode = SessionMode.ONLINE,
-                presenceMode = PresenceMode.NORMAL,
                 activeAccountId = ownerUserId,
             )
         }
@@ -1442,52 +1263,9 @@ class DemoMelodyRepository(
         realtimeClient.connect(accessToken)
         handleRealtimeConnectionState(realtimeClient.connectionState.value)
         startChatSync(accessToken)
-        com.example.myapplication.offlineexchange.OfflineExchangeSyncScheduler.enqueue(applicationContext)
         if (SharingForegroundService.isSharingActive(applicationContext)) {
             startSharing()
         }
-    }
-
-    override fun authenticateOffline(account: CachedAccount) {
-        stopSharing()
-        accessToken = null
-        realtimeClient.disconnect()
-        presenceSyncCoordinator.onSessionCleared()
-        setActiveOwner(account.accountId)
-        val current = _state.value
-        val accountProfile = restoreProfile(current.profile)
-        _state.value = current.copy(
-            isOnboardingComplete = true,
-            selectedTab = MainTab.HOME,
-            presenceMode = PresenceMode.NORMAL,
-            connectionState = ConnectionState.OFFLINE,
-            sharingState = SharingState.STOPPED,
-            currentTrack = Track(
-                id = "offline-cached",
-                title = account.musicCard.trackTitle,
-                artist = account.musicCard.trackArtist,
-                genreTags = account.musicCard.genreTags,
-                moodTags = account.musicCard.moodTags,
-            ),
-            profile = accountProfile.copy(
-                accountAlias = account.displayAlias,
-                nearbyDisplayAlias = account.displayAlias,
-                colorHex = account.colorHex,
-                avatarUrl = account.avatarUrl,
-                melodyNotes = account.melodyAlias.split(" · ").filter(String::isNotBlank),
-            ),
-            nearbyListeners = emptyList(),
-            popularTracks = emptyList(),
-            notifications = emptyList(),
-            chats = emptyList(),
-            chatMessages = emptyMap(),
-            dataSourceLabel = "OFFLINE ACCOUNT",
-            sessionMode = SessionMode.OFFLINE,
-            activeAccountId = account.accountId,
-            selectedPublicProfile = null,
-            publicProfileLoading = false,
-            publicProfileError = null,
-        )
     }
 
     override fun refreshSession(accessToken: String) {
@@ -1526,9 +1304,7 @@ class DemoMelodyRepository(
             publicProfileError = null,
             feedbackMessage = null,
             dataSourceLabel = "SIGNED OUT",
-            sessionMode = SessionMode.SIGNED_OUT,
             activeAccountId = null,
-            offlineExchanges = emptyList(),
         ) }
         setActiveOwner(null)
     }
@@ -1569,15 +1345,8 @@ class DemoMelodyRepository(
             val keepPendingCuration = preferences.getBoolean(profileScopedKey(KEY_PROFILE_CURATION_DIRTY), false)
             val keepPendingPrivacy = preferences.getBoolean(profileScopedKey(KEY_PROFILE_PRIVACY_DIRTY), false)
             val remoteAlias = remote.melodyAlias
-            val stats = remote.stats?.toDomain() ?: current.profile.stats.copy(
-                verifiedExchangeCount = remote.offlineExchangeCount,
-                receivedCardCount = remote.offlineExchangeCount,
-            )
-            val fingerprint = remote.tasteFingerprint?.toDomain()
-                ?: TasteFingerprint(
-                    remote.offlineExchangeGenres.orEmpty().map { TasteMetric(it, 0, 0.0) },
-                    remote.offlineExchangeMoods.orEmpty().map { TasteMetric(it, 0, 0.0) },
-                )
+            val stats = remote.stats?.toDomain() ?: current.profile.stats
+            val fingerprint = remote.tasteFingerprint?.toDomain() ?: current.profile.tasteFingerprint
             val resolvedAvatar = AvatarProfileResolver.resolve(
                 remoteSeed = remote.avatarSeed,
                 remoteUrl = remote.avatarUrl,
@@ -1596,7 +1365,6 @@ class DemoMelodyRepository(
                     genres = remote.genres.orEmpty(),
                     moods = remote.moods.orEmpty(),
                     profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
-                    offlineExchangeEnabled = remote.offlineExchangeEnabled ?: current.profile.offlineExchangeEnabled,
                     stats = stats,
                     tasteFingerprint = fingerprint,
                     profileRevision = if (keepPendingCuration) cachedProfile.profileRevision else remote.profileRevision,
@@ -1613,8 +1381,6 @@ class DemoMelodyRepository(
                             currentMusicVisibility = it.currentMusicVisibility,
                             listeningInsightsEnabled = it.listeningInsightsEnabled,
                             listeningInsightsVisibility = it.listeningInsightsVisibility,
-                            exchangeInsightsVisibility = it.exchangeInsightsVisibility,
-                            bubblePresenceVisibility = it.bubblePresenceVisibility,
                         )
                     } ?: current.profile.privacy,
                     melodyNotes = remoteAlias?.notes ?: current.profile.melodyNotes,
@@ -1629,9 +1395,6 @@ class DemoMelodyRepository(
                         else -> "제목과 아티스트 공개"
                     },
                 ),
-                verifiedOfflineExchangeCount = stats.verifiedExchangeCount,
-                offlineExchangeGenres = fingerprint.genres.map(TasteMetric::label),
-                offlineExchangeMoods = fingerprint.moods.map(TasteMetric::label),
                 feedbackMessage = feedback ?: current.feedbackMessage,
             )
         }
@@ -1658,7 +1421,6 @@ class DemoMelodyRepository(
             .putString("profile-music-visibility", profile.musicVisibilityLabel)
             .putBoolean("profile-discoverable", profile.discoverable)
             .putBoolean("profile-allow-reactions", profile.allowReactions)
-            .putBoolean("profile-offline-exchange", profile.offlineExchangeEnabled)
             .putLong(profileScopedKey("profile-revision"), profile.profileRevision)
             .putString(profileScopedKey("profile-signature-tracks"), gson.toJson(profile.signatureTracks))
             .putString(profileScopedKey("profile-favorite-artists"), gson.toJson(profile.favoriteArtists))
@@ -1686,7 +1448,6 @@ class DemoMelodyRepository(
             musicVisibilityLabel = preferences.getString("profile-music-visibility", fallback.musicVisibilityLabel) ?: fallback.musicVisibilityLabel,
             discoverable = preferences.getBoolean("profile-discoverable", fallback.discoverable),
             allowReactions = preferences.getBoolean("profile-allow-reactions", fallback.allowReactions),
-            offlineExchangeEnabled = preferences.getBoolean("profile-offline-exchange", fallback.offlineExchangeEnabled),
             profileRevision = preferences.getLong(profileScopedKey("profile-revision"), fallback.profileRevision),
             signatureTracks = preferences.getString(profileScopedKey("profile-signature-tracks"), null)?.let { json ->
                 runCatching { gson.fromJson(json, Array<ProfileTrack>::class.java).toList() }.getOrNull()
@@ -2096,7 +1857,7 @@ class DemoMelodyRepository(
         if (accessToken == null) return
         if (_state.value.sharingState !in setOf(SharingState.STARTING, SharingState.ACTIVE)) return
         val connectionState = when (realtimeState) {
-            RealtimeConnectionState.Disconnected -> ConnectionState.OFFLINE
+            RealtimeConnectionState.Disconnected -> ConnectionState.DISCONNECTED
             is RealtimeConnectionState.Connecting -> ConnectionState.CONNECTING
             is RealtimeConnectionState.Connected -> ConnectionState.LIVE
             is RealtimeConnectionState.Reconnecting -> ConnectionState.RECONNECTING
@@ -2685,9 +2446,6 @@ class DemoMelodyRepository(
     private fun RemoteProfileStats.toDomain() = ProfileStats(
         followingCount = followingCount,
         followerCount = followerCount,
-        verifiedExchangeCount = verifiedExchangeCount,
-        uniqueExchangeUserCount = uniqueExchangeUserCount,
-        receivedCardCount = receivedCardCount,
     )
 
     private fun RemoteTasteFingerprint.toDomain() = TasteFingerprint(
@@ -2762,7 +2520,6 @@ class DemoMelodyRepository(
             relationship = runCatching { RelationshipStatus.valueOf(relationship) }.getOrDefault(RelationshipStatus.NONE),
             following = following,
             mutual = mutual,
-            sharedVerifiedExchangeCount = sharedVerifiedExchangeCount,
             sharedFollowers = sharedFollowers.orEmpty().map {
                 SharedFollowerPreview(
                     profileHandle = it.profileHandle,
@@ -2842,10 +2599,6 @@ class DemoMelodyRepository(
             runCatching { applicationContext.unregisterReceiver(locationReceiver) }
             locationReceiverRegistered = false
         }
-        if (exchangeSyncReceiverRegistered) {
-            runCatching { applicationContext.unregisterReceiver(exchangeSyncReceiver) }
-            exchangeSyncReceiverRegistered = false
-        }
         if (ownsRealtimeClient) realtimeClient.close()
         scope.coroutineContext[Job]?.cancel()
     }
@@ -2869,38 +2622,8 @@ class DemoMelodyRepository(
         }
     }
 
-    private fun OfflineExchangeEntity.toDomain() = OfflineExchangeRecord(
-        id = id,
-        ownerUserId = ownerUserId,
-        localSessionId = localSessionId,
-        credentialId = credentialId,
-        peerCredentialId = peerCredentialId,
-        peerDisplayAlias = peerDisplayAlias,
-        trackTitle = trackTitle,
-        trackArtist = trackArtist,
-        melodyAlias = melodyAlias,
-        sentCardJson = sentCardJson,
-        receivedCardJson = receivedCardJson,
-        exchangedAt = exchangedAt,
-        syncState = runCatching { SyncState.valueOf(syncState) }.getOrDefault(SyncState.PENDING),
-        retryCount = retryCount,
-        lastError = lastError,
-        payloadHash = payloadHash,
-        protocolVersion = protocolVersion,
-        recordSignature = recordSignature,
-    )
-
     private fun setActiveOwner(ownerUserId: String?) {
         activeOwnerId = ownerUserId
-        exchangeObserveJob?.cancel()
-        exchangeObserveJob = null
-        if (ownerUserId == null) return
-        exchangeObserveJob = scope.launch {
-            database.offlineExchangeDao().deleteExpired(ownerUserId, System.currentTimeMillis())
-            database.offlineExchangeDao().observeForOwner(ownerUserId).collect { entities ->
-                _state.update { current -> current.copy(offlineExchanges = entities.map { it.toDomain() }) }
-            }
-        }
     }
 
     private fun profileScopedKey(base: String): String =

@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.example.myapplication.MainActivity
+import com.example.myapplication.R
 
 /** Shows private system notifications only while no app Activity is visible. */
 class RealtimeSystemNotifier(context: Context) {
@@ -58,7 +59,7 @@ class RealtimeSystemNotifier(context: Context) {
             }
             is RealtimeEvent.NotificationCreated -> NotificationContent(
                 id = event.envelope.eventId,
-                title = event.envelope.payload.title?.takeIf(String::isNotBlank) ?: "Melody Bubble",
+                title = event.envelope.payload.title?.takeIf(String::isNotBlank) ?: "Sync",
                 body = event.envelope.payload.body?.takeIf(String::isNotBlank) ?: return,
             )
             else -> return
@@ -90,7 +91,8 @@ class RealtimeSystemNotifier(context: Context) {
         notificationManager.notify(
             requestCode,
             builder
-                .setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setSmallIcon(R.drawable.ic_notification_sync)
+                .setColor(applicationContext.getColor(R.color.sync_violet_glow))
                 .setContentTitle(content.title.take(80))
                 .setContentText(content.body.take(180))
                 .setStyle(Notification.BigTextStyle().bigText(content.body.take(500)))

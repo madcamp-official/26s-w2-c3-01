@@ -7,6 +7,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -101,6 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -119,7 +121,6 @@ import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.data.AvatarProfileResolver
 import com.example.myapplication.core.model.MusicSearchResult
-import com.example.myapplication.core.model.OfflineExchangeRecord
 import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.PreviewPlaybackState
 import com.example.myapplication.core.model.ProfileArtist
@@ -127,11 +128,8 @@ import com.example.myapplication.core.model.ProfilePrivacySettings
 import com.example.myapplication.core.model.ProfileTrack
 import com.example.myapplication.core.model.PublicProfile
 import com.example.myapplication.core.model.RelationshipStatus
-import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.SocialConnection
 import com.example.myapplication.core.model.Track
-import com.example.myapplication.offlineexchange.ExchangeConnectionState
-import com.example.myapplication.offlineexchange.ExchangeMusicCard
 import com.example.myapplication.ui.theme.MossOutline
 import com.example.myapplication.ui.theme.MossSurface
 import com.example.myapplication.ui.theme.MossSurfaceHigh
@@ -171,7 +169,7 @@ fun OnboardingScreen(
         "공개는 내가 시작해요",
     )
     val descriptions = listOf(
-        "서비스 이용약관과 개인정보 처리방침에 동의해야 Melody Bubble을 시작할 수 있어요.",
+        "서비스 이용약관과 개인정보 처리방침에 동의해야 Sync를 시작할 수 있어요.",
         "좋아하는 장르와 분위기를 선택해 주세요. 추천과 주변 취향 유사도에 사용됩니다.",
         "이름을 검색해 프로필에 보여줄 아티스트를 최대 3명까지 선택해 주세요.",
         "검색 결과에서 내 음악 취향을 대표하는 곡을 최대 3곡까지 골라 주세요.",
@@ -233,7 +231,7 @@ fun OnboardingScreen(
                 }
             }
             Text(
-                text = "MELODY BUBBLE · ONBOARDING",
+                text = "SYNC · ONBOARDING",
                 style = MaterialTheme.typography.labelLarge,
                 color = SignalGreen
             )
@@ -708,7 +706,7 @@ fun InboxScreen(
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = SignalGreen,
-                                contentColor = Color(0xFF00210B),
+                                contentColor = MelodyBubbleColors.OnPrimary,
                             ),
                         ) {
                             Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null)
@@ -771,7 +769,7 @@ fun InboxScreen(
                                     Text(
                                         chat.unreadCount.toString(),
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        color = Color(0xFF00210B),
+                                        color = MelodyBubbleColors.OnPrimary,
                                         style = MaterialTheme.typography.labelMedium
                                     )
                                 }
@@ -920,13 +918,13 @@ fun NotificationScreen(
                                 ) {
                                     TrackGlyph(
                                         notification.actorAlias ?: "시스템",
-                                        notification.actorColorHex ?: 0xFF2A4937L,
+                                        notification.actorColorHex ?: 0xFF54341EL,
                                     )
                                 }
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        notification.actorAlias ?: "Melody Bubble",
+                                        notification.actorAlias ?: "Sync",
                                         fontWeight = FontWeight.Bold,
                                         modifier = Modifier.clickable(
                                             enabled = notification.actorProfileHandle != null,
@@ -1098,7 +1096,7 @@ fun ChatScreen(
                 Icon(
                     Icons.AutoMirrored.Outlined.Send,
                     contentDescription = "메시지 보내기",
-                    tint = Color(0xFF00210B)
+                    tint = MelodyBubbleColors.OnPrimary
                 )
             }
         }
@@ -1193,16 +1191,12 @@ fun MyScreen(
     feedbackMessage: String?,
     followingCount: Int,
     followerCount: Int,
-    verifiedOfflineExchangeCount: Int,
-    offlineExchangeGenres: List<String>,
-    offlineExchangeMoods: List<String>,
     nowPlayingTrack: Track?,
     nowPlayingActive: Boolean,
     onLoadConnections: () -> Unit,
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenBubbleMode: () -> Unit,
     onProfileUpdate: (String, Long, String, List<String>, List<String>) -> Unit,
     onRandomizeAvatar: () -> Unit,
     onProfileCurationUpdate: (List<ProfileTrack>, List<ProfileArtist>) -> Unit,
@@ -1485,7 +1479,6 @@ fun MyScreen(
                 Row(Modifier.fillMaxWidth()) {
                     LightProfileCount("팔로잉", followingCount, ink, muted, Modifier.weight(1f).clickable(onClick = onOpenFollowing))
                     LightProfileCount("팔로워", followerCount, ink, muted, Modifier.weight(1f).clickable(onClick = onOpenFollowers))
-                    LightProfileCount("검증된 교환", verifiedOfflineExchangeCount, ink, muted, Modifier.weight(1f).clickable(onClick = onOpenBubbleMode))
                 }
             }
         }
@@ -1524,21 +1517,6 @@ fun MyScreen(
                         accent = accent,
                         muted = muted,
                     )
-                }
-            }
-        }
-        item {
-            ProfileLightPanel(outline = outline, ink = ink, contentPadding = 13.dp, onClick = onOpenBubbleMode) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, null, tint = accent)
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("버블 모드", color = ink, fontWeight = FontWeight.Bold)
-                        Text("가까운 사람과 음악 카드를 직접 교환해요", color = muted, style = MaterialTheme.typography.bodySmall)
-                    }
-                    Surface(color = accent, contentColor = MelodyBubbleColors.OnPrimary, shape = RoundedCornerShape(16.dp)) {
-                        Text("시작", Modifier.padding(horizontal = 13.dp, vertical = 7.dp), fontWeight = FontWeight.Bold)
-                    }
                 }
             }
         }
@@ -1595,11 +1573,11 @@ fun MyScreen(
         }
         val discoveredTaste = (profile.tasteFingerprint.genres + profile.tasteFingerprint.moods).take(4)
         val measuredTaste = discoveredTaste.filter { it.ratio > 0.0 }
-        val discoveredLabels = (discoveredTaste.map { it.label } + offlineExchangeGenres + offlineExchangeMoods).distinct().take(4)
+        val discoveredLabels = discoveredTaste.map { it.label }.distinct().take(4)
         item {
             ProfileLightPanel(outline = outline, ink = ink) {
-                Text("교환으로 발견한 취향", color = ink, fontWeight = FontWeight.Bold)
-                Text("양쪽에서 확인된 음악 카드만 반영해요", color = muted, style = MaterialTheme.typography.bodySmall)
+                Text("나의 음악 취향", color = ink, fontWeight = FontWeight.Bold)
+                Text("프로필과 청취 정보를 바탕으로 정리해요", color = muted, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(8.dp))
                 when {
                     measuredTaste.isNotEmpty() -> measuredTaste.forEach { metric ->
@@ -1609,8 +1587,8 @@ fun MyScreen(
                         discoveredLabels.take(3).forEach { label -> LightProfileTag(label, accent, outline) }
                     }
                     else -> ProfileEmptyRow(
-                        title = "교환 데이터가 쌓이면 취향이 보여요",
-                        description = "검증된 음악 교환을 바탕으로 장르와 무드를 정리해드려요.",
+                        title = "취향 정보가 쌓이면 여기에 보여요",
+                        description = "좋아하는 장르와 대표곡을 추가해보세요.",
                         accent = accent,
                         muted = muted,
                     )
@@ -1631,6 +1609,7 @@ fun PublicProfileScreen(
     onMessage: () -> Unit = {},
     onPlayNowPlaying: (String, String, String?) -> Unit = { _, _, _ -> },
     onPlayTrackPreview: (ProfileTrack) -> Unit = {},
+    onOpenMusicApp: (String, String) -> Unit = { _, _ -> },
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
     onShare: () -> Unit = {},
@@ -1690,25 +1669,17 @@ fun PublicProfileScreen(
                         onMessage = onMessage,
                     )
                 }
-                if (profile.sharedVerifiedExchangeCount > 0) item {
-                    ProfileLightPanel(outline = outline, ink = ink, contentPadding = 14.dp) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Outlined.PeopleOutline, null, tint = lavender)
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("실제로 음악을 교환한 사이", color = ink, fontWeight = FontWeight.Bold)
-                                Text("서로 확인된 교환 ${profile.sharedVerifiedExchangeCount}회", color = muted, style = MaterialTheme.typography.bodySmall)
-                            }
-                            Icon(Icons.Outlined.ChevronRight, null, tint = muted)
-                        }
-                    }
-                }
                 profile.nowPlaying?.let { nowPlaying ->
                     item {
                         ProfileLightPanel(
                             outline = outline,
                             ink = ink,
-                            onClick = { onPlayNowPlaying(nowPlaying.title, nowPlaying.artist, nowPlaying.artworkUrl) },
+                            modifier = Modifier.pointerInput(nowPlaying.title, nowPlaying.artist) {
+                                detectTapGestures(
+                                    onTap = { onPlayNowPlaying(nowPlaying.title, nowPlaying.artist, nowPlaying.artworkUrl) },
+                                    onDoubleTap = { onOpenMusicApp(nowPlaying.title, nowPlaying.artist) },
+                                )
+                            },
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text("지금 듣는 음악", color = ink, fontWeight = FontWeight.Bold)
@@ -1750,7 +1721,12 @@ fun PublicProfileScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .clip(RoundedCornerShape(12.dp))
-                                            .clickable { onPlayTrackPreview(track) }
+                                            .pointerInput(track.title, track.artist) {
+                                                detectTapGestures(
+                                                    onTap = { onPlayTrackPreview(track) },
+                                                    onDoubleTap = { onOpenMusicApp(track.title, track.artist) },
+                                                )
+                                            }
                                             .padding(4.dp),
                                     ) {
                                         ProfileArtwork(track.artworkUrl, lavender, 64.dp)
@@ -1783,7 +1759,7 @@ fun PublicProfileScreen(
                 val fallbackTaste = (profile.tasteFingerprint.genres + profile.tasteFingerprint.moods).take(4)
                 if (profile.commonTaste != null || fallbackTaste.isNotEmpty()) item {
                     ProfileLightPanel(outline = outline, ink = ink) {
-                        Text(if (profile.commonTaste != null) "공통 취향" else "교환으로 발견된 취향", color = ink, fontWeight = FontWeight.Bold)
+                        Text(if (profile.commonTaste != null) "공통 취향" else "음악 취향", color = ink, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(10.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -1822,7 +1798,7 @@ fun PublicProfileScreen(
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text("공개 범위는 항목별로 달라요", color = ink, fontWeight = FontWeight.Bold)
-                                Text("지금 듣는 음악 · 청취 분석 · 교환 기록", color = muted, style = MaterialTheme.typography.bodySmall)
+                                Text("지금 듣는 음악 · 청취 분석", color = muted, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -1887,11 +1863,12 @@ private fun PublicProfileHero(
 private fun ProfileLightPanel(
     outline: Color,
     ink: Color,
+    modifier: Modifier = Modifier,
     contentPadding: androidx.compose.ui.unit.Dp = 16.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val panelModifier = Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+    val panelModifier = modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
     Surface(
         modifier = panelModifier,
         shape = RoundedCornerShape(18.dp),
@@ -2142,15 +2119,12 @@ private fun ConnectionCount(
 @Composable
 fun SettingsScreen(
     profile: ProfileSettings,
-    offlineExchangeCount: Int,
     onBack: () -> Unit,
     onDiscoverableChange: (Boolean) -> Unit,
     onAllowReactionsChange: (Boolean) -> Unit,
-    onOfflineExchangeChange: (Boolean) -> Unit,
     onMusicVisibilityChange: (String) -> Unit,
     onProfilePrivacyChange: (ProfilePrivacySettings) -> Unit,
     onOpenNotificationAccess: () -> Unit,
-    onOpenOfflineExchange: () -> Unit,
     onOpenBlockedUsers: () -> Unit,
     onLogout: () -> Unit,
     onDeleteAccount: () -> Unit,
@@ -2194,27 +2168,6 @@ fun SettingsScreen(
                     options = listOf("EVERYONE" to "전체", "MUTUALS" to "맞팔", "PRIVATE" to "비공개"),
                 ) { draftPrivacy = draftPrivacy.copy(listeningInsightsVisibility = it) }
             }
-            Spacer(Modifier.height(18.dp))
-            Text("교환으로 발견된 취향", fontWeight = FontWeight.Bold)
-            PrivacyChoiceRow(
-                selected = draftPrivacy.exchangeInsightsVisibility,
-                options = listOf(
-                    "EVERYONE" to "전체",
-                    "MUTUALS" to "맞팔",
-                    "EXCHANGED" to "교환한 사람",
-                    "PRIVATE" to "비공개",
-                ),
-            ) { draftPrivacy = draftPrivacy.copy(exchangeInsightsVisibility = it) }
-            Spacer(Modifier.height(18.dp))
-            Text("버블 모드 참여 상태", fontWeight = FontWeight.Bold)
-            PrivacyChoiceRow(
-                selected = draftPrivacy.bubblePresenceVisibility,
-                options = listOf(
-                    "PARTICIPANTS_ONLY" to "참여자",
-                    "MUTUALS" to "맞팔",
-                    "PRIVATE" to "비공개",
-                ),
-            ) { draftPrivacy = draftPrivacy.copy(bubblePresenceVisibility = it) }
             Spacer(Modifier.height(24.dp))
             Button(
                 onClick = {
@@ -2251,14 +2204,12 @@ fun SettingsScreen(
             }
         }
         item { SectionLabel("공개 및 연결") }
-        item { SettingsLink(Icons.Outlined.Shield, "프로필 공개 범위", "현재 음악 · 청취 분석 · 교환 기록") { draftPrivacy = profile.privacy; visibilityEditing = true } }
+        item { SettingsLink(Icons.Outlined.Shield, "프로필 공개 범위", "현재 음악 · 청취 분석") { draftPrivacy = profile.privacy; visibilityEditing = true } }
         item { SettingsToggle(Icons.Outlined.Radio, "주변에서 발견 가능", "정확한 위치와 방향은 항상 숨겨요", profile.discoverable, onDiscoverableChange) }
         item { SettingsToggle(Icons.Outlined.FavoriteBorder, "음악 리액션 받기", "정해진 안전한 리액션만 받아요", profile.allowReactions, onAllowReactionsChange) }
         item { SettingsLink(Icons.Outlined.Block, "차단 사용자 관리", "차단 해제와 목록 확인", onOpenBlockedUsers) }
         item { SectionLabel("기기 기능") }
         item { SettingsLink(Icons.Outlined.Notifications, "자동 음악 감지", "재생 알림으로 현재 곡을 감지해요", onOpenNotificationAccess) }
-        item { SettingsToggle(Icons.AutoMirrored.Outlined.BluetoothSearching, "오프라인 음악 카드 교환", "가까운 상대와 승인한 카드만 교환해요", profile.offlineExchangeEnabled, onOfflineExchangeChange) }
-        item { SettingsLink(Icons.Outlined.History, "교환 기록", "이 기기에 저장된 기록 ${offlineExchangeCount}건", onOpenOfflineExchange) }
         item { SectionLabel("계정") }
         item { OutlinedButton(onClick = onLogout, Modifier.fillMaxWidth().height(50.dp)) { Text("로그아웃") } }
         item { TextButton(onClick = { deleteConfirm = true }, Modifier.fillMaxWidth()) { Text("회원 탈퇴", color = MaterialTheme.colorScheme.error) } }
@@ -2450,292 +2401,6 @@ private fun ProfileTagEditor(
 }
 
 @Composable
-private fun LegacyMyScreen(
-    profile: ProfileSettings,
-    offlineExchangeCount: Int,
-    onDiscoverableChange: (Boolean) -> Unit,
-    onAllowReactionsChange: (Boolean) -> Unit,
-    onOfflineExchangeChange: (Boolean) -> Unit,
-    onMusicVisibilityChange: (String) -> Unit,
-    onProfileUpdate: (String, Long) -> Unit,
-    onLogout: () -> Unit,
-    onOpenNotificationAccess: () -> Unit,
-    onOpenOfflineExchange: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var editProfile by rememberSaveable { mutableStateOf(false) }
-    var editVisibility by rememberSaveable { mutableStateOf(false) }
-    var profileName by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
-    var profileColor by rememberSaveable(profile.colorHex) { mutableStateOf(profile.colorHex) }
-    if (editProfile) AlertDialog(
-        onDismissRequest = { editProfile = false },
-        title = { Text("프로필 변경") },
-        text = { Column { OutlinedTextField(value = profileName, onValueChange = { profileName = it }, label = { Text("프로필 이름") }, singleLine = true); Spacer(Modifier.height(16.dp)); Text("프로필 색상"); Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { listOf(0x6750A4L, 0x248A55L, 0xD05A73L, 0x3478C7L).forEach { color -> Surface(modifier = Modifier.size(42.dp).clickable { profileColor = color }.then(if (profileColor == color) Modifier.border(3.dp, PaleMint, CircleShape) else Modifier), shape = CircleShape, color = Color(color)) {} } } } },
-        confirmButton = { TextButton(onClick = { onProfileUpdate(profileName, profileColor); editProfile = false }, enabled = profileName.length >= 2) { Text("저장") } },
-        dismissButton = { TextButton(onClick = { editProfile = false }) { Text("취소") } },
-    )
-    if (editVisibility) AlertDialog(
-        onDismissRequest = { editVisibility = false },
-        title = { Text("음악 공개 범위") },
-        text = { Column { listOf("제목과 아티스트 공개", "비공개").forEach { option ->
-            FilterChip(selected = profile.musicVisibilityLabel == option, onClick = { onMusicVisibilityChange(option); editVisibility = false }, label = { Text(option) }, modifier = Modifier.fillMaxWidth())
-        } } },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = { editVisibility = false }) { Text("닫기") } },
-    )
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            ScreenTitle(eyebrow = "MY SIGNAL", title = "마이", subtitle = "공개 범위와 로컬 기록을 관리해요")
-        }
-        item {
-            Row(modifier = Modifier.fillMaxWidth().clickable { editProfile = true }, verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(72.dp),
-                    shape = CircleShape,
-                    color = Color(profile.colorHex)
-                ) {}
-                Spacer(Modifier.width(16.dp))
-                Column {
-                    Text(profile.accountAlias, style = MaterialTheme.typography.headlineSmall)
-                    Text(
-                        "주변에서는 ${profile.nearbyDisplayAlias} · 세션 종료 시 변경",
-                        color = MutedMint
-                    )
-                    Text(
-                        (profile.genres + profile.moods).joinToString(" · "),
-                        color = SignalGreen,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                Icon(Icons.Outlined.ChevronRight, contentDescription = "프로필 변경", tint = MutedMint)
-            }
-        }
-        item { SectionLabel("음악과 프로필") }
-        item {
-            SettingsLink(
-                icon = Icons.Outlined.Notifications,
-                title = "자동 음악 감지",
-                subtitle = "알림 접근을 허용한 음악 앱만 보조 감지",
-                onClick = onOpenNotificationAccess
-            )
-        }
-        item {
-            SettingsLink(
-                icon = Icons.Outlined.Shield,
-                title = "음악 공개 범위",
-                subtitle = profile.musicVisibilityLabel,
-                onClick = { editVisibility = true }
-            )
-        }
-        item { SectionLabel("공개와 안전") }
-        item {
-            SettingsToggle(
-                icon = Icons.Outlined.Radio,
-                title = "주변에서 발견 가능",
-                subtitle = "정확한 위치·방향은 항상 숨김",
-                checked = profile.discoverable,
-                onCheckedChange = onDiscoverableChange
-            )
-        }
-        item {
-            OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("로그아웃") }
-        }
-        item {
-            SettingsToggle(
-                icon = Icons.Outlined.FavoriteBorder,
-                title = "정해진 리액션 받기",
-                subtitle = "맞팔 전 자유 메시지는 허용 안 함",
-                checked = profile.allowReactions,
-                onCheckedChange = onAllowReactionsChange
-            )
-        }
-        item {
-            SettingsToggle(
-                icon = Icons.AutoMirrored.Outlined.BluetoothSearching,
-                title = "오프라인 음악 카드 교환",
-                subtitle = "승인한 상대와 카드만 로컬 저장",
-                checked = profile.offlineExchangeEnabled,
-                onCheckedChange = onOfflineExchangeChange
-            )
-        }
-        item {
-            SettingsLink(
-                icon = Icons.Outlined.History,
-                title = "오프라인 교환 기록",
-                subtitle = "Room 로컬 DB · ${offlineExchangeCount}건",
-                onClick = onOpenOfflineExchange
-            )
-        }
-        item {
-            AppPanel(color = SignalGreen.copy(alpha = 0.07f)) {
-                Text("개인정보 기본값", color = SignalGreen, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "좌표, JWT, 주변 사용자 목록은 로컬 DB에 저장하지 않아요. 교환 기록과 미전송 outbox만 저장합니다.",
-                    color = MutedMint,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun OfflineExchangeScreen(
-    records: List<OfflineExchangeRecord>,
-    myCard: ExchangeMusicCard,
-    exchangeState: ExchangeConnectionState,
-    onBack: () -> Unit,
-    onStart: () -> Unit,
-    onConnect: (String) -> Unit,
-    onApprove: () -> Unit,
-    onReject: () -> Unit,
-    onStop: () -> Unit,
-    onClearResult: () -> Unit,
-    onSync: (String) -> Unit,
-    onDelete: (String) -> Unit,
-    onOpenProfile: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier.fillMaxSize()) {
-        BackHeader(onBack = onBack, title = "버블 모드", subtitle = "인터넷 상태와 관계없이 가까운 사람과 음악 카드를 교환해요")
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                AppPanel {
-                    Text("내보낼 음악 카드", color = SignalGreen, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("${myCard.trackTitle} · ${myCard.trackArtist}", style = MaterialTheme.typography.titleMedium)
-                }
-            }
-            item {
-                AppPanel(color = SignalGreen.copy(alpha = 0.08f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.AutoMirrored.Outlined.BluetoothSearching, contentDescription = null, tint = SignalGreen)
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text("근처 기기 찾기", style = MaterialTheme.typography.titleMedium)
-                            Text("Bluetooth와 Wi-Fi를 켜고 상대방도 이 화면을 열어 주세요", color = MutedMint)
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    when (exchangeState) {
-                        ExchangeConnectionState.Idle -> Button(
-                            onClick = onStart,
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                        ) { Text("주변 기기 찾기") }
-                        ExchangeConnectionState.Discovering -> {
-                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = SignalGreen)
-                            Spacer(Modifier.height(10.dp))
-                            Text("교환 가능한 기기를 찾고 있어요…", color = MutedMint)
-                            TextButton(onClick = onStop) { Text("검색 중지") }
-                        }
-                        is ExchangeConnectionState.EndpointFound -> {
-                            Text("${exchangeState.endpointName} 기기를 찾았어요", fontWeight = FontWeight.Bold)
-                            Spacer(Modifier.height(10.dp))
-                            Button(
-                                onClick = { onConnect(exchangeState.endpointId) },
-                                modifier = Modifier.fillMaxWidth().height(48.dp),
-                            ) { Text("이 기기와 연결") }
-                        }
-                        is ExchangeConnectionState.AwaitingApproval -> {
-                            Text("상대 기기와 아래 코드가 같은지 확인하세요", color = MutedMint)
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                exchangeState.authenticationDigits,
-                                color = SignalGreen,
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = onReject, modifier = Modifier.weight(1f)) { Text("취소") }
-                                Button(onClick = onApprove, modifier = Modifier.weight(1f)) { Text("코드 일치") }
-                            }
-                        }
-                        is ExchangeConnectionState.Connecting,
-                        is ExchangeConnectionState.Exchanging -> {
-                            LinearProgressIndicator(Modifier.fillMaxWidth(), color = SignalGreen)
-                            Spacer(Modifier.height(10.dp))
-                            Text(
-                                if (exchangeState is ExchangeConnectionState.Connecting) "상대 기기에 연결하고 있어요…"
-                                else "서명된 음악 카드를 교환하고 있어요…",
-                                color = MutedMint,
-                            )
-                        }
-                        is ExchangeConnectionState.Completed -> {
-                            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = SignalGreen)
-                            Spacer(Modifier.height(8.dp))
-                            Text("${exchangeState.result.peerCard.displayAlias} 님과 교환했어요", fontWeight = FontWeight.Bold)
-                            Text(
-                                "${exchangeState.result.peerCard.trackTitle} · ${exchangeState.result.peerCard.trackArtist}",
-                                color = MutedMint,
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Button(onClick = onClearResult, modifier = Modifier.fillMaxWidth()) { Text("확인") }
-                        }
-                        is ExchangeConnectionState.Error -> {
-                            Text(exchangeState.message, color = MaterialTheme.colorScheme.error)
-                            Spacer(Modifier.height(10.dp))
-                            OutlinedButton(onClick = onStart, modifier = Modifier.fillMaxWidth()) { Text("다시 시도") }
-                        }
-                    }
-                }
-            }
-            item { SectionLabel("이 기기에 저장된 기록") }
-            if (records.isEmpty()) {
-                item {
-                    AppPanel {
-                        Text("아직 교환 기록이 없어요", style = MaterialTheme.typography.titleMedium)
-                        Text("가까운 기기와 인증 코드를 확인하면 받은 카드가 여기에 저장돼요.", color = MutedMint)
-                    }
-                }
-            }
-            items(records, key = { it.id }) { record ->
-                AppPanel {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TrackGlyph(record.peerDisplayAlias, record.peerDisplayAlias.hashCode().toLong())
-                        Spacer(Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(record.peerDisplayAlias, fontWeight = FontWeight.Bold)
-                            Text("${record.trackTitle} · ${record.trackArtist}", color = MutedMint)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (record.syncState == SyncState.SYNCED) {
-                                Icon(Icons.Outlined.CloudDone, contentDescription = "동기화됨", tint = SignalGreen)
-                            } else if (record.syncState == SyncState.UPLOADING) {
-                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = SignalGreen)
-                            } else {
-                                IconButton(onClick = { onSync(record.id) }) {
-                                    Icon(Icons.Outlined.CloudUpload, contentDescription = "서버 동기화")
-                                }
-                            }
-                            IconButton(onClick = { onDelete(record.id) }) {
-                                Icon(Icons.Outlined.DeleteOutline, contentDescription = "교환 기록 삭제")
-                            }
-                        }
-                    }
-                    if (record.syncState == SyncState.SYNCED) {
-                        Spacer(Modifier.height(10.dp))
-                        TextButton(onClick = { onOpenProfile(record.id) }) {
-                            Text("교환한 사람의 음악 프로필 보기", color = SignalGreen)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun ScreenTitle(eyebrow: String, title: String, subtitle: String) {
     Column {
         Text(eyebrow, color = SignalGreen, style = MaterialTheme.typography.labelLarge)
@@ -2831,7 +2496,7 @@ private fun TrackGlyph(label: String, colorSeed: Long) {
     val color = Color(colors[(kotlin.math.abs(colorSeed) % colors.size).toInt()])
     Surface(modifier = Modifier.size(46.dp), shape = CircleShape, color = color) {
         Box(contentAlignment = Alignment.Center) {
-            Text(label.take(1).uppercase(), color = Color(0xFF00210B), fontWeight = FontWeight.Black)
+            Text(label.take(1).uppercase(), color = MelodyBubbleColors.OnPrimary, fontWeight = FontWeight.Black)
         }
     }
 }

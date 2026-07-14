@@ -31,7 +31,7 @@ class PublicProfileScreenTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun verifiedExchangeAndTasteLeadToOptionalFollow() {
+    fun tasteAndRelationshipLeadToOptionalFollow() {
         var followed = false
         composeRule.setContent {
             MelodyBubbleTheme {
@@ -46,14 +46,13 @@ class PublicProfileScreenTest {
                         genres = listOf("R&B", "Indie"),
                         moods = listOf("Night"),
                         melodyAlias = null,
-                        stats = ProfileStats(followerCount = 3, verifiedExchangeCount = 4),
+                        stats = ProfileStats(followerCount = 3),
                         tasteFingerprint = TasteFingerprint(
                             genres = listOf(TasteMetric("R&B", 3, 0.75)),
                         ),
                         relationship = RelationshipStatus.NONE,
                         following = false,
                         mutual = false,
-                        sharedVerifiedExchangeCount = 1,
                     ),
                     loading = false,
                     errorMessage = null,
@@ -65,7 +64,6 @@ class PublicProfileScreenTest {
         }
 
         composeRule.onNodeWithText("Night Listener").assertIsDisplayed()
-        composeRule.onNodeWithText("실제로 음악을 교환한 사이").assertIsDisplayed()
         composeRule.onAllNodesWithText("R&B").assertCountEquals(2)
         composeRule.onNodeWithText("팔로우").performClick()
 
@@ -88,12 +86,11 @@ class PublicProfileScreenTest {
                         genres = listOf("Indie"),
                         moods = listOf("Calm", "Night"),
                         melodyAlias = null,
-                        stats = ProfileStats(followingCount = 12, followerCount = 34, verifiedExchangeCount = 5),
+                        stats = ProfileStats(followingCount = 12, followerCount = 34),
                         tasteFingerprint = TasteFingerprint(),
                         relationship = RelationshipStatus.MUTUAL,
                         following = true,
                         mutual = true,
-                        sharedVerifiedExchangeCount = 2,
                         sharedFollowers = listOf(
                             SharedFollowerPreview("listener_one", "해나", null),
                             SharedFollowerPreview("listener_two", "민수", null),
