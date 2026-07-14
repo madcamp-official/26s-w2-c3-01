@@ -47,7 +47,7 @@ class MyProfileScreenTest {
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
-                    onRandomizeAvatar = {},
+                    onCustomizeAvatar = {},
                 )
             }
         }
@@ -87,7 +87,7 @@ class MyProfileScreenTest {
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
-                    onRandomizeAvatar = {},
+                    onCustomizeAvatar = {},
                 )
             }
         }
@@ -132,7 +132,7 @@ class MyProfileScreenTest {
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
-                    onRandomizeAvatar = {},
+                    onCustomizeAvatar = {},
                 )
             }
         }
@@ -184,7 +184,7 @@ class MyProfileScreenTest {
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
-                    onRandomizeAvatar = {},
+                    onCustomizeAvatar = {},
                 )
             }
         }
@@ -227,7 +227,7 @@ class MyProfileScreenTest {
                     onSearchMusic = {},
                     onClearMusicSearch = {},
                     onPreviewMusic = {},
-                    onRandomizeAvatar = {},
+                    onCustomizeAvatar = {},
                 )
             }
         }

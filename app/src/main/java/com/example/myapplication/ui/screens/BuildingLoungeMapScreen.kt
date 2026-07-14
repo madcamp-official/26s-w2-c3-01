@@ -1297,7 +1297,6 @@ fun LoungeMembersScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(member.displayName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
-                            Text("@${member.profileHandle}", color = MutedMint, style = MaterialTheme.typography.bodySmall)
                         }
                         Text("프로필 보기", color = SignalGreen, style = MaterialTheme.typography.labelLarge)
                     }

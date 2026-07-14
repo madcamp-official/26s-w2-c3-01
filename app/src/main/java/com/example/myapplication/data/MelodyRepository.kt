@@ -1847,6 +1847,7 @@ class DemoMelodyRepository(
                     peerAlias = response.peerAlias,
                     peerColorHex = response.peerColor.removePrefix("#").toLongOrNull(16)
                         ?: peer?.colorHex ?: 0x6750A4,
+                    peerAvatarUrl = peer?.avatarUrl,
                     lastMessage = "서로 팔로우했어요",
                     relativeTime = "방금",
                     unreadCount = 0,
@@ -2436,6 +2437,7 @@ class DemoMelodyRepository(
         peerHandle = peerHandle ?: "chat-$roomId",
         peerAlias = peerAlias,
         peerColorHex = peerColor.removePrefix("#").toLongOrNull(16) ?: 0x6750A4,
+        peerAvatarUrl = peerAvatarUrl,
         lastMessage = lastMessage.orEmpty(),
         relativeTime = if (lastMessageAt == null) "새 대화" else "최근",
         unreadCount = unreadCount,

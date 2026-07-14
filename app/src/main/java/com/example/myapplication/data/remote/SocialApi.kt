@@ -43,6 +43,7 @@ data class RemoteChatSummary(
     val peerHandle: String?,
     val peerAlias: String,
     val peerColor: String,
+    val peerAvatarUrl: String? = null,
     val lastMessage: String?,
     val lastMessageAt: String?,
     val unreadCount: Int,

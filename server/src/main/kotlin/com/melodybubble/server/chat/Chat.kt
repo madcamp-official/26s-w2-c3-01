@@ -4,6 +4,7 @@ import com.melodybubble.server.realtime.RealtimeEventTypes
 import com.melodybubble.server.realtime.RealtimePublisher
 import com.melodybubble.server.realtime.RealtimeQueues
 import com.melodybubble.server.safety.ActionRateLimiter
+import com.melodybubble.server.profile.AvatarUrlFactory
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -27,6 +28,7 @@ data class DirectChatSummary(
     val peerHandle: String?,
     val peerAlias: String,
     val peerColor: String,
+    val peerAvatarUrl: String,
     val lastMessage: String?,
     val lastMessageAt: Instant?,
     val unreadCount: Int,
@@ -83,6 +85,7 @@ class ChatService(
     private val jdbc: JdbcTemplate,
     private val rateLimiter: ActionRateLimiter,
     private val realtime: RealtimePublisher,
+    private val avatars: AvatarUrlFactory,
 ) {
     fun rooms(userId: UUID): List<DirectChatSummary> = jdbc.query(
         """
@@ -90,7 +93,8 @@ class ChatService(
           (select ps.nearby_handle from presence_sessions ps
            where ps.user_id=peer.id and ps.expires_at>now()
            order by ps.last_seen_at desc limit 1) peer_handle,
-          peer.display_name,peer.profile_color,last_message.content,last_message.sent_at,
+          peer.display_name,peer.profile_color,peer.avatar_seed,peer.avatar_data_url,
+          last_message.content,last_message.sent_at,
           (select count(*) from chat_messages unread
            where unread.room_id=pair.room_id and unread.sender_id<>?
              and (member.last_read_message_id is null or unread.sent_at > coalesce(
@@ -118,6 +122,7 @@ class ChatService(
                 peerHandle = rs.getString("peer_handle"),
                 peerAlias = rs.getString("display_name"),
                 peerColor = rs.getString("profile_color"),
+                peerAvatarUrl = avatars.resolve(rs.getString("avatar_seed"), rs.getString("avatar_data_url")),
                 lastMessage = rs.getString("content"),
                 lastMessageAt = rs.getTimestamp("sent_at")?.toInstant(),
                 unreadCount = rs.getInt("unread_count"),
@@ -360,7 +365,8 @@ class ChatService(
           (select ps.nearby_handle from presence_sessions ps
            where ps.user_id=peer.id and ps.expires_at>now()
            order by ps.last_seen_at desc limit 1) peer_handle,
-          peer.display_name,peer.profile_color,last_message.content,last_message.sent_at,
+          peer.display_name,peer.profile_color,peer.avatar_seed,peer.avatar_data_url,
+          last_message.content,last_message.sent_at,
           (select count(*) from chat_messages unread
            where unread.room_id=pair.room_id and unread.sender_id<>?
              and (member.last_read_message_id is null or unread.sent_at > coalesce(
@@ -381,6 +387,7 @@ class ChatService(
                 peerHandle = rs.getString("peer_handle"),
                 peerAlias = rs.getString("display_name"),
                 peerColor = rs.getString("profile_color"),
+                peerAvatarUrl = avatars.resolve(rs.getString("avatar_seed"), rs.getString("avatar_data_url")),
                 lastMessage = rs.getString("content"),
                 lastMessageAt = rs.getTimestamp("sent_at")?.toInstant(),
                 unreadCount = rs.getInt("unread_count"),

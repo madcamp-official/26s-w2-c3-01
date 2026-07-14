@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -754,7 +755,7 @@ fun InboxScreen(
                         ) { onOpenChat(chat.roomId) }
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TrackGlyph(chat.peerAlias, chat.peerColorHex)
+                            ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 44.dp)
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(chat.peerAlias, style = MaterialTheme.typography.titleMedium)
@@ -805,7 +806,7 @@ fun InboxScreen(
                             },
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TrackGlyph(chat.peerAlias, chat.peerColorHex)
+                                ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 44.dp)
                                 Spacer(Modifier.width(12.dp))
                                 Text(
                                     chat.peerAlias,
@@ -995,6 +996,7 @@ fun ChatScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .imePadding()
     ) {
         Row(
@@ -1004,6 +1006,8 @@ fun ChatScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로")
             }
+            ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 42.dp)
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(chat.peerAlias, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 currentTrack?.let { track ->
@@ -1039,8 +1043,13 @@ fun ChatScreen(
             items(messages, key = { it.clientMessageId }) { message ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Bottom,
                     horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
                 ) {
+                    if (!message.isMine) {
+                        ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 32.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Surface(
                         shape = RoundedCornerShape(
                             topStart = 18.dp,
@@ -1049,7 +1058,7 @@ fun ChatScreen(
                             bottomEnd = if (message.isMine) 5.dp else 18.dp
                         ),
                         color = if (message.isMine) SignalGreen.copy(alpha = 0.22f) else MossSurfaceHigh,
-                        modifier = Modifier.fillMaxWidth(0.76f)
+                        modifier = Modifier.fillMaxWidth(if (message.isMine) 0.76f else 0.68f)
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(message.content)
@@ -1473,7 +1482,6 @@ fun MyScreen(
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(profile.accountAlias, color = ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        if (profile.profileHandle.isNotBlank()) Text("@${profile.profileHandle}", color = muted)
                         Spacer(Modifier.height(4.dp))
                         Text(
                             profile.bio.ifBlank { "소개를 추가해 나를 표현해보세요." },

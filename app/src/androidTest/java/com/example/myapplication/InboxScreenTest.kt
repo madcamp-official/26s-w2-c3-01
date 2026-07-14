@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -38,6 +39,7 @@ class InboxScreenTest {
         }
 
         composeRule.onNodeWithText("민트").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("민트 프로필 아바타").assertIsDisplayed()
         composeRule.onAllNodesWithText("맞팔이 성립된 사용자만 자유 메시지를 보낼 수 있어요")
             .assertCountEquals(0)
         composeRule.onAllNodesWithText("채팅 시작하기").assertCountEquals(0)

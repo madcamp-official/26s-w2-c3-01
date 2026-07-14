@@ -168,6 +168,7 @@ data class ChatPreview(
     val peerHandle: String,
     val peerAlias: String,
     val peerColorHex: Long,
+    val peerAvatarUrl: String? = null,
     val lastMessage: String,
     val relativeTime: String,
     val unreadCount: Int,
