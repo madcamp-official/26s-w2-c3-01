@@ -108,6 +108,8 @@ data class NearbyBubble(
     val displayPosition: AbstractPosition,
     val matchScore: Int,
     val proximity: String,
+    val distanceConfidence: String = DistanceConfidence.UNKNOWN.name,
+    val distanceAccuracyMeters: Double? = null,
     val relationship: String,
     val canReact: Boolean,
     val track: TrackSummary?,
@@ -225,7 +227,7 @@ class NearbyService(
         val radius = discoveryRadius(userId)
         val sql = """
           WITH my_location AS (
-            SELECT location.point
+            SELECT location.point, location.accuracy_meters
             FROM current_locations location
             JOIN presence_sessions session ON session.id=location.session_id
             WHERE session.user_id=? AND session.expires_at>now() AND location.expires_at>now()
@@ -268,6 +270,8 @@ class NearbyService(
                 ELSE 'NONE'
               END AS relationship,
               privacy.allow_reactions,
+              mine.accuracy_meters AS viewer_accuracy_meters,
+              location.accuracy_meters AS target_accuracy_meters,
               ST_DistanceSphere(mine.point, location.point) AS distance_meters
             FROM my_location mine
             JOIN current_locations location
@@ -306,7 +310,11 @@ class NearbyService(
         }.toTypedArray()
         val items = jdbc.query(sql, { rs, _ ->
             val handle = rs.getString("nearby_handle")
-            val band = proximityBand(rs.getDouble("distance_meters").coerceAtMost(radius.toDouble()))
+            val distanceMeters = rs.getDouble("distance_meters").coerceAtMost(radius.toDouble())
+            val viewerAccuracy = rs.getDouble("viewer_accuracy_meters").takeUnless { rs.wasNull() }
+            val targetAccuracy = rs.getDouble("target_accuracy_meters").takeUnless { rs.wasNull() }
+            val combinedAccuracy = combinedHorizontalAccuracyMeters(viewerAccuracy, targetAccuracy)
+            val band = proximityBand(distanceMeters)
                 ?: ProximityBand.WITHIN_15M
             NearbyBubble(
                 nearbyHandle = handle,
@@ -318,6 +326,8 @@ class NearbyService(
                 displayPosition = abstractPosition(handle, band),
                 matchScore = 65 + stable(handle, 31),
                 proximity = band.name,
+                distanceConfidence = distanceConfidence(distanceMeters, combinedAccuracy).name,
+                distanceAccuracyMeters = combinedAccuracy,
                 relationship = rs.getString("relationship"),
                 canReact = rs.getBoolean("allow_reactions"),
                 track = rs.getString("track_title")?.let {
