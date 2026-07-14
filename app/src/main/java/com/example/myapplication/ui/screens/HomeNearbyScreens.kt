@@ -709,7 +709,7 @@ private fun NearbyMusicCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = listener.proximity.label,
+                        text = if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label,
                         color = MelodyBubbleColors.Primary,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold
@@ -1203,7 +1203,7 @@ private fun ListenerMapBubble(
                 contentDescription = buildString {
                     append(listener.displayAlias)
                     append(", 취향 유사도 ${listener.matchScore}%")
-                    append(", ${listener.proximity.label}")
+                    append(", ${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label}")
                     if (listener.isPlaying) append(", 음악 재생 중")
                     if (musicMatchLevel == MusicMatchLevel.SONG) append(", 같은 노래 재생 중")
                     if (musicMatchLevel == MusicMatchLevel.ALBUM_OR_ARTIST) append(", 같은 앨범 또는 가수")
@@ -1313,7 +1313,7 @@ private fun SelectedListenerCard(
                     }
                 }
                 Text(
-                    text = "${listener.proximity.label} · 유사도 ${listener.matchScore}%",
+                    text = "${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label} · 유사도 ${listener.matchScore}%",
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1490,7 +1490,7 @@ private fun ListenerIdentity(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "${listener.proximity.label} · 취향 ${listener.matchScore}%",
+                text = "${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label} · 취향 ${listener.matchScore}%",
                 color = MelodyBubbleColors.TextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
