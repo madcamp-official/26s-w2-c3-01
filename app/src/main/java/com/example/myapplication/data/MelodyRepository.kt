@@ -34,6 +34,7 @@ import com.example.myapplication.core.model.CommonTasteSummary
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.SharingState
+import com.example.myapplication.core.model.SharedFollowerPreview
 import com.example.myapplication.core.model.SocialConnection
 import com.example.myapplication.core.model.SyncState
 import com.example.myapplication.core.model.TasteFingerprint
@@ -2431,6 +2432,14 @@ class DemoMelodyRepository(
             following = following,
             mutual = mutual,
             sharedVerifiedExchangeCount = sharedVerifiedExchangeCount,
+            sharedFollowers = sharedFollowers.orEmpty().map {
+                SharedFollowerPreview(
+                    profileHandle = it.profileHandle,
+                    displayName = it.displayName,
+                    avatarUrl = it.avatarUrl,
+                )
+            },
+            sharedFollowerCount = sharedFollowerCount,
             signatureTracks = signatureTracks.orEmpty().map { it.toDomain() },
             favoriteArtists = favoriteArtists.orEmpty().map { it.toDomain() },
             nowPlaying = nowPlaying?.let {
