@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.core.model.MainTab
 import com.example.myapplication.core.model.ConnectionState
+import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.core.model.ReportReason
 import com.example.myapplication.core.model.ProfileArtist
@@ -45,6 +46,16 @@ import retrofit2.HttpException
 import java.io.IOException
 
 private const val NEARBY_PREVIEW_TRACK_STABILITY_MILLIS = 1_500L
+
+internal fun List<NearbyListener>.findPreviewSource(
+    nearbyHandle: String?,
+    profileHandle: String?,
+): NearbyListener? {
+    val normalizedProfile = profileHandle?.trim()?.takeIf(String::isNotEmpty)?.lowercase()
+    return normalizedProfile?.let { profile ->
+        firstOrNull { it.profileHandle?.trim()?.lowercase() == profile }
+    } ?: nearbyHandle?.let { handle -> firstOrNull { it.nearbyHandle == handle } }
+}
 
 sealed interface LoginUiState {
     data object Idle : LoginUiState
@@ -155,6 +166,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var previewLookupJob: Job? = null
     private var followedNearbyTransitionJob: Job? = null
     private var followedNearbyHandle: String? = null
+    private var followedNearbyProfileHandle: String? = null
     private var followedNearbyTrackKey: String? = null
 
     val uiState = repository.state
@@ -204,10 +216,18 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             repository.state.collect { state ->
-                val handle = followedNearbyHandle ?: return@collect
-                val track = state.nearbyListeners
-                    .firstOrNull { it.nearbyHandle == handle }
-                    ?.currentTrack
+                if (followedNearbyHandle == null && followedNearbyProfileHandle == null) {
+                    return@collect
+                }
+                val listener = state.nearbyListeners.findPreviewSource(
+                    followedNearbyHandle,
+                    followedNearbyProfileHandle,
+                )
+                listener?.let {
+                    followedNearbyHandle = it.nearbyHandle
+                    followedNearbyProfileHandle = it.profileHandle ?: followedNearbyProfileHandle
+                }
+                val track = listener?.currentTrack
                 val preview = musicPreviewPlayer.state.value
                 val previewActive = preview.isPlaying || preview.isPaused || preview.isLoading
                 if (!previewActive) {
@@ -224,9 +244,15 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 followedNearbyTransitionJob?.cancel()
                 followedNearbyTransitionJob = viewModelScope.launch {
                     delay(NEARBY_PREVIEW_TRACK_STABILITY_MILLIS)
-                    val latestTrack = repository.state.value.nearbyListeners
-                        .firstOrNull { it.nearbyHandle == handle }
-                        ?.currentTrack
+                    val latestListener = repository.state.value.nearbyListeners.findPreviewSource(
+                        followedNearbyHandle,
+                        followedNearbyProfileHandle,
+                    )
+                    latestListener?.let {
+                        followedNearbyHandle = it.nearbyHandle
+                        followedNearbyProfileHandle = it.profileHandle ?: followedNearbyProfileHandle
+                    }
+                    val latestTrack = latestListener?.currentTrack
                     followedNearbyTransitionJob = null
                     if (latestTrack == null) {
                         stopMusicPreview()
@@ -234,7 +260,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         playMusicPreview(
                             title = latestTrack.title,
                             artist = latestTrack.artist,
-                            sourceNearbyHandle = handle,
+                            sourceNearbyHandle = latestListener.nearbyHandle,
+                            sourceNearbyProfileHandle = latestListener.profileHandle,
                         )
                     }
                 }
@@ -527,6 +554,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             .firstOrNull { it.profileHandle == profile.profileHandle }
             ?.let { listener ->
                 followedNearbyHandle = listener.nearbyHandle
+                followedNearbyProfileHandle = listener.profileHandle
                 followedNearbyTrackKey = previewFollowKey(nowPlaying.title, nowPlaying.artist)
             }
         nowPlayingPreviewJob = viewModelScope.launch {
@@ -612,6 +640,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         previewUrl: String? = null,
         artworkUrl: String? = null,
         sourceNearbyHandle: String? = null,
+        sourceNearbyProfileHandle: String? = null,
     ) {
         previewLookupJob?.cancel()
         followedNearbyTransitionJob?.cancel()
@@ -620,6 +649,10 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
             clearFollowedNearbyPreview()
         } else {
             followedNearbyHandle = sourceNearbyHandle
+            followedNearbyProfileHandle = sourceNearbyProfileHandle
+                ?: repository.state.value.nearbyListeners
+                    .firstOrNull { it.nearbyHandle == sourceNearbyHandle }
+                    ?.profileHandle
             followedNearbyTrackKey = previewFollowKey(title, artist)
         }
         if (!previewUrl.isNullOrBlank()) {
@@ -653,6 +686,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         followedNearbyTransitionJob?.cancel()
         followedNearbyTransitionJob = null
         followedNearbyHandle = null
+        followedNearbyProfileHandle = null
         followedNearbyTrackKey = null
     }
 

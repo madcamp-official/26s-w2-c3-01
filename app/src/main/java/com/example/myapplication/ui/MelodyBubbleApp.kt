@@ -486,6 +486,7 @@ fun MelodyBubbleApp(
                                 artist,
                                 artworkUrl = artworkUrl,
                                 sourceNearbyHandle = nearbyHandle,
+                                sourceNearbyProfileHandle = profileHandle,
                             )
                         },
                         onPlayTrackPreview = { track ->
@@ -658,6 +659,7 @@ private fun MainShell(
                             track.artist,
                             artworkUrl = track.artworkUrl,
                             sourceNearbyHandle = it.nearbyHandle,
+                            sourceNearbyProfileHandle = it.profileHandle,
                         )
                     }
                 },
@@ -671,6 +673,7 @@ private fun MainShell(
                         track.artist,
                         artworkUrl = track.artworkUrl,
                         sourceNearbyHandle = listener.nearbyHandle,
+                        sourceNearbyProfileHandle = listener.profileHandle,
                     )
                 },
                 onSearchInMusicApp = { track ->

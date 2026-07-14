@@ -155,12 +155,17 @@ data class PopularTrack(
 )
 data class NearbyMusicUpdatedPayload(
     val nearbyHandle: String,
+    val profileHandle: String,
     val isPlaying: Boolean,
     val track: TrackSummary?,
 )
 data class PopularTracksUpdatedPayload(val tracks: List<PopularTrack>)
 
-data class MusicAudienceMember(val userId: UUID, val sourceHandle: String)
+data class MusicAudienceMember(
+    val userId: UUID,
+    val sourceHandle: String,
+    val sourceProfileHandle: String,
+)
 private data class CurrentMusic(val title: String, val artist: String, val artworkUrl: String?)
 
 @Service
@@ -521,6 +526,7 @@ class NearbyService(
                 RealtimeEventTypes.NEARBY_MUSIC_UPDATED,
                 NearbyMusicUpdatedPayload(
                     nearbyHandle = removed.sourceHandle,
+                    profileHandle = removed.sourceProfileHandle,
                     isPlaying = false,
                     track = null,
                 ),
@@ -652,6 +658,7 @@ class NearbyService(
                 RealtimeEventTypes.NEARBY_MUSIC_UPDATED,
                 NearbyMusicUpdatedPayload(
                     nearbyHandle = audience.sourceHandle,
+                    profileHandle = audience.sourceProfileHandle,
                     isPlaying = isPlaying,
                     track = track,
                 ),
@@ -674,8 +681,10 @@ class NearbyService(
           where session.user_id=? and session.expires_at>now() and location.expires_at>now()
         )
         select distinct on (recipient_session.user_id)
-          recipient_session.user_id recipient_id,source.nearby_handle
+          recipient_session.user_id recipient_id,source.nearby_handle,
+          source_user.profile_handle source_profile_handle
         from source_locations source
+        join users source_user on source_user.id=?
         join current_locations recipient_location
           on recipient_location.expires_at>now()
         join presence_sessions recipient_session
@@ -720,8 +729,10 @@ class NearbyService(
             MusicAudienceMember(
                 userId = UUID.fromString(rs.getString("recipient_id")),
                 sourceHandle = rs.getString("nearby_handle"),
+                sourceProfileHandle = rs.getString("source_profile_handle"),
             )
         },
+        sourceUserId,
         sourceUserId,
         sourceUserId,
         sourceUserId,

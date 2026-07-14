@@ -1,6 +1,9 @@
 package com.example.myapplication.ui
 
 import com.example.myapplication.core.model.MusicSearchResult
+import com.example.myapplication.core.model.DisplayPosition
+import com.example.myapplication.core.model.NearbyListener
+import com.example.myapplication.core.model.Proximity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -77,6 +80,32 @@ class NowPlayingPreviewMatcherTest {
         assertEquals("ILLIT", "ILLIT（아일릿）".withoutParentheticalQualifier())
     }
 
+    @Test
+    fun previewSourceSurvivesNearbySessionHandleRotation() {
+        val oldSessionHandle = "session-old"
+        val currentSession = nearbyListener(
+            nearbyHandle = "session-current",
+            profileHandle = "same-user",
+        )
+
+        val resolved = listOf(currentSession).findPreviewSource(
+            nearbyHandle = oldSessionHandle,
+            profileHandle = "SAME-USER",
+        )
+
+        assertEquals(currentSession, resolved)
+    }
+
+    @Test
+    fun previewSourceFallsBackToSessionHandleWithoutProfileIdentity() {
+        val currentSession = nearbyListener(nearbyHandle = "session-current", profileHandle = null)
+
+        assertEquals(
+            currentSession,
+            listOf(currentSession).findPreviewSource("session-current", null),
+        )
+    }
+
     private fun result(title: String, artist: String, previewUrl: String?) = MusicSearchResult(
         id = 1L,
         artistId = 2L,
@@ -89,5 +118,18 @@ class NowPlayingPreviewMatcherTest {
         artworkUrl = null,
         previewUrl = previewUrl,
         appleMusicUrl = null,
+    )
+
+    private fun nearbyListener(nearbyHandle: String, profileHandle: String?) = NearbyListener(
+        nearbyHandle = nearbyHandle,
+        profileHandle = profileHandle,
+        displayAlias = "Listener",
+        colorHex = 0xFF6750A4L,
+        displayPosition = DisplayPosition(0.5f, 0.5f),
+        matchScore = 80,
+        proximity = Proximity.WITHIN_10M,
+        isPlaying = true,
+        currentTrack = null,
+        commonGenres = emptyList(),
     )
 }

@@ -197,18 +197,42 @@ internal data class DirectNearbyCandidate(
     val measurement: PeerProximityMeasurement?,
 )
 
+internal fun com.example.myapplication.core.model.NearbyListener.stableNearbyIdentity(): String =
+    profileHandle?.trim()?.takeIf(String::isNotEmpty)?.lowercase()?.let { "profile:$it" }
+        ?: "session:$nearbyHandle"
+
+internal fun deduplicateNearbyListeners(
+    listeners: List<com.example.myapplication.core.model.NearbyListener>,
+    preferredHandles: Set<String> = emptySet(),
+): List<com.example.myapplication.core.model.NearbyListener> = listeners
+    .groupBy { it.stableNearbyIdentity() }
+    .values
+    .map { sameUser ->
+        sameUser.maxWithOrNull(
+            compareBy<com.example.myapplication.core.model.NearbyListener> {
+                it.nearbyHandle in preferredHandles
+            }.thenBy { !it.nearbyHandle.startsWith("d_") }
+                .thenBy { it.canReact }
+                .thenBy { it.isPlaying },
+        ) ?: error("nearby identity group cannot be empty")
+    }
+
 internal fun preferDirectNearbyUsers(
     candidates: List<DirectNearbyCandidate>,
     currentByHandle: Map<String, com.example.myapplication.core.model.NearbyListener>,
-): Map<String, com.example.myapplication.core.model.NearbyListener> = candidates
-    .groupBy { it.user.nearbyHandle }
-    .mapValues { (_, sameUserCandidates) ->
+): Map<String, com.example.myapplication.core.model.NearbyListener> {
+    val currentByIdentity = currentByHandle.values.associateBy { it.stableNearbyIdentity() }
+    return candidates
+    .groupBy { it.user.stableNearbyIdentity() }
+    .values
+    .map { sameUserCandidates ->
         val preferred = sameUserCandidates.maxWithOrNull(
             compareBy<DirectNearbyCandidate> { it.measurement != null }
                 .thenBy { it.measurement?.observedAtEpochMillis ?: Long.MIN_VALUE }
                 .thenBy { it.beaconId },
         ) ?: error("direct candidate group cannot be empty")
         val existing = currentByHandle[preferred.user.nearbyHandle]
+            ?: currentByIdentity[preferred.user.stableNearbyIdentity()]
         // A beacon resolution is authoritative only for direct proximity. Its embedded profile
         // snapshot can be older than a realtime music event, so never let it roll playback back.
         val proximityUser = existing?.let { current ->
@@ -233,6 +257,8 @@ internal fun preferDirectNearbyUsers(
             )
         }
     }
+    .associateBy { it.nearbyHandle }
+}
 
 internal fun shouldApplyDirectResolveResult(
     requestGeneration: Long,
@@ -367,6 +393,8 @@ class DemoMelodyRepository(
     @Volatile private var directNearbyByHandle = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
     @Volatile private var directUsersByBeacon = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
     @Volatile private var directMeasurementsByBeacon = emptyMap<String, PeerProximityMeasurement>()
+    @Volatile private var authoritativeNearbyHandles = emptySet<String>()
+    private val profileByNearbyHandle = ConcurrentHashMap<String, String>()
     private val reportedDirectMeasurementAt = ConcurrentHashMap<String, Long>()
     private val lastMusicEventAtByHandle = ConcurrentHashMap<String, Long>()
     private val explicitlyRemovedNearbyHandles = ConcurrentHashMap.newKeySet<String>()
@@ -648,6 +676,8 @@ class DemoMelodyRepository(
         nearbyProximityStabilizer.clear()
         explicitlyRemovedNearbyHandles.clear()
         lastMusicEventAtByHandle.clear()
+        authoritativeNearbyHandles = emptySet()
+        profileByNearbyHandle.clear()
         _state.update {
             it.copy(
                 sharingState = SharingState.STOPPED,
@@ -724,8 +754,9 @@ class DemoMelodyRepository(
     }
 
     override fun react(handle: String, reactionLabel: String) {
-        val target = _state.value.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
+        val selected = _state.value.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
             ?: return
+        val target = canonicalNearbyTarget(selected)
         val reactionType = reactionTypeForLabel(reactionLabel)
         if (reactionType == null) {
             _state.update { it.copy(feedbackMessage = "지원하지 않는 리액션이에요") }
@@ -736,7 +767,7 @@ class DemoMelodyRepository(
             runCatching {
                 nearbyApi.sendReaction(
                     authorization = "Bearer $token",
-                    nearbyHandle = handle,
+                    nearbyHandle = target.nearbyHandle,
                     request = NearbyReactionRequest(
                         clientReactionId = UUID.randomUUID().toString(),
                         reactionType = reactionType,
@@ -756,6 +787,18 @@ class DemoMelodyRepository(
                 if (isCurrentSession(token)) showRequestError(error, "리액션을 보내지 못했어요")
             }
         }
+    }
+
+    private fun canonicalNearbyTarget(
+        selected: com.example.myapplication.core.model.NearbyListener,
+    ): com.example.myapplication.core.model.NearbyListener {
+        val identity = selected.stableNearbyIdentity()
+        return deduplicateNearbyListeners(
+            listeners = _state.value.nearbyListeners.filter {
+                it.stableNearbyIdentity() == identity
+            },
+            preferredHandles = authoritativeNearbyHandles,
+        ).firstOrNull() ?: selected
     }
 
     override fun block(handle: String) {
@@ -1838,9 +1881,13 @@ class DemoMelodyRepository(
         val direct = directNearbyByHandle
         val newest = directMeasurementsByBeacon.values.maxByOrNull { it.observedAtEpochMillis }
         _state.update { current ->
-            val existingHandles = current.nearbyListeners.mapTo(mutableSetOf()) { it.nearbyHandle }
+            val directByIdentity = direct.values.associateBy { it.stableNearbyIdentity() }
+            val existingIdentities = current.nearbyListeners
+                .mapTo(mutableSetOf()) { it.stableNearbyIdentity() }
             val listeners = current.nearbyListeners.map { existing ->
-                val measured = direct[existing.nearbyHandle] ?: return@map existing
+                val measured = direct[existing.nearbyHandle]
+                    ?: directByIdentity[existing.stableNearbyIdentity()]
+                    ?: return@map existing
                 // Re-read playback from the atomic state update. A realtime event may have arrived
                 // after direct candidates were calculated but before this reducer executes.
                 existing.copy(
@@ -1850,10 +1897,18 @@ class DemoMelodyRepository(
                     isDirectlyDetected = true,
                 )
             } +
-                direct.values.filterNot { it.nearbyHandle in existingHandles }
+                direct.values.filterNot { it.stableNearbyIdentity() in existingIdentities }
+            val deduplicatedListeners = deduplicateNearbyListeners(
+                listeners,
+                authoritativeNearbyHandles,
+            )
             current.copy(
-                nearbyListeners = listeners,
-                nearbyLoadState = if (listeners.isEmpty()) current.nearbyLoadState else NearbyLoadState.READY,
+                nearbyListeners = deduplicatedListeners,
+                nearbyLoadState = if (deduplicatedListeners.isEmpty()) {
+                    current.nearbyLoadState
+                } else {
+                    NearbyLoadState.READY
+                },
                 nearbyMeasurementDiagnostics = newest?.let {
                     NearbyMeasurementDiagnostics(it.method, null, it.observedAtEpochMillis, null)
                 } ?: current.nearbyMeasurementDiagnostics,
@@ -1922,24 +1977,44 @@ class DemoMelodyRepository(
     private fun mergeDirectNearby(
         locationUsers: List<com.example.myapplication.core.model.NearbyListener>,
     ): List<com.example.myapplication.core.model.NearbyListener> {
-        val activeLocationUsers = locationUsers.filterNot {
-            it.nearbyHandle in explicitlyRemovedNearbyHandles
-        }
+        val activeLocationUsers = deduplicateNearbyListeners(
+            locationUsers.filterNot { it.nearbyHandle in explicitlyRemovedNearbyHandles },
+        )
         val locationHandles = activeLocationUsers.mapTo(mutableSetOf()) { it.nearbyHandle }
+        authoritativeNearbyHandles = locationHandles
+        rememberNearbyAliases(activeLocationUsers)
+        rememberNearbyAliases(directNearbyByHandle.values)
+        val locationIdentities = activeLocationUsers
+            .mapTo(mutableSetOf()) { it.stableNearbyIdentity() }
         val currentByProfile = _state.value.nearbyListeners
-            .mapNotNull { listener -> listener.profileHandle?.let { it to listener } }
+            .mapNotNull { listener ->
+                listener.profileHandle?.trim()?.lowercase()?.let { it to listener }
+            }
             .toMap()
         val directOnly = directNearbyByHandle.values.filterNot {
-            it.nearbyHandle in locationHandles || it.nearbyHandle in explicitlyRemovedNearbyHandles
+            it.nearbyHandle in locationHandles ||
+                it.stableNearbyIdentity() in locationIdentities ||
+                it.nearbyHandle in explicitlyRemovedNearbyHandles
         }.map { direct ->
-            val current = direct.profileHandle?.let(currentByProfile::get) ?: return@map direct
+            val current = direct.profileHandle?.trim()?.lowercase()
+                ?.let(currentByProfile::get) ?: return@map direct
             direct.copy(
                 relationship = current.relationship,
                 isPlaying = current.isPlaying,
                 currentTrack = current.currentTrack,
             )
         }
-        return activeLocationUsers + directOnly
+        return deduplicateNearbyListeners(activeLocationUsers + directOnly, locationHandles)
+    }
+
+    private fun rememberNearbyAliases(
+        listeners: Collection<com.example.myapplication.core.model.NearbyListener>,
+    ) {
+        listeners.forEach { listener ->
+            listener.profileHandle?.trim()?.takeIf(String::isNotEmpty)?.lowercase()?.let { profile ->
+                profileByNearbyHandle[listener.nearbyHandle] = profile
+            }
+        }
     }
 
     private fun preserveNewerRealtimeMusic(
@@ -1948,9 +2023,20 @@ class DemoMelodyRepository(
     ): List<com.example.myapplication.core.model.NearbyListener> {
         val snapshotEpochMillis = snapshotGeneratedAt.toServerEpochMillis() ?: return incoming
         val currentByHandle = _state.value.nearbyListeners.associateBy { it.nearbyHandle }
+        val currentByIdentity = _state.value.nearbyListeners.associateBy { it.stableNearbyIdentity() }
         return incoming.map { listener ->
-            val musicEventAt = lastMusicEventAtByHandle[listener.nearbyHandle] ?: return@map listener
-            val current = currentByHandle[listener.nearbyHandle] ?: return@map listener
+            val profile = listener.profileHandle?.trim()?.lowercase()
+            val musicEventAt = sequenceOf(lastMusicEventAtByHandle[listener.nearbyHandle])
+                .plus(
+                    profileByNearbyHandle.entries.asSequence()
+                        .filter { (_, aliasProfile) -> aliasProfile == profile }
+                        .mapNotNull { (aliasHandle, _) -> lastMusicEventAtByHandle[aliasHandle] },
+                )
+                .filterNotNull()
+                .maxOrNull() ?: return@map listener
+            val current = currentByHandle[listener.nearbyHandle]
+                ?: currentByIdentity[listener.stableNearbyIdentity()]
+                ?: return@map listener
             if (musicEventAt > snapshotEpochMillis) {
                 listener.copy(
                     isPlaying = current.isPlaying,
@@ -2032,12 +2118,16 @@ class DemoMelodyRepository(
                 )
             )
             if (!isCurrentSession(token)) return@runCatching false
-            val stabilizedListeners = nearbyProximityStabilizer.stabilize(
-                _state.value.nearbyListeners,
-                preserveNewerRealtimeMusic(
-                    mergeDirectNearby(snapshot.items.map { it.toDomain() }),
-                    snapshot.generatedAt,
+            val incomingListeners = preserveNewerRealtimeMusic(
+                mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                snapshot.generatedAt,
+            )
+            val stabilizedListeners = deduplicateNearbyListeners(
+                nearbyProximityStabilizer.stabilize(
+                    _state.value.nearbyListeners,
+                    incomingListeners,
                 ),
+                incomingListeners.mapTo(mutableSetOf()) { it.nearbyHandle },
             )
             _state.update { current ->
                 val listeners = if (nearbyRealtimeVersion.get() == nearbyVersionAtRequest) {
@@ -2053,13 +2143,17 @@ class DemoMelodyRepository(
                         } ?: remote
                     }
                 }
+                val uniqueListeners = deduplicateNearbyListeners(
+                    listeners,
+                    authoritativeNearbyHandles,
+                )
                 current.copy(
-                    nearbyListeners = listeners,
+                    nearbyListeners = uniqueListeners,
                     connectionState = if (
                         realtimeClient.connectionState.value is RealtimeConnectionState.Connected
                     ) ConnectionState.LIVE else ConnectionState.RECONNECTING,
                     discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
-                    nearbyLoadState = if (listeners.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
+                    nearbyLoadState = if (uniqueListeners.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
                     nearbyErrorMessage = null,
                     dataSourceLabel = "SERVER LIVE",
                     nearbyMeasurementDiagnostics = NearbyMeasurementDiagnostics(
@@ -2471,13 +2565,31 @@ class DemoMelodyRepository(
     private fun applyNearbyMusicUpdated(event: RealtimeEvent.NearbyMusicUpdated) {
         val payload = event.envelope.payload
         val handle = payload.nearbyHandle?.takeIf(String::isNotBlank) ?: return
-        lastMusicEventAtByHandle[handle] = event.envelope.timestamp.toServerEpochMillis()
-            ?: System.currentTimeMillis()
+        val profile = payload.profileHandle?.trim()?.takeIf(String::isNotEmpty)?.lowercase()
+            ?: profileByNearbyHandle[handle]
+            ?: _state.value.nearbyListeners.firstOrNull { it.nearbyHandle == handle }
+                ?.profileHandle?.trim()?.takeIf(String::isNotEmpty)?.lowercase()
+        if (profile != null) profileByNearbyHandle[handle] = profile
+        val eventAt = event.envelope.timestamp.toServerEpochMillis() ?: System.currentTimeMillis()
+        val aliasHandles = buildSet {
+            add(handle)
+            if (profile != null) {
+                profileByNearbyHandle.forEach { (aliasHandle, aliasProfile) ->
+                    if (aliasProfile == profile) add(aliasHandle)
+                }
+                _state.value.nearbyListeners.forEach { listener ->
+                    if (listener.profileHandle?.trim()?.lowercase() == profile) {
+                        add(listener.nearbyHandle)
+                    }
+                }
+            }
+        }
+        aliasHandles.forEach { aliasHandle -> lastMusicEventAtByHandle[aliasHandle] = eventAt }
         val title = payload.track?.title?.trim()?.takeIf(String::isNotEmpty)
         val artist = payload.track?.artist?.trim()?.takeIf(String::isNotEmpty)
         val playingTrack = if (payload.isPlaying == true && title != null && artist != null) {
             Track(
-                id = "remote-${handle}-${title.hashCode()}-${artist.hashCode()}",
+                id = "remote-${profile ?: handle}-${title.hashCode()}-${artist.hashCode()}",
                 title = title,
                 artist = artist,
                 artworkUrl = payload.track?.albumArtUrl,
@@ -2486,12 +2598,16 @@ class DemoMelodyRepository(
         } else null
         synchronized(directStateLock) {
             directNearbyByHandle = directNearbyByHandle.mapValues { (_, listener) ->
-                if (listener.nearbyHandle == handle) {
+                if (listener.nearbyHandle in aliasHandles ||
+                    profile != null && listener.profileHandle?.trim()?.lowercase() == profile
+                ) {
                     listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
                 } else listener
             }
             directUsersByBeacon = directUsersByBeacon.mapValues { (_, listener) ->
-                if (listener.nearbyHandle == handle) {
+                if (listener.nearbyHandle in aliasHandles ||
+                    profile != null && listener.profileHandle?.trim()?.lowercase() == profile
+                ) {
                     listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
                 } else listener
             }
@@ -2499,11 +2615,16 @@ class DemoMelodyRepository(
         var found = false
         _state.update { current ->
             current.copy(
-                nearbyListeners = current.nearbyListeners.map { listener ->
-                    if (listener.nearbyHandle != handle) return@map listener
-                    found = true
-                    listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
-                },
+                nearbyListeners = deduplicateNearbyListeners(
+                    current.nearbyListeners.map { listener ->
+                        val matches = listener.nearbyHandle in aliasHandles ||
+                            profile != null && listener.profileHandle?.trim()?.lowercase() == profile
+                        if (!matches) return@map listener
+                        found = true
+                        listener.copy(isPlaying = playingTrack != null, currentTrack = playingTrack)
+                    },
+                    authoritativeNearbyHandles,
+                ),
                 snapshotSequence = current.snapshotSequence + 1,
             )
         }
@@ -2524,12 +2645,13 @@ class DemoMelodyRepository(
                 }
             }
         }
-        val listeners = nearbyProximityStabilizer.stabilize(
-            currentListeners,
-            preserveNewerRealtimeMusic(
-                mergeDirectNearby(snapshot.items.map { it.toDomain() }),
-                snapshot.generatedAt,
-            ),
+        val incomingListeners = preserveNewerRealtimeMusic(
+            mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+            snapshot.generatedAt,
+        )
+        val listeners = deduplicateNearbyListeners(
+            nearbyProximityStabilizer.stabilize(currentListeners, incomingListeners),
+            incomingListeners.mapTo(mutableSetOf()) { it.nearbyHandle },
         )
         _state.update { current ->
             current.copy(
@@ -2701,12 +2823,16 @@ class DemoMelodyRepository(
             runCatching { nearbyApi.snapshot("Bearer $token") }
                 .onSuccess { snapshot ->
                     if (!isCurrentSession(token)) return@onSuccess
-                    val stabilizedListeners = nearbyProximityStabilizer.stabilize(
-                        _state.value.nearbyListeners,
-                        preserveNewerRealtimeMusic(
-                            mergeDirectNearby(snapshot.items.map { it.toDomain() }),
-                            snapshot.generatedAt,
+                    val incomingListeners = preserveNewerRealtimeMusic(
+                        mergeDirectNearby(snapshot.items.map { it.toDomain() }),
+                        snapshot.generatedAt,
+                    )
+                    val stabilizedListeners = deduplicateNearbyListeners(
+                        nearbyProximityStabilizer.stabilize(
+                            _state.value.nearbyListeners,
+                            incomingListeners,
                         ),
+                        incomingListeners.mapTo(mutableSetOf()) { it.nearbyHandle },
                     )
                     _state.update { current ->
                         val listeners = if (nearbyRealtimeVersion.get() == versionAtRequest) {
@@ -2722,10 +2848,14 @@ class DemoMelodyRepository(
                                 } ?: remote
                             }
                         }
+                        val uniqueListeners = deduplicateNearbyListeners(
+                            listeners,
+                            authoritativeNearbyHandles,
+                        )
                         current.copy(
-                            nearbyListeners = listeners,
+                            nearbyListeners = uniqueListeners,
                             discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
-                            nearbyLoadState = if (listeners.isEmpty()) {
+                            nearbyLoadState = if (uniqueListeners.isEmpty()) {
                                 NearbyLoadState.EMPTY
                             } else NearbyLoadState.READY,
                             nearbyErrorMessage = null,

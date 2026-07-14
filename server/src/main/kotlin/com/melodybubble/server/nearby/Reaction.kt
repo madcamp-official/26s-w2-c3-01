@@ -234,7 +234,7 @@ class NearbyReactionService(
                     sender_location.point::geography,
                     least(
                       (select discovery_radius_meters from user_privacy_settings where user_id=?),
-                      15
+                      20
                     )
                   )
               )

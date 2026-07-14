@@ -84,6 +84,7 @@ data class RealtimeTrackPayload(
 
 data class NearbyMusicUpdatedPayload(
     val nearbyHandle: String? = null,
+    val profileHandle: String? = null,
     val isPlaying: Boolean? = null,
     val track: RealtimeTrackPayload? = null,
 )

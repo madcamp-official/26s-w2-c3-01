@@ -15,6 +15,7 @@ import com.example.myapplication.core.model.radiusFromCenter
 import com.example.myapplication.core.model.shouldZoomNearbyMap
 import com.example.myapplication.data.keepSettledDuringRefresh
 import com.example.myapplication.data.DirectNearbyCandidate
+import com.example.myapplication.data.deduplicateNearbyListeners
 import com.example.myapplication.data.preferDirectNearbyUsers
 import com.example.myapplication.data.shouldApplyDirectResolveResult
 import com.example.myapplication.data.toMeasurementMethod
@@ -339,6 +340,56 @@ class NearbyDistanceContractTest {
         ).getValue(current.nearbyHandle)
 
         assertEquals(newTrack, result.currentTrack)
+        assertTrue(result.isPlaying)
+    }
+
+    @Test
+    fun sameProfileWithRotatedSessionHandlesRendersOnlyAuthoritativeUser() {
+        val oldSession = listener(
+            Proximity.WITHIN_10M,
+            DisplayPosition(0.55f, 0.5f),
+            "session-old",
+        ).copy(profileHandle = "SameUser")
+        val currentSession = oldSession.copy(
+            nearbyHandle = "session-current",
+            displayPosition = DisplayPosition(0.60f, 0.5f),
+        )
+
+        val result = deduplicateNearbyListeners(
+            listOf(oldSession, currentSession),
+            preferredHandles = setOf(currentSession.nearbyHandle),
+        )
+
+        assertEquals(1, result.size)
+        assertEquals(currentSession.nearbyHandle, result.single().nearbyHandle)
+    }
+
+    @Test
+    fun rotatedDirectHandleKeepsCurrentMusicByProfileIdentity() {
+        val currentTrack = Track("new", "Current Song", "Artist", platform = "REMOTE")
+        val current = listener(
+            Proximity.WITHIN_10M,
+            DisplayPosition(0.55f, 0.5f),
+            "location-session",
+        ).copy(
+            profileHandle = "same-user",
+            isPlaying = true,
+            currentTrack = currentTrack,
+        )
+        val rotatedDirect = current.copy(
+            nearbyHandle = "direct-session",
+            isPlaying = false,
+            currentTrack = null,
+            isDirectlyDetected = true,
+        )
+
+        val result = preferDirectNearbyUsers(
+            candidates = listOf(DirectNearbyCandidate("beacon", rotatedDirect, null)),
+            currentByHandle = mapOf(current.nearbyHandle to current),
+        ).values.single()
+
+        assertEquals("direct-session", result.nearbyHandle)
+        assertEquals(currentTrack, result.currentTrack)
         assertTrue(result.isPlaying)
     }
 
