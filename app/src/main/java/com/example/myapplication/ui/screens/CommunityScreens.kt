@@ -2401,7 +2401,7 @@ private fun GenreCatalogPicker(
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), fontWeight = FontWeight.Bold)
-            Text("Apple Music", color = MutedMint, style = MaterialTheme.typography.labelSmall)
+            Text("Melon 기준", color = MutedMint, style = MaterialTheme.typography.labelSmall)
         }
         if (state.loading) {
             Spacer(Modifier.height(10.dp))

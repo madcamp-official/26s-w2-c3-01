@@ -152,18 +152,22 @@ class MusicSearchRepository(
             )
         }
 
-    suspend fun genres(): List<String> = api.genres()
-        .values
-        .firstOrNull()
-        ?.subgenres
-        .orEmpty()
-        .values
-        .map(ITunesGenreDto::name)
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .distinct()
-        .sorted()
+    suspend fun genres(): List<String> = SUPPORTED_PROFILE_GENRES
 }
+
+internal val SUPPORTED_PROFILE_GENRES = listOf(
+    "발라드",
+    "댄스",
+    "랩/힙합",
+    "R&B/Soul",
+    "인디음악",
+    "트로트",
+    "포크/블루스",
+    "POP",
+    "록/메탈",
+    "일렉트로니카",
+    "포크/블루스/컨트리",
+)
 
 private fun String.highResolutionArtwork(): String =
     replace("100x100bb", "600x600bb").replace("100x100-75", "600x600-75")

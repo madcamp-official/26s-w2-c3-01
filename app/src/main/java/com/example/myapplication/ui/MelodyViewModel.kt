@@ -354,7 +354,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     if (error is CancellationException) throw error
                     _genreCatalogState.value = GenreCatalogUiState(
                         genres = _genreCatalogState.value.genres,
-                        errorMessage = "Apple Music 장르 목록을 불러오지 못했어요.",
+                        errorMessage = "장르 목록을 준비하지 못했어요.",
                     )
                 }
         }

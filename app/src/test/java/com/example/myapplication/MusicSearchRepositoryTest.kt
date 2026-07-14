@@ -70,7 +70,7 @@ class MusicSearchRepositoryTest {
     }
 
     @Test
-    fun mapsTopLevelITunesMusicGenres() = runBlocking {
+    fun usesSupportedMelonGenreCatalog() = runBlocking {
         val api = object : MusicSearchApi {
             override suspend fun search(
                 term: String,
@@ -100,7 +100,22 @@ class MusicSearchRepositoryTest {
         val artistApi = object : DeezerArtistApi {
             override suspend fun search(artistName: String) = DeezerArtistSearchResponse()
         }
-        assertEquals(listOf("록", "팝"), MusicSearchRepository(api, artistApi).genres())
+        assertEquals(
+            listOf(
+                "발라드",
+                "댄스",
+                "랩/힙합",
+                "R&B/Soul",
+                "인디음악",
+                "트로트",
+                "포크/블루스",
+                "POP",
+                "록/메탈",
+                "일렉트로니카",
+                "포크/블루스/컨트리",
+            ),
+            MusicSearchRepository(api, artistApi).genres(),
+        )
     }
 
     @Test
