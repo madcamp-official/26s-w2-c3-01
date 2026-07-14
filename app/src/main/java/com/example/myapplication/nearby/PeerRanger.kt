@@ -44,13 +44,22 @@ class PeerRangingCapabilityDetector(context: Context) {
             add(PeerRangingTechnology.WIFI_RTT)
         }
         if (packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
-            if (Build.VERSION.SDK_INT >= 36) {
+            if (PlatformRangingPolicy.enabled && Build.VERSION.SDK_INT >= 36) {
                 add(PeerRangingTechnology.BLUETOOTH_CHANNEL_SOUNDING)
             }
             add(PeerRangingTechnology.BLUETOOTH_RSSI)
         }
         add(PeerRangingTechnology.GPS)
     }
+}
+
+/**
+ * Android 16's OOB ranging service can crash system_server while a session is stopping.
+ * Keep the platform path disabled until the framework fix is available; Nearby Connections,
+ * BLE RSSI, and GPS continue to provide discovery and proximity measurements.
+ */
+internal object PlatformRangingPolicy {
+    const val enabled = false
 }
 
 interface PlatformConnectedRanger {
@@ -69,7 +78,11 @@ interface PlatformConnectedRanger {
 
 object PlatformConnectedRangerFactory {
     fun create(context: Context): PlatformConnectedRanger =
-        if (Build.VERSION.SDK_INT >= 36) Api36.create(context) else NoOpPlatformConnectedRanger()
+        if (PlatformRangingPolicy.enabled && Build.VERSION.SDK_INT >= 36) {
+            Api36.create(context)
+        } else {
+            NoOpPlatformConnectedRanger()
+        }
 
     @RequiresApi(36)
     private object Api36 {

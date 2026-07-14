@@ -196,9 +196,6 @@ fun MelodyBubbleApp(
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.NEARBY_WIFI_DEVICES)
             }
-            if (Build.VERSION.SDK_INT >= 36) {
-                add(Manifest.permission.RANGING)
-            }
         }.filter {
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }

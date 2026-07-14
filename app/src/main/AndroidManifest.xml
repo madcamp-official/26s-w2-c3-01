@@ -20,10 +20,10 @@
         android:minSdkVersion="33"
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
+    <!-- Declared for the dormant implementation; runtime use is disabled by PlatformRangingPolicy. -->
     <uses-permission
         android:minSdkVersion="36"
         android:name="android.permission.RANGING" />
-
     <uses-feature
         android:name="android.hardware.location.gps"
         android:required="false" />
