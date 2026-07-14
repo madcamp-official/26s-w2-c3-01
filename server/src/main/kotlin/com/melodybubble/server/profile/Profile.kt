@@ -172,6 +172,7 @@ private data class StoredProfile(
     val profileColor: String,
     val bio: String,
     val avatarSeed: String,
+    val avatarUrl: String?,
     val genres: List<String>,
     val moods: List<String>,
     val discoverable: Boolean,
@@ -196,7 +197,7 @@ class ProfileQueryService(
             profileColor = stored.profileColor,
             bio = stored.bio,
             avatarSeed = stored.avatarSeed,
-            avatarUrl = avatars.create(stored.avatarSeed),
+            avatarUrl = avatars.resolve(stored.avatarSeed, stored.avatarUrl),
             genres = stored.genres,
             moods = stored.moods,
             discoverable = stored.discoverable,
@@ -246,7 +247,7 @@ class ProfileQueryService(
             profileColor = target.profileColor,
             bio = target.bio,
             avatarSeed = target.avatarSeed,
-            avatarUrl = avatars.create(target.avatarSeed),
+            avatarUrl = avatars.resolve(target.avatarSeed, target.avatarUrl),
             genres = target.genres,
             moods = target.moods,
             melodyAlias = target.melodyAlias,
@@ -313,6 +314,7 @@ class ProfileQueryService(
             profileColor = rs.getString("profile_color"),
             bio = rs.getString("bio").orEmpty(),
             avatarSeed = rs.getString("avatar_seed"),
+            avatarUrl = rs.getString("avatar_data_url"),
             genres = splitTags(rs.getString("preferred_genres")),
             moods = splitTags(rs.getString("mood_tags")),
             discoverable = rs.getBoolean("discoverable"),
@@ -521,7 +523,7 @@ class ProfileQueryService(
         if (viewerId == targetId) return SharedFollowers(0, emptyList())
         val rows = jdbc.query(
             """
-            select u.profile_handle, u.display_name, u.avatar_seed, count(*) over()::int
+            select u.profile_handle, u.display_name, u.avatar_seed, u.avatar_data_url, count(*) over()::int
             from user_follows viewer_following
             join users u on u.id=viewer_following.followed_id
             join user_follows target_followers
@@ -536,10 +538,10 @@ class ProfileQueryService(
             limit 3
             """.trimIndent(),
             { rs, _ ->
-                rs.getInt(4) to SharedFollowerPreview(
+                rs.getInt(5) to SharedFollowerPreview(
                     profileHandle = rs.getString(1),
                     displayName = rs.getString(2),
-                    avatarUrl = avatars.create(rs.getString(3)),
+                    avatarUrl = avatars.resolve(rs.getString(3), rs.getString(4)),
                 )
             },
             targetId,
@@ -583,7 +585,7 @@ class ProfileQueryService(
     companion object {
         private val PROFILE_HANDLE_REGEX = Regex("[a-z0-9_]{3,32}")
         private val PROFILE_SELECT = """
-            select u.id,u.profile_handle,u.display_name,u.profile_color,u.bio,u.avatar_seed,
+            select u.id,u.profile_handle,u.display_name,u.profile_color,u.bio,u.avatar_seed,u.avatar_data_url,
               u.preferred_genres,u.mood_tags,u.melody_alias_id,
               u.melody_alias_notes::text melody_alias_notes,u.melody_alias_tone,u.melody_alias_mood,
               u.melody_alias_tempo,u.profile_revision,coalesce(p.discoverable,true) discoverable,
@@ -603,6 +605,7 @@ class ProfileController(
     private val nearby: NearbyService,
     private val rateLimiter: ActionRateLimiter,
     private val profiles: ProfileQueryService,
+    private val avatars: AvatarUrlFactory,
 ) {
     @GetMapping fun me(principal: Principal): ProfileResponse = profiles.me(principal.userId())
 
@@ -626,9 +629,24 @@ class ProfileController(
         val userId = principal.userId()
         rateLimiter.enforce(userId, "AVATAR_RANDOMIZE", 10, Duration.ofMinutes(1))
         jdbc.update(
-            "update users set avatar_seed=?,profile_revision=profile_revision+1,updated_at=now() where id=?",
+            "update users set avatar_seed=?,avatar_data_url=null,profile_revision=profile_revision+1,updated_at=now() where id=?",
             UUID.randomUUID().toString(),
             userId,
+        )
+        return profiles.me(userId)
+    }
+
+    @PutMapping("/avatar")
+    fun customizeAvatar(principal: Principal, @RequestBody request: AvatarCustomization): ProfileResponse {
+        val userId = principal.userId()
+        rateLimiter.enforce(userId, "AVATAR_CUSTOMIZE", 30, Duration.ofMinutes(1))
+        val customization = runCatching { request.validated() }
+            .getOrElse { throw ResponseStatusException(HttpStatus.BAD_REQUEST, it.message, it) }
+        val seed = jdbc.queryForObject("select avatar_seed from users where id=?", String::class.java, userId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "프로필을 찾을 수 없습니다.")
+        jdbc.update(
+            "update users set avatar_data_url=?,profile_revision=profile_revision+1,updated_at=now() where id=?",
+            avatars.create(seed, customization), userId,
         )
         return profiles.me(userId)
     }

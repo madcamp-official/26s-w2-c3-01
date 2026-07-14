@@ -136,6 +136,14 @@ data class ProfileUpdateRequest(
     val genres: List<String>,
     val moods: List<String>,
 )
+data class AvatarCustomizationRequest(
+    val eyebrowsVariant: String,
+    val eyesVariant: String,
+    val noseVariant: String,
+    val mouthVariant: String,
+    val glassesVariant: String? = null,
+    val freckles: Boolean = false,
+)
 data class PrivacyUpdateRequest(
     val discoverable: Boolean,
     val shareMusic: Boolean,
@@ -158,6 +166,10 @@ interface ProfileApi {
     ): RemoteProfile
     @POST("api/v1/me/avatar/randomize") suspend fun randomizeAvatar(
         @Header("Authorization") authorization: String,
+    ): RemoteProfile
+    @PUT("api/v1/me/avatar") suspend fun customizeAvatar(
+        @Header("Authorization") authorization: String,
+        @Body request: AvatarCustomizationRequest,
     ): RemoteProfile
     @PUT("api/v1/me/privacy") suspend fun privacy(
         @Header("Authorization") authorization: String,

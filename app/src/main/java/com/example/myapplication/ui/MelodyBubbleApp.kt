@@ -736,7 +736,7 @@ private fun MainShell(
                 onOpenFollowers = onOpenFollowers,
                 onOpenSettings = onOpenSettings,
                 onProfileUpdate = viewModel::updateProfile,
-                onRandomizeAvatar = viewModel::randomizeAvatar,
+                onCustomizeAvatar = viewModel::customizeAvatar,
                 onProfileCurationUpdate = viewModel::updateProfileCuration,
                 musicSearchState = musicSearchState,
                 genreCatalogState = genreCatalogState,

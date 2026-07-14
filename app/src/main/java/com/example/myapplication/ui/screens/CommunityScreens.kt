@@ -120,6 +120,7 @@ import com.example.myapplication.core.model.ChatPreview
 import com.example.myapplication.core.model.DeliveryState
 import com.example.myapplication.core.model.InboxNotification
 import com.example.myapplication.data.AvatarProfileResolver
+import com.example.myapplication.data.AvatarCustomization
 import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.PreviewPlaybackState
@@ -1211,7 +1212,7 @@ fun MyScreen(
     onOpenFollowers: () -> Unit,
     onOpenSettings: () -> Unit,
     onProfileUpdate: (String, Long, String, List<String>, List<String>) -> Unit,
-    onRandomizeAvatar: () -> Unit,
+    onCustomizeAvatar: (AvatarCustomization) -> Unit,
     onProfileCurationUpdate: (List<ProfileTrack>, List<ProfileArtist>) -> Unit,
     musicSearchState: MusicSearchUiState,
     genreCatalogState: GenreCatalogUiState,
@@ -1233,6 +1234,10 @@ fun MyScreen(
     var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
     var signatureTracks by remember(profile.signatureTracks) { mutableStateOf(profile.signatureTracks) }
     var favoriteArtists by remember(profile.favoriteArtists) { mutableStateOf(profile.favoriteArtists) }
+    var avatarEditorVisible by remember { mutableStateOf(false) }
+    var avatarCustomization by remember(profile.avatarUrl) {
+        mutableStateOf(AvatarProfileResolver.customizationFrom(profile.avatarUrl))
+    }
     LaunchedEffect(profileSaving, feedbackMessage, awaitingProfileSave) {
         if (awaitingProfileSave && profileSaving) profileSaveStarted = true
         if (awaitingProfileSave && profileSaveStarted && !profileSaving) {
@@ -1279,12 +1284,8 @@ fun MyScreen(
             if (editorSection == "BASIC") {
             ProfileAvatar(profile.avatarUrl, name, profile.colorHex, 112.dp)
             Text("DiceBear Lorelei Neutral 아바타", color = MutedMint, style = MaterialTheme.typography.bodySmall)
-            OutlinedButton(onClick = onRandomizeAvatar, enabled = !profileSaving) {
-                if (profileSaving) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                }
-                Text(if (profileSaving) "새 아바타 적용 중" else "새 아바타 뽑기")
+            OutlinedButton(onClick = { avatarEditorVisible = true }, enabled = !profileSaving) {
+                Text("아바타 꾸미기")
             }
             Spacer(Modifier.height(8.dp))
             OutlinedTextField(name, { name = it.take(40) }, Modifier.fillMaxWidth(), label = { Text("프로필 이름") }, singleLine = true)
@@ -1609,6 +1610,98 @@ fun MyScreen(
             }
         }
     }
+
+    if (avatarEditorVisible) {
+        AvatarCustomizationDialog(
+            seed = profile.avatarSeed,
+            customization = avatarCustomization,
+            onChange = { avatarCustomization = it },
+            onDismiss = { avatarEditorVisible = false },
+            onSave = {
+                onCustomizeAvatar(avatarCustomization)
+                avatarEditorVisible = false
+            },
+        )
+    }
+}
+
+@Composable
+private fun AvatarCustomizationDialog(
+    seed: String,
+    customization: AvatarCustomization,
+    onChange: (AvatarCustomization) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("아바타 꾸미기") },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                ProfileAvatar(
+                    AvatarProfileResolver.customizedUrl(seed, customization),
+                    "아바타 미리보기",
+                    0xFF6750A4,
+                    128.dp,
+                )
+                AvatarVariantRow("눈썹", AvatarCustomization.eyebrows, customization.eyebrowsVariant) {
+                    onChange(customization.copy(eyebrowsVariant = it))
+                }
+                AvatarVariantRow("눈", AvatarCustomization.eyes, customization.eyesVariant) {
+                    onChange(customization.copy(eyesVariant = it))
+                }
+                AvatarVariantRow("코", AvatarCustomization.noses, customization.noseVariant) {
+                    onChange(customization.copy(noseVariant = it))
+                }
+                AvatarVariantRow("입", AvatarCustomization.mouths, customization.mouthVariant) {
+                    onChange(customization.copy(mouthVariant = it))
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("안경", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Switch(
+                        checked = customization.glassesVariant != null,
+                        onCheckedChange = {
+                            onChange(customization.copy(glassesVariant = if (it) AvatarCustomization.glasses.first() else null))
+                        },
+                    )
+                }
+                customization.glassesVariant?.let { selected ->
+                    AvatarVariantRow("안경 모양", AvatarCustomization.glasses, selected) {
+                        onChange(customization.copy(glassesVariant = it))
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("주근깨", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Switch(
+                        checked = customization.freckles,
+                        onCheckedChange = { onChange(customization.copy(freckles = it)) },
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onSave) { Text("적용") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
+}
+
+@Composable
+private fun AvatarVariantRow(
+    label: String,
+    variants: List<String>,
+    selected: String,
+    onSelected: (String) -> Unit,
+) {
+    val index = variants.indexOf(selected).coerceAtLeast(0)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+        TextButton(onClick = { onSelected(variants[(index - 1 + variants.size) % variants.size]) }) { Text("‹") }
+        Text("${index + 1} / ${variants.size}", modifier = Modifier.width(68.dp), maxLines = 1)
+        TextButton(onClick = { onSelected(variants[(index + 1) % variants.size]) }) { Text("›") }
+    }
 }
 
 @Composable
@@ -1851,14 +1944,16 @@ private fun PublicProfileHero(
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        Text(
-            profile.bio.ifBlank { "음악으로 자신을 소개하는 사용자" },
-            color = ink,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.bodyMedium,
-        )
+        profile.bio.trim().takeIf { it.isNotEmpty() }?.let { bio ->
+            Spacer(Modifier.height(12.dp))
+            Text(
+                bio,
+                color = ink,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
         val tasteTags = (profile.genres + profile.moods).distinct().take(4)
         if (tasteTags.isNotEmpty()) {
             Spacer(Modifier.height(9.dp))

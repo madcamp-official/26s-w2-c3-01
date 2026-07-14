@@ -15,6 +15,7 @@ import com.example.myapplication.audio.MusicPreviewPlayer
 import com.example.myapplication.data.DemoMelodyRepository
 import com.example.myapplication.MelodyApplication
 import com.example.myapplication.data.MelodyRepository
+import com.example.myapplication.data.AvatarCustomization
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
 import com.example.myapplication.data.realtime.RealtimeConnectionState
 import com.example.myapplication.data.realtime.RealtimeDestinations
@@ -559,7 +560,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         repository.updatePresenceSettings(radiusMeters, discoverabilityScope, musicVisibility)
     fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>) =
         repository.updateProfile(displayName, colorHex, bio, genres, moods)
-    fun randomizeAvatar() = repository.randomizeAvatar()
+    fun customizeAvatar(customization: AvatarCustomization) = repository.customizeAvatar(customization)
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>) =
         repository.updateProfileCuration(signatureTracks, favoriteArtists)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings) =

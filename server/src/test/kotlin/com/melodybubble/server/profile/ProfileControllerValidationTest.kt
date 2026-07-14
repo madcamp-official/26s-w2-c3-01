@@ -15,6 +15,7 @@ class ProfileControllerValidationTest {
         mock(NearbyService::class.java),
         mock(ActionRateLimiter::class.java),
         mock(ProfileQueryService::class.java),
+        mock(AvatarUrlFactory::class.java),
     )
     private val principal = Principal { UUID.randomUUID().toString() }
 

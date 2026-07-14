@@ -64,6 +64,7 @@ import com.example.myapplication.data.remote.RemotePopularTrack
 import com.example.myapplication.data.remote.ReportSubmitRequest
 import com.example.myapplication.data.remote.SendChatMessageRequest
 import com.example.myapplication.data.remote.ProfileUpdateRequest
+import com.example.myapplication.data.remote.AvatarCustomizationRequest
 import com.example.myapplication.data.remote.ProfileCurationUpdateRequest
 import com.example.myapplication.data.remote.ProfilePrivacyUpdateRequest
 import com.example.myapplication.data.remote.RemoteProfile
@@ -182,7 +183,7 @@ interface MelodyRepository {
     fun setMusicVisibility(label: String)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
     fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>)
-    fun randomizeAvatar()
+    fun customizeAvatar(customization: AvatarCustomization)
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings)
     fun clearFeedback()
@@ -1043,12 +1044,12 @@ class DemoMelodyRepository(
         }
     }
 
-    override fun randomizeAvatar() {
+    override fun customizeAvatar(customization: AvatarCustomization) {
         val token = accessToken
         val previousProfile = _state.value.profile
         val optimisticAvatar = AvatarProfileResolver.resolve(
-            remoteSeed = UUID.randomUUID().toString(),
-            remoteUrl = null,
+            remoteSeed = previousProfile.avatarSeed,
+            remoteUrl = AvatarProfileResolver.customizedUrl(previousProfile.avatarSeed, customization),
             stableIdentity = null,
             fallbackSeed = previousProfile.avatarSeed,
         )
@@ -1070,7 +1071,19 @@ class DemoMelodyRepository(
             return
         }
         scope.launch {
-            runCatching { profileApi.randomizeAvatar("Bearer $token") }
+            runCatching {
+                profileApi.customizeAvatar(
+                    "Bearer $token",
+                    AvatarCustomizationRequest(
+                        eyebrowsVariant = customization.eyebrowsVariant,
+                        eyesVariant = customization.eyesVariant,
+                        noseVariant = customization.noseVariant,
+                        mouthVariant = customization.mouthVariant,
+                        glassesVariant = customization.glassesVariant,
+                        freckles = customization.freckles,
+                    ),
+                )
+            }
                 .onSuccess {
                     if (isCurrentSession(token)) {
                         preferences.edit().putBoolean(profileScopedKey(KEY_PROFILE_AVATAR_DIRTY), false).apply()

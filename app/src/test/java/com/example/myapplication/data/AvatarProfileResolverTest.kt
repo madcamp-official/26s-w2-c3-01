@@ -66,6 +66,36 @@ class AvatarProfileResolverTest {
     }
 
     @Test
+    fun customizedLoreleiNeutralAvatarIsPreserved() {
+        val url = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=server-seed" +
+            "&eyebrowsVariant=variant13&eyesVariant=variant24&noseVariant=variant06" +
+            "&mouthVariant=sad09&glassesVariant=variant05&glassesProbability=100&frecklesProbability=100"
+
+        val avatar = AvatarProfileResolver.resolve(
+            remoteSeed = "server-seed",
+            remoteUrl = url,
+            stableIdentity = null,
+            fallbackSeed = "cached-seed",
+        )
+
+        assertEquals(url, avatar.url)
+        assertEquals(
+            AvatarCustomization("variant13", "variant24", "variant06", "sad09", "variant05", true),
+            AvatarProfileResolver.customizationFrom(avatar.url),
+        )
+    }
+
+    @Test
+    fun customizedUrlDisablesOptionalComponentsWhenNotSelected() {
+        assertEquals(
+            "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=user%20seed" +
+                "&eyebrowsVariant=variant01&eyesVariant=variant01&noseVariant=variant01" +
+                "&mouthVariant=happy01&glassesProbability=0&frecklesProbability=0",
+            AvatarProfileResolver.customizedUrl("user seed", AvatarCustomization()),
+        )
+    }
+
+    @Test
     fun blankRemoteValuesUseCachedSeed() {
         val avatar = AvatarProfileResolver.resolve(
             remoteSeed = " ",

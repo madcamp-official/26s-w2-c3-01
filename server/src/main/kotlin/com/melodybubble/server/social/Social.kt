@@ -149,7 +149,7 @@ class SocialService(
 
     fun following(userId: UUID): List<SocialConnection> = jdbc.query(
         """
-        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_seed,u.bio,
+        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_seed,u.avatar_data_url,u.bio,
           exists(select 1 from user_follows back where back.follower_id=u.id and back.followed_id=?),
           mine.created_at
         from user_follows mine join users u on u.id=mine.followed_id
@@ -164,7 +164,7 @@ class SocialService(
 
     fun followers(userId: UUID): List<SocialConnection> = jdbc.query(
         """
-        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_seed,u.bio,
+        select mine.id,u.profile_handle,u.display_name,u.profile_color,u.avatar_seed,u.avatar_data_url,u.bio,
           (mine.id is not null),incoming.created_at
         from user_follows incoming join users u on u.id=incoming.follower_id
         left join user_follows mine on mine.follower_id=? and mine.followed_id=u.id
@@ -323,10 +323,10 @@ class SocialService(
         profileHandle = rs.getString(2),
         displayAlias = rs.getString(3),
         profileColor = rs.getString(4),
-        avatarUrl = avatars.create(rs.getString(5)),
-        bio = rs.getString(6).orEmpty(),
-        mutual = rs.getBoolean(7),
-        followedAt = rs.getTimestamp(8).toInstant(),
+        avatarUrl = avatars.resolve(rs.getString(5), rs.getString(6)),
+        bio = rs.getString(7).orEmpty(),
+        mutual = rs.getBoolean(8),
+        followedAt = rs.getTimestamp(9).toInstant(),
     )
 
     companion object {

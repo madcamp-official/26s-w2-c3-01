@@ -171,7 +171,7 @@ class NearbyService(
     fun directBubble(viewerId: UUID, targetId: UUID): NearbyBubble? = jdbc.query(
         """
         select coalesce(ps.nearby_handle,concat('d_',replace(u.id::text,'-',''))) nearby_handle,
-          u.profile_handle,u.display_name,u.avatar_seed,u.profile_color,
+          u.profile_handle,u.display_name,u.avatar_seed,u.avatar_data_url,u.profile_color,
           (p.allow_reactions and ps.nearby_handle is not null) allow_reactions,
           case
             when exists(select 1 from user_follows f where f.follower_id=? and f.followed_id=u.id)
@@ -206,7 +206,7 @@ class NearbyService(
                 profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
                 avatarSeed = rs.getString("avatar_seed"),
-                avatarUrl = null,
+                avatarUrl = rs.getString("avatar_data_url"),
                 profileColor = rs.getString("profile_color"),
                 displayPosition = abstractPosition(handle, ProximityBand.WITHIN_5M),
                 matchScore = 65 + stable(handle, 31),
@@ -256,6 +256,7 @@ class NearbyService(
               person.profile_handle,
               person.display_name,
               person.avatar_seed,
+              person.avatar_data_url,
               person.profile_color,
               CASE WHEN status.is_playing AND privacy.share_music AND (
                 privacy.music_visibility='TITLE_ARTIST' OR (
@@ -338,7 +339,7 @@ class NearbyService(
                 profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
                 avatarSeed = rs.getString("avatar_seed"),
-                avatarUrl = null,
+                avatarUrl = rs.getString("avatar_data_url"),
                 profileColor = rs.getString("profile_color"),
                 displayPosition = abstractPosition(handle, band),
                 matchScore = 65 + stable(handle, 31),
