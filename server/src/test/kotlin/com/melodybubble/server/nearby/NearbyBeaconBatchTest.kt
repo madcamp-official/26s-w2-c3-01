@@ -37,7 +37,7 @@ class NearbyBeaconBatchTest {
     private fun update(beaconId: String, observedAt: Long, sequence: Long) =
         DirectProximityUpdate(
             beaconId = beaconId,
-            proximity = ProximityBand.WITHIN_5M.name,
+            proximity = ProximityBand.WITHIN_10M.name,
             confidence = DistanceConfidence.HIGH.name,
             method = "BLUETOOTH",
             sequence = sequence,

@@ -57,17 +57,15 @@ enum class Proximity(
     val label: String,
     val outerRadiusFraction: Float,
 ) {
-    WITHIN_5M("5m 안쪽", 0.143f),
-    WITHIN_10M("10m 안쪽", 0.286f),
-    WITHIN_15M("15m 안쪽", 0.429f);
+    WITHIN_10M("10m 안쪽", 0.22f),
+    WITHIN_20M("10~20m", 0.44f);
 
     companion object {
-        /** Accepts one release of the former broad-distance contract during rollout. */
+        /** Accepts the former 5/10/15 m wire contract during rolling deployment. */
         fun fromWire(value: String?): Proximity = when (value?.trim()?.uppercase()) {
-            "WITHIN_5M", "VERY_CLOSE" -> WITHIN_5M
-            "WITHIN_10M", "CLOSE" -> WITHIN_10M
-            "WITHIN_15M", "AROUND" -> WITHIN_15M
-            else -> WITHIN_15M
+            "WITHIN_5M", "WITHIN_10M", "VERY_CLOSE", "CLOSE" -> WITHIN_10M
+            "WITHIN_15M", "WITHIN_20M", "AROUND" -> WITHIN_20M
+            else -> WITHIN_20M
         }
     }
 }
@@ -413,7 +411,7 @@ data class MelodyUiState(
     val selectedPublicProfile: PublicProfile? = null,
     val publicProfileLoading: Boolean = false,
     val publicProfileError: String? = null,
-    val discoveryRadiusMeters: Int = 15,
+    val discoveryRadiusMeters: Int = 20,
     val discoverabilityScope: String = "NEARBY",
     val musicVisibility: String = "TITLE_ARTIST",
     val nearbyLoadState: NearbyLoadState = NearbyLoadState.IDLE,

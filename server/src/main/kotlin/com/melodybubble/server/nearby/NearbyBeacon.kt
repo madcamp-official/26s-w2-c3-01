@@ -122,8 +122,8 @@ class NearbyBeaconService(
     }
 
     private fun reportProximityUnchecked(viewerId: UUID, update: DirectProximityUpdate): Boolean {
+        val proximity = proximityBandFromWire(update.proximity) ?: return false
         if (!update.beaconId.matches(Regex("mb1_[a-f0-9]{32}")) ||
-            update.proximity !in ProximityBand.entries.map { it.name } ||
             update.confidence !in DistanceConfidence.entries.map { it.name } ||
             update.method !in setOf("UWB", "WIFI_RTT", "BLUETOOTH") ||
             update.sequence <= 0L
@@ -148,7 +148,7 @@ class NearbyBeaconService(
               sequence=excluded.sequence,observed_at=excluded.observed_at,expires_at=excluded.expires_at
             WHERE direct_proximity_measurements.sequence < excluded.sequence
             """.trimIndent(),
-            viewerId, targetId, update.proximity, update.confidence, update.method, update.sequence,
+            viewerId, targetId, proximity.name, update.confidence, update.method, update.sequence,
             Timestamp.from(Instant.ofEpochMilli(observedAtMillis)),
             Timestamp.from(now.plusSeconds(DIRECT_PROXIMITY_TTL_SECONDS)),
         ) > 0

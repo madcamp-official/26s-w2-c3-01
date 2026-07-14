@@ -28,7 +28,7 @@ app:
     access-token-minutes: ${JWT_ACCESS_TOKEN_MINUTES:60}
   nearby:
     presence-ttl-seconds: 90
-    max-radius-meters: 15
+    max-radius-meters: 20
   realtime:
     broker-relay:
       enabled: ${WEBSOCKET_BROKER_RELAY_ENABLED:false}
