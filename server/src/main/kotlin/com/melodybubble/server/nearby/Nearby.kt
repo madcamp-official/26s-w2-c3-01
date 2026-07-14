@@ -298,10 +298,17 @@ class NearbyService(
 
     @Transactional
     fun updateLocation(userId: UUID, update: LocationUpdate) {
-        rateLimiter.enforce(userId, "PRESENCE_LOCATION", 120, Duration.ofMinutes(1))
+        rateLimiter.enforce(userId, "PRESENCE_LOCATION", 300, Duration.ofMinutes(1))
         validateLocation(update)
+        val receivedAt = Instant.now()
+        val sequence = update.sequence.takeIf { it > 0L } ?: receivedAt.toEpochMilli() * 1_000L
+        val observedAtMillis = update.observedAtEpochMillis?.takeIf {
+            it in (receivedAt.toEpochMilli() - 60_000L)..(receivedAt.toEpochMilli() + 10_000L)
+        } ?: receivedAt.toEpochMilli()
+        val observedAt = Instant.ofEpochMilli(observedAtMillis)
+        val source = update.source.uppercase().takeIf { it in setOf("FUSED", "GPS") } ?: "UNKNOWN"
         val previousViewers = nearbyViewerIds(userId)
-        val expiresAt = Timestamp.from(Instant.now().plusSeconds(presenceTtlSeconds.coerceIn(30, 300)))
+        val expiresAt = Timestamp.from(receivedAt.plusSeconds(presenceTtlSeconds.coerceIn(30, 300)))
         val session = jdbc.query(
             """
             INSERT INTO presence_sessions(id,user_id,client_session_id,nearby_handle,expires_at)
@@ -315,20 +322,26 @@ class NearbyService(
             update.clientSessionId,
             expiresAt,
         ).single()
-        jdbc.update(
+        val updated = jdbc.update(
             """
-            INSERT INTO current_locations(session_id,point,accuracy_meters,expires_at)
-            VALUES (?, ST_SetSRID(ST_MakePoint(?,?),4326), ?, ?)
+            INSERT INTO current_locations(session_id,point,accuracy_meters,sequence,observed_at,source,expires_at)
+            VALUES (?, ST_SetSRID(ST_MakePoint(?,?),4326), ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
               point=excluded.point,accuracy_meters=excluded.accuracy_meters,
+              sequence=excluded.sequence,observed_at=excluded.observed_at,source=excluded.source,
               expires_at=excluded.expires_at,updated_at=now()
+            WHERE current_locations.sequence < excluded.sequence
             """.trimIndent(),
             session,
             update.longitude,
             update.latitude,
             update.accuracyMeters,
+            sequence,
+            Timestamp.from(observedAt),
+            source,
             expiresAt,
         )
+        if (updated == 0) return
         publishNearbySnapshotsAfterCommit(previousViewers + nearbyViewerIds(userId))
     }
 
@@ -709,6 +722,9 @@ class NearbyService(
             (!update.accuracyMeters.isFinite() || update.accuracyMeters !in 0f..5000f)
         ) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "유효한 위치 정확도가 필요합니다.")
+        }
+        if (update.sequence < 0L || update.source.length > 24) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "유효한 위치 측정 정보가 필요합니다.")
         }
     }
 
