@@ -8,17 +8,18 @@ data class NearbyLocationRequestProfile(
 
 object NearbyLocationPolicy {
     val INTERACTIVE = NearbyLocationRequestProfile(
-        intervalMillis = 1_000L,
-        minIntervalMillis = 500L,
+        intervalMillis = 0L,
+        minIntervalMillis = 0L,
         minDistanceMeters = 0f,
     )
 
     val EFFICIENT = NearbyLocationRequestProfile(
-        intervalMillis = 2_000L,
-        minIntervalMillis = 1_000L,
+        intervalMillis = 0L,
+        minIntervalMillis = 0L,
         minDistanceMeters = 0f,
     )
 
+    const val SAMPLE_SELECTION_WINDOW_MILLIS = 250L
     const val MAX_ACCURACY_METERS = 20f
     const val MAX_AGE_MILLIS = 15_000L
     const val INITIAL_MAX_ACCURACY_METERS = 50f

@@ -12,6 +12,8 @@ import com.example.myapplication.core.model.radiusFromCenter
 import com.example.myapplication.data.keepSettledDuringRefresh
 import com.example.myapplication.data.toMeasurementMethod
 import com.example.myapplication.service.NearbyLocationPolicy
+import com.example.myapplication.service.AccuracyFirstLocationSelector
+import com.example.myapplication.service.NearbyLocationSample
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -53,9 +55,9 @@ class NearbyDistanceContractTest {
 
     @Test
     fun locationPolicyUsesFastVisibleProfileAndRejectsStaleOrInaccurateFixes() {
-        assertEquals(1_000L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
+        assertEquals(0L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
         assertEquals(0f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
-        assertEquals(2_000L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
+        assertEquals(0L, NearbyLocationPolicy.EFFICIENT.intervalMillis)
         assertEquals(0f, NearbyLocationPolicy.EFFICIENT.minDistanceMeters)
 
         val now = 100_000L
@@ -95,6 +97,27 @@ class NearbyDistanceContractTest {
         assertEquals(NearbyMeasurementMethod.FUSED, "fused".toMeasurementMethod())
         assertEquals(NearbyMeasurementMethod.UNKNOWN, "network".toMeasurementMethod())
     }
+
+    @Test
+    fun accuracyFirstSelectorChoosesTheBestFreshCandidateOnce() {
+        val selector = AccuracyFirstLocationSelector()
+        selector.offer(sample(accuracy = 12f, elapsedNanos = 900_000_000L))
+        selector.offer(sample(accuracy = 4f, elapsedNanos = 800_000_000L))
+
+        assertEquals(4f, selector.takeBest(1_000_000_000L)?.accuracyMeters)
+        assertEquals(null, selector.takeBest(1_100_000_000L))
+        selector.offer(sample(accuracy = 1f, elapsedNanos = 800_000_000L))
+        assertEquals(null, selector.takeBest(1_200_000_000L))
+    }
+
+    private fun sample(accuracy: Float, elapsedNanos: Long) = NearbyLocationSample(
+        latitude = 37.0,
+        longitude = 127.0,
+        accuracyMeters = accuracy,
+        observedAtEpochMillis = 1_000L,
+        elapsedRealtimeNanos = elapsedNanos,
+        source = "gps",
+    )
 
     private fun listener(proximity: Proximity, position: DisplayPosition) = NearbyListener(
         nearbyHandle = "nearby-test",
