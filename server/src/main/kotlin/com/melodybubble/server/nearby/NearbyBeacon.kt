@@ -22,6 +22,14 @@ data class NearbyBeaconResponse(
 )
 data class ResolveNearbyBeaconsRequest(val beaconIds: List<String>)
 data class ResolvedNearbyBeacon(val beaconId: String, val user: NearbyBubble)
+data class DirectProximityUpdate(
+    val beaconId: String,
+    val proximity: String,
+    val confidence: String,
+    val method: String,
+    val sequence: Long,
+    val observedAtEpochMillis: Long,
+)
 
 @Service
 class NearbyBeaconService(
@@ -61,6 +69,40 @@ class NearbyBeaconService(
             nearby.directBubble(viewerId, ownerId)?.let { ResolvedNearbyBeacon(beaconId, it) }
         }
     }
+
+    @Transactional
+    fun reportProximity(viewerId: UUID, update: DirectProximityUpdate): Boolean {
+        rateLimiter.enforce(viewerId, "NEARBY_DIRECT_PROXIMITY", 600, Duration.ofMinutes(1))
+        if (!update.beaconId.matches(Regex("mb1_[a-f0-9]{32}")) ||
+            update.proximity !in ProximityBand.entries.map { it.name } ||
+            update.confidence !in DistanceConfidence.entries.map { it.name } ||
+            update.method !in setOf("UWB", "WIFI_RTT", "BLUETOOTH") ||
+            update.sequence <= 0L
+        ) return false
+        val targetId = jdbc.query(
+            "select user_id from nearby_beacons where beacon_id=? and expires_at>now() and user_id<>?",
+            { rs, _ -> UUID.fromString(rs.getString("user_id")) },
+            update.beaconId,
+            viewerId,
+        ).firstOrNull() ?: return false
+        val now = Instant.now()
+        val observedAtMillis = update.observedAtEpochMillis.takeIf {
+            it in (now.toEpochMilli() - 10_000L)..(now.toEpochMilli() + 5_000L)
+        } ?: now.toEpochMilli()
+        return jdbc.update(
+            """
+            INSERT INTO direct_proximity_measurements(
+              viewer_user_id,target_user_id,proximity,confidence,method,sequence,observed_at,expires_at
+            ) VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(viewer_user_id,target_user_id) DO UPDATE SET
+              proximity=excluded.proximity,confidence=excluded.confidence,method=excluded.method,
+              sequence=excluded.sequence,observed_at=excluded.observed_at,expires_at=excluded.expires_at
+            WHERE direct_proximity_measurements.sequence < excluded.sequence
+            """.trimIndent(),
+            viewerId, targetId, update.proximity, update.confidence, update.method, update.sequence,
+            Timestamp.from(Instant.ofEpochMilli(observedAtMillis)), Timestamp.from(now.plusSeconds(3)),
+        ) > 0
+    }
 }
 
 @RestController
@@ -73,4 +115,8 @@ class NearbyBeaconController(private val service: NearbyBeaconService) {
     @PostMapping("/resolve")
     fun resolve(principal: Principal, @RequestBody request: ResolveNearbyBeaconsRequest) =
         service.resolve(UUID.fromString(principal.name), request)
+
+    @PostMapping("/proximity")
+    fun reportProximity(principal: Principal, @RequestBody update: DirectProximityUpdate) =
+        service.reportProximity(UUID.fromString(principal.name), update)
 }
