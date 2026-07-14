@@ -17,6 +17,7 @@ import com.example.myapplication.core.model.ProfileStats
 import com.example.myapplication.core.model.ProfileTrack
 import com.example.myapplication.core.model.PublicProfile
 import com.example.myapplication.core.model.RelationshipStatus
+import com.example.myapplication.core.model.SharedFollowerPreview
 import com.example.myapplication.core.model.TasteFingerprint
 import com.example.myapplication.core.model.TasteMetric
 import com.example.myapplication.ui.screens.PublicProfileScreen
@@ -73,6 +74,7 @@ class PublicProfileScreenTest {
 
     @Test
     fun curatedLiveProfileRendersCompactSections() {
+        var messageRequested = false
         composeRule.setContent {
             MelodyBubbleTheme {
                 PublicProfileScreen(
@@ -92,6 +94,11 @@ class PublicProfileScreenTest {
                         following = true,
                         mutual = true,
                         sharedVerifiedExchangeCount = 2,
+                        sharedFollowers = listOf(
+                            SharedFollowerPreview("listener_one", "해나", null),
+                            SharedFollowerPreview("listener_two", "민수", null),
+                        ),
+                        sharedFollowerCount = 4,
                         signatureTracks = listOf(
                             ProfileTrack(rank = 1, title = "새벽의 온도", artist = "Clouded Steps"),
                         ),
@@ -118,10 +125,14 @@ class PublicProfileScreenTest {
                     onBack = {},
                     onRetry = {},
                     onFollow = {},
+                    onMessage = { messageRequested = true },
                 )
             }
         }
 
+        composeRule.onNodeWithText("해나, 민수 외 2명이 팔로우해요").assertIsDisplayed()
+        composeRule.onNodeWithText("메시지 보내기").performClick()
+        composeRule.runOnIdle { assertTrue(messageRequested) }
         composeRule.onNodeWithText("지금 듣는 음악").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("요즘 나를 설명하는 3곡").performScrollTo().assertIsDisplayed()
         composeRule.onAllNodesWithText("1").assertCountEquals(0)

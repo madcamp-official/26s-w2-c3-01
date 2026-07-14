@@ -1967,6 +1967,75 @@ private fun ProfileEmptyRow(
 }
 
 @Composable
+private fun PublicProfileActions(
+    profile: PublicProfile,
+    accent: Color,
+    muted: Color,
+    onFollow: () -> Unit,
+    onMessage: () -> Unit,
+) {
+    if (profile.isSelf) {
+        Surface(
+            color = MelodyBubbleColors.SurfaceSelected,
+            contentColor = accent,
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Text(
+                "내 프로필",
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        return
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (profile.following) {
+            OutlinedButton(
+                onClick = onFollow,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text("팔로잉", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.width(4.dp))
+                Icon(Icons.Outlined.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+        } else {
+            Button(
+                onClick = onFollow,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = MelodyBubbleColors.OnPrimary),
+            ) {
+                Text(
+                    if (profile.relationship == RelationshipStatus.FOLLOWS_ME) "맞팔하기" else "팔로우",
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        OutlinedButton(
+            onClick = onMessage,
+            enabled = profile.mutual,
+            modifier = Modifier.weight(1f).height(48.dp),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("메시지 보내기", fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+    }
+    if (!profile.mutual) {
+        Text(
+            "서로 팔로우하면 메시지를 보낼 수 있어요",
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            color = muted,
+            style = MaterialTheme.typography.labelSmall,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+    }
+}
+
+@Composable
 private fun LightProfileTag(label: String, accent: Color, outline: Color) {
     Surface(color = MelodyBubbleColors.SurfaceSelected, contentColor = accent, border = androidx.compose.foundation.BorderStroke(1.dp, outline), shape = RoundedCornerShape(10.dp)) {
         Text(label, Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
