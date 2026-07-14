@@ -206,8 +206,20 @@ fun MelodyBubbleApp(
                 context,
                 Manifest.permission.POST_NOTIFICATIONS
             ) != PackageManager.PERMISSION_GRANTED
+        val nearbyPermissions = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                add(Manifest.permission.BLUETOOTH_SCAN)
+                add(Manifest.permission.BLUETOOTH_CONNECT)
+                add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            }
+        }.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
 
-        if (hasLocationPermission && !needsNotificationPermission) {
+        if (hasLocationPermission && !needsNotificationPermission && nearbyPermissions.isEmpty()) {
             if (SharingForegroundService.start(context)) {
                 viewModel.startSharing()
                 requestNowPlayingAccessIfNeeded()
@@ -224,6 +236,7 @@ fun MelodyBubbleApp(
             if (needsNotificationPermission) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
+            addAll(nearbyPermissions)
         }
         permissionLauncher.launch(permissions.toTypedArray())
     }
