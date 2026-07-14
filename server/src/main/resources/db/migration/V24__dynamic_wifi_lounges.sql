@@ -1,3 +1,4 @@
+-- Dynamic Wi-Fi lounges follow the already-deployed V23 nearby beacon schema.
 CREATE TABLE wifi_lounge_candidates (
   user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   wifi_fingerprint CHAR(64) NOT NULL,

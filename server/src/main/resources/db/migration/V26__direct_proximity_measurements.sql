@@ -1,3 +1,4 @@
+-- Store short-lived direct device proximity measurements separately from location data.
 CREATE TABLE direct_proximity_measurements (
   viewer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   target_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

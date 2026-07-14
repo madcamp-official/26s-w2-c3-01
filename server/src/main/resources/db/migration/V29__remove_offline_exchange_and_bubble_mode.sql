@@ -1,3 +1,4 @@
+-- Remove the retired offline exchange and bubble-mode persistence model.
 DROP TABLE IF EXISTS offline_exchange_events CASCADE;
 DROP TABLE IF EXISTS offline_credentials CASCADE;
 

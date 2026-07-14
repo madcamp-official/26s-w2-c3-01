@@ -1,3 +1,4 @@
+-- Preserve client observation order when updating the current location.
 ALTER TABLE current_locations ADD COLUMN sequence BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE current_locations ADD COLUMN observed_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE current_locations ADD COLUMN source VARCHAR(24) NOT NULL DEFAULT 'UNKNOWN';

@@ -1,3 +1,4 @@
+-- Persist dynamically formed location lounges and their chat rooms.
 CREATE TABLE location_lounges (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   center geometry(Point, 4326) NOT NULL,
