@@ -1,6 +1,7 @@
 package com.example.myapplication.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class AvatarProfileResolverTest {
@@ -82,6 +83,48 @@ class AvatarProfileResolverTest {
         assertEquals(
             AvatarCustomization("variant13", "variant24", "variant06", "sad09", "variant05", true),
             AvatarProfileResolver.customizationFrom(avatar.url),
+        )
+    }
+
+    @Test
+    fun seedOnlyUrlDoesNotPretendTheCurrentAvatarUsesDefaultParts() {
+        assertNull(
+            AvatarProfileResolver.explicitCustomizationFrom(
+                "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=existing-avatar",
+            ),
+        )
+    }
+
+    @Test
+    fun renderedSvgRestoresTheExactVisibleAvatarParts() {
+        val svg = """
+            <svg>
+              <defs>
+                <g id="eyebrows-variant13-a1"><path /></g>
+                <g id="eyes-variant24-a1"><path /></g>
+                <g id="freckles-variant01-a1"><path /></g>
+                <g id="glasses-variant05-a1"><path /></g>
+                <g id="mouth-sad09-a1"><path /></g>
+                <g id="nose-variant06-a1"><path /></g>
+              </defs>
+            </svg>
+        """.trimIndent()
+
+        assertEquals(
+            AvatarCustomization("variant13", "variant24", "variant06", "sad09", "variant05", true),
+            AvatarProfileResolver.customizationFromSvg(svg),
+        )
+    }
+
+    @Test
+    fun explicitZeroProbabilityDoesNotEnableGlasses() {
+        val url = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=server-seed" +
+            "&eyebrowsVariant=variant13&eyesVariant=variant24&noseVariant=variant06" +
+            "&mouthVariant=sad09&glassesVariant=variant05&glassesProbability=0&frecklesProbability=0"
+
+        assertEquals(
+            AvatarCustomization("variant13", "variant24", "variant06", "sad09", null, false),
+            AvatarProfileResolver.explicitCustomizationFrom(url),
         )
     }
 

@@ -8,6 +8,29 @@ import kotlin.math.PI
 
 class LocationLoungePolicyTest {
     @Test
+    fun `new lounge starts at twenty meters for its creation grace period`() {
+        val createdAt = Instant.parse("2026-01-01T00:00:00Z")
+
+        assertThat(LocationLoungePolicy.INITIAL_RADIUS_METERS).isEqualTo(20)
+        assertThat(
+            LocationLoungePolicy.effectiveRadius(
+                currentRadius = 20,
+                distancesMeters = listOf(0.0),
+                createdAt = createdAt,
+                now = createdAt.plusSeconds(59),
+            )
+        ).isEqualTo(20)
+        assertThat(
+            LocationLoungePolicy.effectiveRadius(
+                currentRadius = 20,
+                distancesMeters = listOf(0.0),
+                createdAt = createdAt,
+                now = createdAt.plusSeconds(60),
+            )
+        ).isEqualTo(5)
+    }
+
+    @Test
     fun `radius thresholds are 5 10 and 20 meters and capped`() {
         assertThat(LocationLoungePolicy.radiusFor(0)).isEqualTo(5)
         assertThat(LocationLoungePolicy.radiusFor(4)).isEqualTo(5)

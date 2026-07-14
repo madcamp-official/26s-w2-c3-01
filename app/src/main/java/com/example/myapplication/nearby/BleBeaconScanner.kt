@@ -84,7 +84,10 @@ class BleBeaconScanner(context: Context) {
     }
 
     private companion object {
-        const val MEASUREMENT_TTL_MILLIS = 3_000L
+        // Android may briefly pause BLE callbacks during radio arbitration or screen-state
+        // changes. Keep the latest stable band long enough to bridge that gap without making it
+        // look like a peer vanished and immediately reappeared.
+        const val MEASUREMENT_TTL_MILLIS = 10_000L
         const val PRUNE_INTERVAL_MILLIS = 1_000L
     }
 }

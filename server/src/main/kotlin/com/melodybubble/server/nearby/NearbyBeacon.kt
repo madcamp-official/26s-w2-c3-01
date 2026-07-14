@@ -30,6 +30,29 @@ data class DirectProximityUpdate(
     val sequence: Long,
     val observedAtEpochMillis: Long,
 )
+data class DirectProximityBatchRequest(val updates: List<DirectProximityUpdate> = emptyList())
+data class DirectProximityBatchResponse(val acceptedCount: Int, val receivedCount: Int)
+
+internal fun normalizeDirectProximityBatch(
+    updates: List<DirectProximityUpdate>,
+    maxSize: Int = 40,
+): List<DirectProximityUpdate> = updates
+    .groupBy(DirectProximityUpdate::beaconId)
+    .mapNotNull { (_, sameBeaconUpdates) ->
+        sameBeaconUpdates.maxWithOrNull(
+            compareBy<DirectProximityUpdate>(DirectProximityUpdate::observedAtEpochMillis)
+                .thenBy(DirectProximityUpdate::sequence),
+        )
+    }
+    .sortedWith(
+        compareByDescending<DirectProximityUpdate>(DirectProximityUpdate::observedAtEpochMillis)
+            .thenByDescending(DirectProximityUpdate::sequence),
+    )
+    .take(maxSize)
+    .sortedWith(
+        compareBy<DirectProximityUpdate>(DirectProximityUpdate::observedAtEpochMillis)
+            .thenBy(DirectProximityUpdate::sequence),
+    )
 
 @Service
 class NearbyBeaconService(
@@ -45,8 +68,8 @@ class NearbyBeaconService(
         val beaconId = "mb1_" + UUID.randomUUID().toString().replace("-", "")
         val expiresAt = Instant.now().plusSeconds(75)
         jdbc.update(
-            "delete from nearby_beacons where user_id=? and (client_session_id=? or expires_at<now())",
-            userId, sessionId,
+            "delete from nearby_beacons where user_id=? and expires_at<now()",
+            userId,
         )
         jdbc.update(
             "insert into nearby_beacons(beacon_id,user_id,client_session_id,expires_at) values (?,?,?,?)",
@@ -73,6 +96,32 @@ class NearbyBeaconService(
     @Transactional
     fun reportProximity(viewerId: UUID, update: DirectProximityUpdate): Boolean {
         rateLimiter.enforce(viewerId, "NEARBY_DIRECT_PROXIMITY", 600, Duration.ofMinutes(1))
+        return reportProximityUnchecked(viewerId, update)
+    }
+
+    /**
+     * Reports every currently observed peer in one request. The client sends at most one batch per
+     * second, so the request budget no longer scales with the number of nearby phones or with
+     * overlapping old/new beacon IDs during rotation.
+     */
+    @Transactional
+    fun reportProximityBatch(
+        viewerId: UUID,
+        request: DirectProximityBatchRequest,
+    ): DirectProximityBatchResponse {
+        rateLimiter.enforce(viewerId, "NEARBY_DIRECT_BATCH", 75, Duration.ofMinutes(1))
+        val updates = normalizeDirectProximityBatch(
+            request.updates,
+            MAX_DIRECT_PROXIMITY_BATCH_SIZE,
+        )
+        val acceptedCount = updates.count { reportProximityUnchecked(viewerId, it) }
+        return DirectProximityBatchResponse(
+            acceptedCount = acceptedCount,
+            receivedCount = updates.size,
+        )
+    }
+
+    private fun reportProximityUnchecked(viewerId: UUID, update: DirectProximityUpdate): Boolean {
         if (!update.beaconId.matches(Regex("mb1_[a-f0-9]{32}")) ||
             update.proximity !in ProximityBand.entries.map { it.name } ||
             update.confidence !in DistanceConfidence.entries.map { it.name } ||
@@ -100,8 +149,16 @@ class NearbyBeaconService(
             WHERE direct_proximity_measurements.sequence < excluded.sequence
             """.trimIndent(),
             viewerId, targetId, update.proximity, update.confidence, update.method, update.sequence,
-            Timestamp.from(Instant.ofEpochMilli(observedAtMillis)), Timestamp.from(now.plusSeconds(3)),
+            Timestamp.from(Instant.ofEpochMilli(observedAtMillis)),
+            Timestamp.from(now.plusSeconds(DIRECT_PROXIMITY_TTL_SECONDS)),
         ) > 0
+    }
+
+    private companion object {
+        // A scan callback can pause for a few seconds even while two phones remain adjacent.
+        // The client refreshes at most once per second, so this bridges transient radio gaps.
+        const val DIRECT_PROXIMITY_TTL_SECONDS = 12L
+        const val MAX_DIRECT_PROXIMITY_BATCH_SIZE = 40
     }
 }
 
@@ -119,4 +176,8 @@ class NearbyBeaconController(private val service: NearbyBeaconService) {
     @PostMapping("/proximity")
     fun reportProximity(principal: Principal, @RequestBody update: DirectProximityUpdate) =
         service.reportProximity(UUID.fromString(principal.name), update)
+
+    @PostMapping("/proximity/batch")
+    fun reportProximityBatch(principal: Principal, @RequestBody request: DirectProximityBatchRequest) =
+        service.reportProximityBatch(UUID.fromString(principal.name), request)
 }

@@ -1,8 +1,12 @@
 package com.example.myapplication.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -101,6 +105,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -110,6 +115,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -978,6 +986,21 @@ fun ChatScreen(
     var inputFocused by remember { mutableStateOf(false) }
     val messageListState = rememberLazyListState()
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    val messageAnimationTracker = remember(chat.roomId) {
+        ChatMessageEntryAnimationTracker(
+            initialMessageIds = messages.map(ChatMessage::clientMessageId),
+            awaitInitialHistory = messages.isEmpty() && chat.hasMessages,
+        )
+    }
+    messageAnimationTracker.observe(messages.map(ChatMessage::clientMessageId))
+
+    val submitMessage = {
+        if (input.isNotBlank()) {
+            messageAnimationTracker.expectNextAppend()
+            onSend(input)
+            input = ""
+        }
+    }
 
     LaunchedEffect(messages.size, messages.lastOrNull()?.clientMessageId) {
         if (messages.isNotEmpty()) {
@@ -1041,44 +1064,14 @@ fun ChatScreen(
                 )
             }
             items(messages, key = { it.clientMessageId }) { message ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start
-                ) {
-                    if (!message.isMine) {
-                        ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 32.dp)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(
-                            topStart = 18.dp,
-                            topEnd = 18.dp,
-                            bottomStart = if (message.isMine) 18.dp else 5.dp,
-                            bottomEnd = if (message.isMine) 5.dp else 18.dp
-                        ),
-                        color = if (message.isMine) SignalGreen.copy(alpha = 0.22f) else MossSurfaceHigh,
-                        modifier = Modifier.fillMaxWidth(if (message.isMine) 0.76f else 0.68f)
-                    ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
-                            Text(message.content)
-                            Spacer(Modifier.height(5.dp))
-                            if (message.isMine) {
-                                Text(
-                                    when (message.deliveryState) {
-                                        DeliveryState.PENDING -> "전송 중"
-                                        DeliveryState.SENT -> "안 읽음"
-                                        DeliveryState.READ -> "읽음"
-                                        DeliveryState.FAILED -> "실패 · 다시 시도"
-                                    },
-                                    color = MutedMint,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    modifier = Modifier.align(Alignment.End)
-                                )
-                            }
-                        }
-                    }
+                val animateEntry = remember(message.clientMessageId) {
+                    messageAnimationTracker.claimEntryAnimation(message.clientMessageId)
                 }
+                ChatMessageRow(
+                    chat = chat,
+                    message = message,
+                    animateEntry = animateEntry,
+                )
             }
         }
         Row(
@@ -1097,21 +1090,11 @@ fun ChatScreen(
                 shape = RoundedCornerShape(22.dp),
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = {
-                    if (input.isNotBlank()) {
-                        onSend(input)
-                        input = ""
-                    }
-                })
+                keyboardActions = KeyboardActions(onSend = { submitMessage() })
             )
             Spacer(Modifier.width(8.dp))
             IconButton(
-                onClick = {
-                    if (input.isNotBlank()) {
-                        onSend(input)
-                        input = ""
-                    }
-                },
+                onClick = submitMessage,
                 modifier = Modifier
                     .size(52.dp)
                     .background(SignalGreen, CircleShape)
@@ -1121,6 +1104,74 @@ fun ChatScreen(
                     contentDescription = "메시지 보내기",
                     tint = MelodyBubbleColors.OnPrimary
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatMessageRow(
+    chat: ChatPreview,
+    message: ChatMessage,
+    animateEntry: Boolean,
+) {
+    var visible by remember(message.clientMessageId) { mutableStateOf(!animateEntry) }
+    val entryOffsetPx = with(LocalDensity.current) { 14.dp.roundToPx() }
+
+    LaunchedEffect(message.clientMessageId) {
+        visible = true
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(
+            initialAlpha = 0.45f,
+            animationSpec = tween(durationMillis = 140),
+        ) + slideInVertically(
+            initialOffsetY = { fullHeight -> entryOffsetPx.coerceAtMost(fullHeight) },
+            animationSpec = tween(
+                durationMillis = 220,
+                easing = FastOutSlowInEasing,
+            ),
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start,
+        ) {
+            if (!message.isMine) {
+                ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 32.dp)
+                Spacer(Modifier.width(8.dp))
+            }
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = 18.dp,
+                    topEnd = 18.dp,
+                    bottomStart = if (message.isMine) 18.dp else 5.dp,
+                    bottomEnd = if (message.isMine) 5.dp else 18.dp,
+                ),
+                color = if (message.isMine) SignalGreen.copy(alpha = 0.22f) else MossSurfaceHigh,
+                modifier = Modifier.fillMaxWidth(if (message.isMine) 0.76f else 0.68f),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(message.content)
+                    Spacer(Modifier.height(5.dp))
+                    if (message.isMine) {
+                        Text(
+                            when (message.deliveryState) {
+                                DeliveryState.PENDING -> "전송 중"
+                                DeliveryState.SENT -> "안 읽음"
+                                DeliveryState.READ -> "읽음"
+                                DeliveryState.FAILED -> "실패 · 다시 시도"
+                            },
+                            color = MutedMint,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    }
+                }
             }
         }
     }
@@ -1229,6 +1280,9 @@ fun MyScreen(
     onSearchMusic: (String) -> Unit,
     onClearMusicSearch: () -> Unit,
     onPreviewMusic: (MusicSearchResult) -> Unit,
+    avatarCustomizationLoader: suspend (String, String?) -> AvatarCustomization? = { seed, url ->
+        AvatarProfileResolver.loadCurrentCustomization(seed, url)
+    },
     bottomContentPadding: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
@@ -1243,7 +1297,11 @@ fun MyScreen(
     var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
     var signatureTracks by remember(profile.signatureTracks) { mutableStateOf(profile.signatureTracks) }
     var favoriteArtists by remember(profile.favoriteArtists) { mutableStateOf(profile.favoriteArtists) }
+    val avatarEditorScope = rememberCoroutineScope()
     var avatarEditorVisible by remember { mutableStateOf(false) }
+    var avatarEditorLoading by remember { mutableStateOf(false) }
+    var avatarEditorLoadFailed by remember { mutableStateOf(false) }
+    var avatarEditorRequestId by remember { mutableIntStateOf(0) }
     var avatarCustomization by remember(profile.avatarUrl) {
         mutableStateOf(AvatarProfileResolver.customizationFrom(profile.avatarUrl))
     }
@@ -1264,8 +1322,48 @@ fun MyScreen(
         avatarCustomization = AvatarProfileResolver.customizationFrom(profile.avatarUrl)
         avatarDialogCustomization = avatarCustomization
         avatarCustomizationDirty = false
+        avatarEditorRequestId += 1
+        avatarEditorVisible = false
+        avatarEditorLoading = false
+        avatarEditorLoadFailed = false
         genreExpanded = false
         moodExpanded = false
+    }
+
+    fun openAvatarEditor() {
+        avatarEditorRequestId += 1
+        val requestId = avatarEditorRequestId
+        avatarEditorVisible = true
+        avatarEditorLoadFailed = false
+
+        if (avatarCustomizationDirty) {
+            avatarDialogCustomization = avatarCustomization
+            avatarEditorLoading = false
+            return
+        }
+
+        val currentUrl = AvatarProfileResolver.currentUrl(profile.avatarSeed, profile.avatarUrl)
+        AvatarProfileResolver.explicitCustomizationFrom(currentUrl)?.let { current ->
+            avatarDialogCustomization = current
+            avatarEditorLoading = false
+            return
+        }
+
+        avatarEditorLoading = true
+        avatarEditorScope.launch {
+            val current = avatarCustomizationLoader(profile.avatarSeed, profile.avatarUrl)
+            if (requestId != avatarEditorRequestId || !avatarEditorVisible) return@launch
+            avatarEditorLoading = false
+            avatarEditorLoadFailed = current == null
+            current?.let { avatarDialogCustomization = it }
+        }
+    }
+
+    fun dismissAvatarEditor() {
+        avatarEditorRequestId += 1
+        avatarEditorVisible = false
+        avatarEditorLoading = false
+        avatarEditorLoadFailed = false
     }
 
     fun dismissEditor() {
@@ -1318,10 +1416,7 @@ fun MyScreen(
                 profile.colorHex,
                 112.dp,
             )
-            OutlinedButton(onClick = {
-                avatarDialogCustomization = avatarCustomization
-                avatarEditorVisible = true
-            }, enabled = !profileSaving) {
+            OutlinedButton(onClick = ::openAvatarEditor, enabled = !profileSaving) {
                 Text("아바타 꾸미기")
             }
             Spacer(Modifier.height(8.dp))
@@ -1345,7 +1440,7 @@ fun MyScreen(
                 onToggle = { genreExpanded = !genreExpanded },
             ) {
                 GenreCatalogPicker(
-                    title = "좋아하는 장르",
+                    title = null,
                     state = genreCatalogState,
                     selected = genres,
                     onChange = { genres = it },
@@ -1682,12 +1777,15 @@ fun MyScreen(
         AvatarCustomizationDialog(
             seed = profile.avatarSeed,
             customization = avatarDialogCustomization,
+            loading = avatarEditorLoading,
+            loadFailed = avatarEditorLoadFailed,
             onChange = { avatarDialogCustomization = it },
-            onDismiss = { avatarEditorVisible = false },
+            onRetry = ::openAvatarEditor,
+            onDismiss = ::dismissAvatarEditor,
             onSave = {
                 avatarCustomization = avatarDialogCustomization
                 avatarCustomizationDirty = AvatarProfileResolver.customizedUrl(profile.avatarSeed, avatarCustomization) != profile.avatarUrl
-                avatarEditorVisible = false
+                dismissAvatarEditor()
             },
         )
     }
@@ -1697,7 +1795,10 @@ fun MyScreen(
 private fun AvatarCustomizationDialog(
     seed: String,
     customization: AvatarCustomization,
+    loading: Boolean,
+    loadFailed: Boolean,
     onChange: (AvatarCustomization) -> Unit,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -1705,60 +1806,88 @@ private fun AvatarCustomizationDialog(
         onDismissRequest = onDismiss,
         title = { Text("아바타 꾸미기") },
         text = {
-            Column(
-                Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                ProfileAvatar(
-                    AvatarProfileResolver.customizedUrl(seed, customization),
-                    "아바타 미리보기",
-                    0xFF6750A4,
-                    128.dp,
+            when {
+                loading -> AvatarCustomizationLoading("현재 아바타를 확인하고 있어요")
+                loadFailed -> AvatarCustomizationLoading(
+                    message = "현재 아바타 정보를 불러오지 못했어요",
+                    actionLabel = "다시 시도",
+                    onAction = onRetry,
                 )
-                AvatarVariantRow("눈썹", AvatarCustomization.eyebrows, customization.eyebrowsVariant) {
-                    onChange(customization.copy(eyebrowsVariant = it))
-                }
-                AvatarVariantRow("눈", AvatarCustomization.eyes, customization.eyesVariant) {
-                    onChange(customization.copy(eyesVariant = it))
-                }
-                AvatarVariantRow("코", AvatarCustomization.noses, customization.noseVariant) {
-                    onChange(customization.copy(noseVariant = it))
-                }
-                AvatarVariantRow("입", AvatarCustomization.mouths, customization.mouthVariant) {
-                    onChange(customization.copy(mouthVariant = it))
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("안경", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    Switch(
-                        checked = customization.glassesVariant != null,
-                        onCheckedChange = {
-                            onChange(customization.copy(glassesVariant = if (it) AvatarCustomization.glasses.first() else null))
-                        },
+                else -> Column(
+                    Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    ProfileAvatar(
+                        AvatarProfileResolver.customizedUrl(seed, customization),
+                        "아바타 미리보기",
+                        0xFF6750A4,
+                        128.dp,
                     )
-                }
-                customization.glassesVariant?.let { selected ->
-                    AvatarVariantRow("안경 모양", AvatarCustomization.glasses, selected) {
-                        onChange(customization.copy(glassesVariant = it))
+                    AvatarVariantRow("눈썹", "avatar_eyebrows_variant", AvatarCustomization.eyebrows, customization.eyebrowsVariant) {
+                        onChange(customization.copy(eyebrowsVariant = it))
                     }
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("주근깨", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    Switch(
-                        checked = customization.freckles,
-                        onCheckedChange = { onChange(customization.copy(freckles = it)) },
-                    )
+                    AvatarVariantRow("눈", "avatar_eyes_variant", AvatarCustomization.eyes, customization.eyesVariant) {
+                        onChange(customization.copy(eyesVariant = it))
+                    }
+                    AvatarVariantRow("코", "avatar_nose_variant", AvatarCustomization.noses, customization.noseVariant) {
+                        onChange(customization.copy(noseVariant = it))
+                    }
+                    AvatarVariantRow("입", "avatar_mouth_variant", AvatarCustomization.mouths, customization.mouthVariant) {
+                        onChange(customization.copy(mouthVariant = it))
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("안경", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = customization.glassesVariant != null,
+                            onCheckedChange = {
+                                onChange(customization.copy(glassesVariant = if (it) AvatarCustomization.glasses.first() else null))
+                            },
+                            modifier = Modifier.testTag("avatar_glasses_switch"),
+                        )
+                    }
+                    customization.glassesVariant?.let { selected ->
+                        AvatarVariantRow("안경 모양", "avatar_glasses_variant", AvatarCustomization.glasses, selected) {
+                            onChange(customization.copy(glassesVariant = it))
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("주근깨", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                        Switch(
+                            checked = customization.freckles,
+                            onCheckedChange = { onChange(customization.copy(freckles = it)) },
+                            modifier = Modifier.testTag("avatar_freckles_switch"),
+                        )
+                    }
                 }
             }
         },
-        confirmButton = { Button(onClick = onSave) { Text("적용") } },
+        confirmButton = { Button(onClick = onSave, enabled = !loading && !loadFailed) { Text("적용") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
     )
 }
 
 @Composable
+private fun AvatarCustomizationLoading(
+    message: String,
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
+) {
+    Column(
+        Modifier.fillMaxWidth().height(220.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        if (actionLabel == null) CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+        Text(message, Modifier.padding(top = 14.dp), color = MutedMint)
+        actionLabel?.let { TextButton(onClick = onAction) { Text(it) } }
+    }
+}
+
+@Composable
 private fun AvatarVariantRow(
     label: String,
+    valueTestTag: String,
     variants: List<String>,
     selected: String,
     onSelected: (String) -> Unit,
@@ -1767,7 +1896,7 @@ private fun AvatarVariantRow(
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
         TextButton(onClick = { onSelected(variants[(index - 1 + variants.size) % variants.size]) }) { Text("‹") }
-        Text("${index + 1} / ${variants.size}", modifier = Modifier.width(68.dp), maxLines = 1)
+        Text("${index + 1} / ${variants.size}", modifier = Modifier.width(68.dp).testTag(valueTestTag), maxLines = 1)
         TextButton(onClick = { onSelected(variants[(index + 1) % variants.size]) }) { Text("›") }
     }
 }
@@ -2259,18 +2388,42 @@ private fun ArtistArtwork(
 
 @Composable
 private fun LightTasteMetric(label: String, score: Int, ink: Color, muted: Color, accent: Color) {
+    val normalizedScore = score.coerceIn(0, 100)
+    val progress = normalizedScore / 100f
+    val gradientEnd = accent.copy(alpha = similarityGradientEndAlpha(normalizedScore))
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-        Text("${score.coerceIn(0, 100)}%", color = muted, style = MaterialTheme.typography.labelMedium)
+        Text("$normalizedScore%", color = muted, style = MaterialTheme.typography.labelMedium)
         Spacer(Modifier.width(8.dp))
-        LinearProgressIndicator(
-            progress = { score.coerceIn(0, 100) / 100f },
-            modifier = Modifier.width(64.dp).height(4.dp),
-            color = accent,
-            trackColor = MelodyBubbleColors.SurfaceSelected,
-        )
+        Box(
+            Modifier
+                .width(68.dp)
+                .height(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MelodyBubbleColors.SurfaceSelected)
+                .testTag("taste_similarity_bar_$label")
+                .semantics {
+                    progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f, 100)
+                },
+        ) {
+            if (progress > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(progress)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(accent.copy(alpha = 0.12f), gradientEnd),
+                            ),
+                        ),
+                )
+            }
+        }
     }
 }
+
+internal fun similarityGradientEndAlpha(score: Int): Float =
+    0.12f + (score.coerceIn(0, 100) / 100f) * 0.83f
 
 @Composable
 private fun ConnectionCount(
@@ -2549,7 +2702,7 @@ private fun ExpandableProfileTagSection(
 
 @Composable
 private fun GenreCatalogPicker(
-    title: String,
+    title: String?,
     state: GenreCatalogUiState,
     selected: List<String>,
     onChange: (List<String>) -> Unit,
@@ -2557,9 +2710,11 @@ private fun GenreCatalogPicker(
 ) {
     val options = (selected + state.genres).distinct()
     Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f), fontWeight = FontWeight.Bold)
-            Text("Melon 기준", color = MutedMint, style = MaterialTheme.typography.labelSmall)
+        if (title != null) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                Text("Melon 기준", color = MutedMint, style = MaterialTheme.typography.labelSmall)
+            }
         }
         if (state.loading) {
             Spacer(Modifier.height(10.dp))
@@ -2573,7 +2728,7 @@ private fun GenreCatalogPicker(
             }
         }
         if (options.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
+            if (title != null || state.loading || state.errorMessage != null) Spacer(Modifier.height(8.dp))
             ProfileTagEditor(options = options, selected = selected, onChange = onChange)
         }
     }

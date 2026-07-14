@@ -105,6 +105,8 @@ data class DirectProximityUpdateRequest(
     val sequence: Long,
     val observedAtEpochMillis: Long,
 )
+data class DirectProximityBatchRequest(val updates: List<DirectProximityUpdateRequest>)
+data class DirectProximityBatchResponse(val acceptedCount: Int, val receivedCount: Int)
 
 interface NearbyApi {
     @POST("api/v1/nearby/beacons")
@@ -124,6 +126,12 @@ interface NearbyApi {
         @Header("Authorization") authorization: String,
         @Body request: DirectProximityUpdateRequest,
     ): Boolean
+
+    @POST("api/v1/nearby/beacons/proximity/batch")
+    suspend fun reportDirectProximityBatch(
+        @Header("Authorization") authorization: String,
+        @Body request: DirectProximityBatchRequest,
+    ): DirectProximityBatchResponse
 
     @GET("api/v1/nearby/snapshot")
     suspend fun snapshot(@Header("Authorization") authorization: String): RemoteNearbySnapshot

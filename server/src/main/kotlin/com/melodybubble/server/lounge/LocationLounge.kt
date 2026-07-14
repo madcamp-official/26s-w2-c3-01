@@ -103,9 +103,13 @@ class LocationLoungeService(
         val id = jdbc.query(
             """
             INSERT INTO location_lounges(center,radius_m,current_user_count,created_by)
-            VALUES (ST_SetSRID(ST_MakePoint(?,?),4326),5,1,?) RETURNING id
+            VALUES (ST_SetSRID(ST_MakePoint(?,?),4326),?,1,?) RETURNING id
             """.trimIndent(),
-            { rs, _ -> UUID.fromString(rs.getString(1)) }, point.longitude, point.latitude, userId,
+            { rs, _ -> UUID.fromString(rs.getString(1)) },
+            point.longitude,
+            point.latitude,
+            LocationLoungePolicy.INITIAL_RADIUS_METERS,
+            userId,
         ).single()
         jdbc.update(
             "INSERT INTO location_lounge_presence_cache(lounge_id,user_id) VALUES (?,?) ON CONFLICT DO NOTHING",
@@ -135,7 +139,12 @@ class LocationLoungeService(
 
     private fun reconcilePopulation(disk: LoungeDisk) {
         val distances = activeUserDistances(disk.id)
-        val stableRadius = LocationLoungePolicy.stableRadius(disk.radiusMeters, distances.values)
+        val stableRadius = LocationLoungePolicy.effectiveRadius(
+            currentRadius = disk.radiusMeters,
+            distancesMeters = distances.values,
+            createdAt = disk.createdAt,
+            now = Instant.now(),
+        )
         val users = distances.filterValues { it <= stableRadius + DISTANCE_EPSILON }.keys
         val previous = jdbc.query(
             "SELECT user_id FROM location_lounge_presence_cache WHERE lounge_id=?",

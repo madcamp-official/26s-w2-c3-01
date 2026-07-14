@@ -20,8 +20,10 @@ data class LoungeDisk(
 data class LoungeMergeDecision(val deletedId: UUID, val targetId: UUID, val overlapRatio: Double)
 
 object LocationLoungePolicy {
-    const val INITIAL_RADIUS_METERS = 5
+    const val MIN_RADIUS_METERS = 5
+    const val INITIAL_RADIUS_METERS = 20
     const val MAX_RADIUS_METERS = 20
+    const val INITIAL_RADIUS_GRACE_SECONDS = 60L
     const val OVERLAP_THRESHOLD = 0.70
     const val MAX_CHAT_ROOMS = 5
 
@@ -54,7 +56,7 @@ object LocationLoungePolicy {
      * three transitions; the visited guard additionally makes malformed input fail stable.
      */
     fun stableRadius(currentRadius: Int, distancesMeters: Collection<Double>): Int {
-        var radius = currentRadius.coerceIn(INITIAL_RADIUS_METERS, MAX_RADIUS_METERS)
+        var radius = currentRadius.coerceIn(MIN_RADIUS_METERS, MAX_RADIUS_METERS)
         val visited = linkedSetOf<Int>()
         repeat(4) {
             if (!visited.add(radius)) return visited.min()
@@ -64,6 +66,17 @@ object LocationLoungePolicy {
             radius = next
         }
         return radius
+    }
+
+    fun effectiveRadius(
+        currentRadius: Int,
+        distancesMeters: Collection<Double>,
+        createdAt: Instant,
+        now: Instant,
+    ): Int = if (createdAt.plusSeconds(INITIAL_RADIUS_GRACE_SECONDS).isAfter(now)) {
+        INITIAL_RADIUS_METERS
+    } else {
+        stableRadius(currentRadius, distancesMeters)
     }
 
     fun circleIntersectionArea(radiusA: Double, radiusB: Double, centerDistance: Double): Double {

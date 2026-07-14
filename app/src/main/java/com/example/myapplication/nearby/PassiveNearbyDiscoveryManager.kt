@@ -146,6 +146,6 @@ class PassiveNearbyDiscoveryManager(context: Context) {
     }
     private companion object {
         val BEACON_PATTERN = Regex("mb1_[a-f0-9]{32}")
-        const val ENDPOINT_LOSS_GRACE_MILLIS = 10_000L
+        const val ENDPOINT_LOSS_GRACE_MILLIS = 15_000L
     }
 }

@@ -11,12 +11,17 @@ import com.example.myapplication.core.model.Proximity
 import com.example.myapplication.core.model.abstractDisplayPosition
 import com.example.myapplication.core.model.radiusFromCenter
 import com.example.myapplication.data.keepSettledDuringRefresh
+import com.example.myapplication.data.DirectNearbyCandidate
+import com.example.myapplication.data.preferDirectNearbyUsers
+import com.example.myapplication.data.shouldApplyDirectResolveResult
 import com.example.myapplication.data.toMeasurementMethod
 import com.example.myapplication.nearby.BleBeaconCodec
 import com.example.myapplication.nearby.BleRssiProximityEstimator
+import com.example.myapplication.nearby.PeerProximityMeasurement
 import com.example.myapplication.service.NearbyLocationPolicy
 import com.example.myapplication.service.AccuracyFirstLocationSelector
 import com.example.myapplication.service.NearbyLocationSample
+import com.example.myapplication.ui.screens.mapLocationMaxAccuracyMeters
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -71,6 +76,43 @@ class NearbyDistanceContractTest {
     }
 
     @Test
+    fun transientMissingSnapshotKeepsBubbleUntilRetentionExpires() {
+        var now = 1_000L
+        val stabilizer = NearbyProximityStabilizer(
+            confirmationsRequired = 1,
+            missingRetentionMillis = 15_000L,
+            nowMillis = { now },
+        )
+        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+
+        assertEquals(current, stabilizer.stabilize(current, emptyList()))
+        now += 14_999L
+        val retained = stabilizer.stabilize(current, emptyList())
+        assertEquals(current, retained)
+
+        now += 1L
+        assertTrue(stabilizer.stabilize(retained, emptyList()).isEmpty())
+    }
+
+    @Test
+    fun returningBubbleClearsItsMissingTimer() {
+        var now = 1_000L
+        val stabilizer = NearbyProximityStabilizer(
+            confirmationsRequired = 1,
+            missingRetentionMillis = 15_000L,
+            nowMillis = { now },
+        )
+        val current = listOf(listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f)))
+
+        stabilizer.stabilize(current, emptyList())
+        now += 10_000L
+        val returned = stabilizer.stabilize(current, current)
+        now += 10_000L
+
+        assertEquals(returned, stabilizer.stabilize(returned, emptyList()))
+    }
+
+    @Test
     fun locationPolicyUsesFastVisibleProfileAndRejectsStaleOrInaccurateFixes() {
         assertEquals(0L, NearbyLocationPolicy.INTERACTIVE.intervalMillis)
         assertEquals(0f, NearbyLocationPolicy.INTERACTIVE.minDistanceMeters)
@@ -86,6 +128,12 @@ class NearbyDistanceContractTest {
         assertTrue(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 20_000L, 45f, now))
         assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 31_000L, 45f, now))
         assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 5_000L, 51f, now))
+    }
+
+    @Test
+    fun mapRecenteringAcceptsAndroidApproximateLocationWithoutWeakeningPreciseMode() {
+        assertEquals(50f, mapLocationMaxAccuracyMeters(hasFineLocationPermission = true))
+        assertEquals(5_000f, mapLocationMaxAccuracyMeters(hasFineLocationPermission = false))
     }
 
     @Test
@@ -150,6 +198,101 @@ class NearbyDistanceContractTest {
         assertEquals(Proximity.WITHIN_5M, near.add("near", -65, 6L)?.proximity)
         assertEquals(Proximity.WITHIN_10M, middle.add("middle", -78, 6L)?.proximity)
         assertEquals(Proximity.WITHIN_15M, outer.add("outer", -83, 6L)?.proximity)
+    }
+
+    @Test
+    fun rotatingBeaconKeepsTheNewestMeasuredCandidateForTheSameUser() {
+        val base = listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f))
+        val measured = base.copy(
+            proximity = Proximity.WITHIN_10M,
+            displayPosition = DisplayPosition(0.7f, 0.5f),
+            isDirectlyDetected = true,
+        )
+        val result = preferDirectNearbyUsers(
+            candidates = listOf(
+                DirectNearbyCandidate("old", base.copy(isDirectlyDetected = true), null),
+                DirectNearbyCandidate(
+                    "new",
+                    measured,
+                    PeerProximityMeasurement(
+                        beaconId = "new",
+                        proximity = Proximity.WITHIN_10M,
+                        confidence = NearbyProximityConfidence.HIGH,
+                        method = NearbyMeasurementMethod.BLUETOOTH,
+                        observedAtEpochMillis = 2_000L,
+                    ),
+                ),
+            ),
+            currentByHandle = emptyMap(),
+        )
+
+        assertEquals(Proximity.WITHIN_10M, result.getValue(base.nearbyHandle).proximity)
+    }
+
+    @Test
+    fun lowConfidenceDirectBandDoesNotMoveAnExistingUser() {
+        val current = listener(Proximity.WITHIN_5M, DisplayPosition(0.55f, 0.5f))
+        val noisy = current.copy(
+            proximity = Proximity.WITHIN_15M,
+            proximityConfidence = NearbyProximityConfidence.LOW,
+            displayPosition = DisplayPosition(0.85f, 0.5f),
+            isDirectlyDetected = true,
+        )
+        val result = preferDirectNearbyUsers(
+            candidates = listOf(
+                DirectNearbyCandidate(
+                    "beacon",
+                    noisy,
+                    PeerProximityMeasurement(
+                        beaconId = "beacon",
+                        proximity = Proximity.WITHIN_15M,
+                        confidence = NearbyProximityConfidence.LOW,
+                        method = NearbyMeasurementMethod.BLUETOOTH,
+                        observedAtEpochMillis = 2_000L,
+                    ),
+                )
+            ),
+            currentByHandle = mapOf(current.nearbyHandle to current),
+        ).getValue(current.nearbyHandle)
+
+        assertEquals(current.proximity, result.proximity)
+        assertEquals(current.displayPosition, result.displayPosition)
+        assertTrue(result.isDirectlyDetected)
+    }
+
+    @Test
+    fun staleDirectResolveResponseCannotRestoreAChangedOrStoppedBeaconSet() {
+        val requested = setOf("old-beacon")
+        assertTrue(
+            shouldApplyDirectResolveResult(
+                requestGeneration = 4L,
+                currentGeneration = 4L,
+                requestedBeaconIds = requested,
+                desiredBeaconIds = requested,
+                tokenIsCurrent = true,
+                sharingIsActive = true,
+            ),
+        )
+        assertFalse(
+            shouldApplyDirectResolveResult(
+                requestGeneration = 3L,
+                currentGeneration = 4L,
+                requestedBeaconIds = requested,
+                desiredBeaconIds = setOf("new-beacon"),
+                tokenIsCurrent = true,
+                sharingIsActive = true,
+            ),
+        )
+        assertFalse(
+            shouldApplyDirectResolveResult(
+                requestGeneration = 4L,
+                currentGeneration = 4L,
+                requestedBeaconIds = requested,
+                desiredBeaconIds = requested,
+                tokenIsCurrent = true,
+                sharingIsActive = false,
+            ),
+        )
     }
 
     private fun sample(accuracy: Float, elapsedNanos: Long) = NearbyLocationSample(

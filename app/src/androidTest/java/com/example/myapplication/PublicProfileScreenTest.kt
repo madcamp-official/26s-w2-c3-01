@@ -2,6 +2,7 @@ package com.example.myapplication
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertRangeInfoEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -9,6 +10,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import com.example.myapplication.core.model.CommonTasteMetric
 import com.example.myapplication.core.model.CommonTasteSummary
 import com.example.myapplication.core.model.ProfileArtist
@@ -63,7 +65,7 @@ class PublicProfileScreenTest {
             }
         }
 
-        composeRule.onNodeWithText("Night Listener").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Night Listener").assertCountEquals(2)
         composeRule.onAllNodesWithText("listener_night").assertCountEquals(0)
         composeRule.onAllNodesWithText("R&B").assertCountEquals(2)
         composeRule.onNodeWithText("팔로우").performClick()
@@ -138,5 +140,8 @@ class PublicProfileScreenTest {
         composeRule.onNodeWithText("최애 아티스트 3명").assertIsDisplayed()
         composeRule.onNodeWithTag("public_profile_list").performScrollToIndex(5)
         composeRule.onNodeWithText("87%").assertIsDisplayed()
+        composeRule.onNodeWithTag("taste_similarity_bar_잔잔한 멜로디").assertRangeInfoEquals(
+            ProgressBarRangeInfo(0.89f, 0f..1f, 100),
+        )
     }
 }

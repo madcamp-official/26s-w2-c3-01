@@ -15,6 +15,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import androidx.core.app.NotificationManagerCompat
 import com.example.myapplication.data.presence.PresenceSyncCoordinator
+import com.example.myapplication.music.MusicPlaybackAppPreference
 
 /**
  * Reads current playback from active MediaSessions exposed to this enabled notification listener.
@@ -101,13 +102,19 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
                         positionUpdatedAt = state.lastPositionUpdateTime,
                         text = it,
                         isPlaying = state.state in ACTIVE_PLAYBACK_STATES,
+                        packageName = controller.packageName,
                     )
                 }
             }
             .maxByOrNull(ObservedPlayback::positionUpdatedAt)
 
         when {
-            observed != null -> publish(observed.text, SOURCE_MEDIA_SESSION, observed.isPlaying)
+            observed != null -> publish(
+                observed.text,
+                SOURCE_MEDIA_SESSION,
+                observed.isPlaying,
+                observed.packageName,
+            )
             activeControllers.isNotEmpty() -> persistStopped()
             else -> refreshFromActiveTransportNotifications()
         }
@@ -120,12 +127,21 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
                 .filter { it.isTransportNotification() }
                 .mapNotNull { notification ->
                     notification.fallbackText()?.let { text ->
-                        TimestampedFallback(notification.postTime, text)
+                        TimestampedFallback(notification.postTime, text, notification.packageName)
                     }
                 }
                 .maxByOrNull(TimestampedFallback::postTime)
         }.getOrNull()
-        if (newest == null) persistStopped() else persist(newest.text, SOURCE_NOTIFICATION_FALLBACK)
+        if (newest == null) {
+            persistStopped()
+        } else {
+            publish(
+                newest.text,
+                SOURCE_NOTIFICATION_FALLBACK,
+                isPlaying = true,
+                playbackPackageName = newest.packageName,
+            )
+        }
     }
 
     private fun MediaController.mediaText(playbackState: PlaybackState): NowPlayingText? {
@@ -170,15 +186,19 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         return if (title == null || artist == null) null else NowPlayingText(title, artist)
     }
 
-    private fun persist(text: NowPlayingText, source: String) {
-        publish(text, source, isPlaying = true)
-    }
-
     private fun persistStopped() {
         publish(null, SOURCE_MEDIA_SESSION, isPlaying = false)
     }
 
-    private fun publish(text: NowPlayingText?, source: String, isPlaying: Boolean) {
+    private fun publish(
+        text: NowPlayingText?,
+        source: String,
+        isPlaying: Boolean,
+        playbackPackageName: String? = null,
+    ) {
+        if (text != null && playbackPackageName != null) {
+            MusicPlaybackAppPreference.remember(this, playbackPackageName)
+        }
         val coordinator = PresenceSyncCoordinator.get(this)
         if (text != null) {
             coordinator.onPlaybackDetected(
@@ -228,8 +248,13 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
         val positionUpdatedAt: Long,
         val text: NowPlayingText,
         val isPlaying: Boolean,
+        val packageName: String,
     )
-    private data class TimestampedFallback(val postTime: Long, val text: NowPlayingText)
+    private data class TimestampedFallback(
+        val postTime: Long,
+        val text: NowPlayingText,
+        val packageName: String,
+    )
 
     companion object {
         fun isEnabled(context: Context): Boolean =

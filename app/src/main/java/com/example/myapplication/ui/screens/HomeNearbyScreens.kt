@@ -1169,21 +1169,12 @@ private fun AbstractNearbyMap(
             Surface(
                 modifier = Modifier
                     .align(Alignment.Center)
-                    .size(42.dp)
+                    .size(20.dp)
                     .semantics { contentDescription = "내 버블" },
                 shape = CircleShape,
                 color = MelodyBubbleColors.Primary,
                 border = BorderStroke(2.dp, MelodyBubbleColors.Primary.copy(alpha = 0.20f))
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "나",
-                        color = MelodyBubbleColors.OnPrimary,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Black
-                    )
-                }
-            }
+            ) {}
 
             listeners.forEach { listener ->
                 key(listener.nearbyHandle) {
@@ -1289,7 +1280,7 @@ private fun ListenerMapBubble(
                 modifier = Modifier
                     .size(pointSize)
                     .clip(CircleShape)
-                    .background(Color(listener.colorHex))
+                    .background(Color.White)
                     .border(
                         width = if (selected) 2.dp else 1.dp,
                         color = if (selected) MelodyBubbleColors.PrimarySoft else Color.White.copy(alpha = 0.35f),

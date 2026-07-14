@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.SystemClock
 import android.util.Log
 import com.example.myapplication.MelodyApplication
 import com.example.myapplication.core.model.ChatMessage
@@ -51,6 +52,7 @@ import com.example.myapplication.data.realtime.toServerEpochMillis
 import com.example.myapplication.data.remote.ApiEnvironment
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.LocationUpdateRequest
+import com.example.myapplication.data.remote.DirectProximityBatchRequest
 import com.example.myapplication.data.remote.DirectProximityUpdateRequest
 import com.example.myapplication.data.remote.NearbyBeaconRequest
 import com.example.myapplication.data.remote.MusicSearchRepository
@@ -88,8 +90,11 @@ import com.google.gson.Gson
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.service.NearbyLocationPolicy
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -116,6 +121,14 @@ import retrofit2.HttpException
 private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 5_000L
 private const val PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS = 60_000L
 private const val STATIONARY_LOCATION_FALLBACK_MAX_AGE_MILLIS = 10 * 60_000L
+private const val ACTIVE_PRESENCE_REFRESH_INTERVAL_MILLIS = 1_000L
+private const val DIRECT_PROXIMITY_REPORT_INTERVAL_MILLIS = 1_000L
+private const val DIRECT_BEACON_RESOLVE_INTERVAL_MILLIS = 1_100L
+private const val DIRECT_BEACON_RESOLVE_INITIAL_RETRY_MILLIS = 500L
+private const val DIRECT_BEACON_RESOLVE_MAX_RETRY_MILLIS = 5_000L
+private const val MAX_DIRECT_PROXIMITY_BATCH_SIZE = 40
+private const val NEARBY_BUBBLE_MISSING_RETENTION_MILLIS = 15_000L
+private const val POPULAR_TRACK_REFRESH_INTERVAL_MILLIS = 10_000L
 private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
 private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
@@ -148,6 +161,46 @@ internal fun reactionTypeForLabel(label: String): String? = when (label.trim()) 
     "같이 듣고 싶어요", "LISTEN_TOGETHER" -> "LISTEN_TOGETHER"
     else -> null
 }
+
+internal data class DirectNearbyCandidate(
+    val beaconId: String,
+    val user: com.example.myapplication.core.model.NearbyListener,
+    val measurement: PeerProximityMeasurement?,
+)
+
+internal fun preferDirectNearbyUsers(
+    candidates: List<DirectNearbyCandidate>,
+    currentByHandle: Map<String, com.example.myapplication.core.model.NearbyListener>,
+): Map<String, com.example.myapplication.core.model.NearbyListener> = candidates
+    .groupBy { it.user.nearbyHandle }
+    .mapValues { (_, sameUserCandidates) ->
+        val preferred = sameUserCandidates.maxWithOrNull(
+            compareBy<DirectNearbyCandidate> { it.measurement != null }
+                .thenBy { it.measurement?.observedAtEpochMillis ?: Long.MIN_VALUE }
+                .thenBy { it.beaconId },
+        ) ?: error("direct candidate group cannot be empty")
+        val existing = currentByHandle[preferred.user.nearbyHandle]
+        if (preferred.user.proximityConfidence == NearbyProximityConfidence.LOW &&
+            existing != null && preferred.user.proximity != existing.proximity
+        ) {
+            preferred.user.copy(
+                proximity = existing.proximity,
+                displayPosition = existing.displayPosition,
+            )
+        } else preferred.user
+    }
+
+internal fun shouldApplyDirectResolveResult(
+    requestGeneration: Long,
+    currentGeneration: Long,
+    requestedBeaconIds: Set<String>,
+    desiredBeaconIds: Set<String>,
+    tokenIsCurrent: Boolean,
+    sharingIsActive: Boolean,
+): Boolean = requestGeneration == currentGeneration &&
+    requestedBeaconIds == desiredBeaconIds &&
+    tokenIsCurrent &&
+    sharingIsActive
 
 interface MelodyRepository {
     val state: StateFlow<MelodyUiState>
@@ -235,15 +288,27 @@ class DemoMelodyRepository(
 
     private var sharingJob: Job? = null
     private val presenceSyncMutex = Mutex()
+    private var lastPresenceSyncStartedAtElapsedMillis = 0L
     private val locationSyncSignal = Channel<Unit>(Channel.CONFLATED)
+    private val directMeasurementReportSignal = Channel<Unit>(Channel.CONFLATED)
+    private val directStateLock = Any()
+    private val directResolveStartMutex = Mutex()
+    private val directReportStartMutex = Mutex()
+    private var lastDirectResolveStartedAtElapsedMillis = 0L
+    private var lastDirectReportStartedAtElapsedMillis = 0L
     @Volatile private var latestLocationFix: LocationFix? = null
     private var hybridDiscoveryJob: Job? = null
+    private var directResolveJob: Job? = null
+    private val directResolveGeneration = AtomicLong(0L)
+    @Volatile private var desiredDirectBeaconIds = emptySet<String>()
+    private var directDiscoveryActive = false
     private var chatSyncJob: Job? = null
     private val chatRealtimeVersion = AtomicLong(0)
     private val nearbyRealtimeVersion = AtomicLong(0)
     private val locationSequence = AtomicLong(System.currentTimeMillis() * 1_000L)
     private val directProximitySequence = AtomicLong(System.currentTimeMillis() * 1_000L)
     private val popularRealtimeVersion = AtomicLong(0)
+    private val lastPopularRefreshStartedAt = AtomicLong(0L)
     private val chatReadLock = Any()
     private val hiddenChatRoomLock = Any()
     private val chatReadJobs = mutableMapOf<String, Job>()
@@ -253,14 +318,18 @@ class DemoMelodyRepository(
         ?: UUID.randomUUID().toString().also { preferences.edit().putString("client-session-id", it).apply() }
     private val nearbyApi = ApiClient.createNearbyApi(environment)
     private val passiveNearbyDiscovery = PassiveNearbyDiscoveryManager(applicationContext)
-    private var directNearbyByHandle = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
-    private var directUsersByBeacon = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
-    private var directMeasurementsByBeacon = emptyMap<String, PeerProximityMeasurement>()
-    private val reportedDirectMeasurementAt = mutableMapOf<String, Long>()
+    @Volatile private var directNearbyByHandle = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
+    @Volatile private var directUsersByBeacon = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
+    @Volatile private var directMeasurementsByBeacon = emptyMap<String, PeerProximityMeasurement>()
+    private val reportedDirectMeasurementAt = ConcurrentHashMap<String, Long>()
     private var passiveDiscoveryStarted = false
     // Server distance bands are already privacy-coarsened. Apply a crossed band immediately so
     // another user's movement is visible on the next snapshot instead of one cycle later.
-    private val nearbyProximityStabilizer = NearbyProximityStabilizer(confirmationsRequired = 1)
+    private val nearbyProximityStabilizer = NearbyProximityStabilizer(
+        confirmationsRequired = 1,
+        missingRetentionMillis = NEARBY_BUBBLE_MISSING_RETENTION_MILLIS,
+        nowMillis = SystemClock::elapsedRealtime,
+    )
     private val profileApi = ApiClient.createProfileApi(environment)
     private val socialApi = ApiClient.createSocialApi(environment)
     private val musicSearchRepository = MusicSearchRepository()
@@ -318,9 +387,31 @@ class DemoMelodyRepository(
         }
         scope.launch {
             passiveNearbyDiscovery.proximityMeasurements.collect { measurements ->
-                directMeasurementsByBeacon = measurements
-                applyDirectProximityMeasurements()
-                reportDirectProximityMeasurements(measurements)
+                val shouldReport = synchronized(directStateLock) {
+                    if (!directDiscoveryActive) {
+                        directMeasurementsByBeacon = emptyMap()
+                        false
+                    } else {
+                        directMeasurementsByBeacon = measurements.filterKeys {
+                            it in desiredDirectBeaconIds
+                        }
+                        applyDirectProximityMeasurementsLocked()
+                        directMeasurementsByBeacon.isNotEmpty()
+                    }
+                }
+                if (shouldReport) directMeasurementReportSignal.trySend(Unit)
+            }
+        }
+        scope.launch {
+            for (ignored in directMeasurementReportSignal) {
+                while (isActive &&
+                    _state.value.sharingState in setOf(SharingState.STARTING, SharingState.ACTIVE) &&
+                    directMeasurementsByBeacon.isNotEmpty()
+                ) {
+                    awaitDirectReportSlot()
+                    val reported = reportDirectProximityMeasurements(directMeasurementsByBeacon)
+                    if (reported) break
+                }
             }
         }
         scope.launch {
@@ -437,6 +528,9 @@ class DemoMelodyRepository(
             setSharingStartFailed()
             return
         }
+        synchronized(directStateLock) {
+            directDiscoveryActive = true
+        }
         sharingJob = scope.launch {
             _state.update {
                 it.copy(
@@ -469,7 +563,7 @@ class DemoMelodyRepository(
                 if (recovered && hybridDiscoveryJob?.isActive != true) {
                     startHybridDiscovery(accessToken.orEmpty())
                 }
-                refreshDelayMillis = 2_000L
+                refreshDelayMillis = ACTIVE_PRESENCE_REFRESH_INTERVAL_MILLIS
             }
         }
     }
@@ -479,9 +573,21 @@ class DemoMelodyRepository(
         sharingJob = null
         hybridDiscoveryJob?.cancel()
         hybridDiscoveryJob = null
+        val pendingDirectResolve = synchronized(directStateLock) {
+            directDiscoveryActive = false
+            directResolveGeneration.incrementAndGet()
+            desiredDirectBeaconIds = emptySet()
+            val pending = directResolveJob
+            directResolveJob = null
+            directNearbyByHandle = emptyMap()
+            directUsersByBeacon = emptyMap()
+            directMeasurementsByBeacon = emptyMap()
+            reportedDirectMeasurementAt.clear()
+            pending
+        }
+        pendingDirectResolve?.cancel()
         passiveNearbyDiscovery.stop()
         passiveDiscoveryStarted = false
-        directNearbyByHandle = emptyMap()
         latestLocationFix = null
         nearbyProximityStabilizer.clear()
         _state.update {
@@ -1510,32 +1616,116 @@ class DemoMelodyRepository(
     }
 
     private fun resolveDirectBeacons(beaconIds: Set<String>) {
-        val token = accessToken ?: return
-        if (beaconIds.isEmpty()) {
-            directUsersByBeacon = emptyMap()
-            directNearbyByHandle = emptyMap()
-            refreshNearbySnapshot()
+        val incomingBeaconIds = beaconIds.toSortedSet()
+        val (generation, pendingResolve, requestedBeaconIds) = synchronized(directStateLock) {
+            val currentBeaconIds = if (directDiscoveryActive) incomingBeaconIds else emptySet()
+            val nextGeneration = directResolveGeneration.incrementAndGet()
+            desiredDirectBeaconIds = currentBeaconIds
+            val pending = directResolveJob
+            directResolveJob = null
+            if (currentBeaconIds.isEmpty()) {
+                directUsersByBeacon = emptyMap()
+                directNearbyByHandle = emptyMap()
+                directMeasurementsByBeacon = emptyMap()
+                reportedDirectMeasurementAt.clear()
+            }
+            Triple(nextGeneration, pending, currentBeaconIds)
+        }
+        pendingResolve?.cancel()
+        if (requestedBeaconIds.isEmpty()) {
             return
         }
-        scope.launch {
-            runCatching {
-                nearbyApi.resolveBeacons(
-                    "Bearer $token",
-                    ResolveNearbyBeaconsRequest(beaconIds.toList()),
-                )
-            }.onSuccess { resolved ->
-                if (!isCurrentSession(token)) return@onSuccess
-                directUsersByBeacon = resolved.associate { item ->
-                    item.beaconId to item.user.toDomain()
+        val token = accessToken ?: return
+        lateinit var resolveJob: Job
+        resolveJob = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                var retryDelayMillis = DIRECT_BEACON_RESOLVE_INITIAL_RETRY_MILLIS
+                while (isActive && isCurrentDirectResolve(generation, requestedBeaconIds, token)) {
+                    awaitDirectResolveSlot()
+                    if (!isCurrentDirectResolve(generation, requestedBeaconIds, token)) return@launch
+                    val resolved = try {
+                        nearbyApi.resolveBeacons(
+                            "Bearer $token",
+                            ResolveNearbyBeaconsRequest(requestedBeaconIds.toList()),
+                        )
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.w("MelodyNearby", "Direct beacon resolve failed; retrying", error)
+                        null
+                    }
+                    if (resolved == null) {
+                        delay(retryDelayMillis)
+                        retryDelayMillis = (retryDelayMillis * 2L)
+                            .coerceAtMost(DIRECT_BEACON_RESOLVE_MAX_RETRY_MILLIS)
+                        continue
+                    }
+                    val usersByBeacon = resolved
+                        .filter { it.beaconId in requestedBeaconIds }
+                        .associate { item -> item.beaconId to item.user.toDomain() }
+                    val applied = synchronized(directStateLock) {
+                        if (!isCurrentDirectResolveLocked(generation, requestedBeaconIds, token)) {
+                            false
+                        } else {
+                            directUsersByBeacon = usersByBeacon
+                            applyDirectProximityMeasurementsLocked()
+                            true
+                        }
+                    }
+                    if (!applied) return@launch
+                    return@launch
                 }
-                applyDirectProximityMeasurements()
-                refreshNearbySnapshot()
+            } finally {
+                synchronized(directStateLock) {
+                    if (directResolveJob === resolveJob) directResolveJob = null
+                }
             }
+        }
+        val shouldStart = synchronized(directStateLock) {
+            if (isCurrentDirectResolveLocked(generation, requestedBeaconIds, token)) {
+                directResolveJob = resolveJob
+                true
+            } else {
+                false
+            }
+        }
+        if (shouldStart) resolveJob.start() else resolveJob.cancel()
+    }
+
+    private fun isCurrentDirectResolve(
+        generation: Long,
+        beaconIds: Set<String>,
+        token: String,
+    ): Boolean = synchronized(directStateLock) {
+        isCurrentDirectResolveLocked(generation, beaconIds, token)
+    }
+
+    private fun isCurrentDirectResolveLocked(
+        generation: Long,
+        beaconIds: Set<String>,
+        token: String,
+    ): Boolean = shouldApplyDirectResolveResult(
+        requestGeneration = generation,
+        currentGeneration = directResolveGeneration.get(),
+        requestedBeaconIds = beaconIds,
+        desiredBeaconIds = desiredDirectBeaconIds,
+        tokenIsCurrent = isCurrentSession(token),
+        sharingIsActive = directDiscoveryActive && _state.value.sharingState in
+            setOf(SharingState.STARTING, SharingState.ACTIVE),
+    )
+
+    private suspend fun awaitDirectResolveSlot() {
+        directResolveStartMutex.withLock {
+            val elapsed = SystemClock.elapsedRealtime()
+            val waitMillis = DIRECT_BEACON_RESOLVE_INTERVAL_MILLIS -
+                (elapsed - lastDirectResolveStartedAtElapsedMillis)
+            if (waitMillis > 0L) delay(waitMillis)
+            lastDirectResolveStartedAtElapsedMillis = SystemClock.elapsedRealtime()
         }
     }
 
-    private fun applyDirectProximityMeasurements() {
-        directNearbyByHandle = directUsersByBeacon.map { (beaconId, user) ->
+    private fun applyDirectProximityMeasurementsLocked() {
+        val candidates = directUsersByBeacon.map { (beaconId, user) ->
             val measurement = directMeasurementsByBeacon[beaconId]
             val measuredUser = if (measurement == null) {
                 user.copy(isDirectlyDetected = true)
@@ -1547,13 +1737,17 @@ class DemoMelodyRepository(
                     isDirectlyDetected = true,
                 )
             }
-            measuredUser.nearbyHandle to measuredUser
-        }.toMap()
+            DirectNearbyCandidate(beaconId, measuredUser, measurement)
+        }
+        val currentByHandle = _state.value.nearbyListeners.associateBy { it.nearbyHandle }
+        directNearbyByHandle = preferDirectNearbyUsers(candidates, currentByHandle)
         val direct = directNearbyByHandle
         val newest = directMeasurementsByBeacon.values.maxByOrNull { it.observedAtEpochMillis }
         _state.update { current ->
             val existingHandles = current.nearbyListeners.mapTo(mutableSetOf()) { it.nearbyHandle }
-            val listeners = current.nearbyListeners.map { direct[it.nearbyHandle] ?: it } +
+            val listeners = current.nearbyListeners.map { existing ->
+                direct[existing.nearbyHandle] ?: existing
+            } +
                 direct.values.filterNot { it.nearbyHandle in existingHandles }
             current.copy(
                 nearbyListeners = listeners,
@@ -1568,12 +1762,24 @@ class DemoMelodyRepository(
 
     private suspend fun reportDirectProximityMeasurements(
         measurements: Map<String, PeerProximityMeasurement>,
-    ) {
-        val token = accessToken ?: return
-        measurements.values.forEach { measurement ->
-            val lastReportedAt = reportedDirectMeasurementAt[measurement.beaconId] ?: Long.MIN_VALUE
-            if (measurement.observedAtEpochMillis <= lastReportedAt) return@forEach
-            val request = DirectProximityUpdateRequest(
+    ): Boolean {
+        val token = accessToken ?: return true
+        if (!isCurrentSession(token) ||
+            _state.value.sharingState !in setOf(SharingState.STARTING, SharingState.ACTIVE)
+        ) return true
+        reportedDirectMeasurementAt.keys.retainAll(measurements.keys)
+        val pendingMeasurements = measurements.values
+            .filter { measurement ->
+                measurement.observedAtEpochMillis >
+                    (reportedDirectMeasurementAt[measurement.beaconId] ?: Long.MIN_VALUE)
+            }
+            .sortedWith(
+                compareBy<PeerProximityMeasurement>(PeerProximityMeasurement::observedAtEpochMillis)
+                    .thenBy(PeerProximityMeasurement::beaconId),
+            )
+        if (pendingMeasurements.isEmpty()) return true
+        val requests = pendingMeasurements.take(MAX_DIRECT_PROXIMITY_BATCH_SIZE).map { measurement ->
+            DirectProximityUpdateRequest(
                 beaconId = measurement.beaconId,
                 proximity = measurement.proximity.name,
                 confidence = measurement.confidence.name,
@@ -1581,9 +1787,33 @@ class DemoMelodyRepository(
                 sequence = directProximitySequence.incrementAndGet(),
                 observedAtEpochMillis = measurement.observedAtEpochMillis,
             )
-            if (runCatching { nearbyApi.reportDirectProximity("Bearer $token", request) }
-                    .getOrDefault(false)
-            ) reportedDirectMeasurementAt[measurement.beaconId] = measurement.observedAtEpochMillis
+        }
+        val succeeded = try {
+            nearbyApi.reportDirectProximityBatch(
+                "Bearer $token",
+                DirectProximityBatchRequest(requests),
+            )
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w("MelodyNearby", "Direct proximity batch failed; retrying", error)
+            false
+        }
+        if (!succeeded) return false
+        requests.forEach { request ->
+            reportedDirectMeasurementAt[request.beaconId] = request.observedAtEpochMillis
+        }
+        return pendingMeasurements.size <= requests.size
+    }
+
+    private suspend fun awaitDirectReportSlot() {
+        directReportStartMutex.withLock {
+            val elapsed = SystemClock.elapsedRealtime()
+            val waitMillis = DIRECT_PROXIMITY_REPORT_INTERVAL_MILLIS -
+                (elapsed - lastDirectReportStartedAtElapsedMillis)
+            if (waitMillis > 0L) delay(waitMillis)
+            lastDirectReportStartedAtElapsedMillis = SystemClock.elapsedRealtime()
         }
     }
 
@@ -1597,13 +1827,25 @@ class DemoMelodyRepository(
     private suspend fun syncPresence(
         fix: LocationFix? = null,
         requirePrecise: Boolean = false,
-    ): Boolean = presenceSyncMutex.withLock { syncPresenceLocked(fix, requirePrecise) }
+    ): Boolean = presenceSyncMutex.withLock {
+        awaitPresenceSyncSlot()
+        syncPresenceLocked(fix, requirePrecise)
+    }
 
     private suspend fun syncLatestLocationPresence(): Boolean =
         presenceSyncMutex.withLock {
             val fix = latestLocationFix ?: return@withLock false
+            awaitPresenceSyncSlot()
             syncPresenceLocked(fix, requirePrecise = true)
         }
+
+    private suspend fun awaitPresenceSyncSlot() {
+        val elapsed = SystemClock.elapsedRealtime()
+        val waitMillis = ACTIVE_PRESENCE_REFRESH_INTERVAL_MILLIS -
+            (elapsed - lastPresenceSyncStartedAtElapsedMillis)
+        if (waitMillis > 0L) delay(waitMillis)
+        lastPresenceSyncStartedAtElapsedMillis = SystemClock.elapsedRealtime()
+    }
 
     private suspend fun syncPresenceLocked(
         fix: LocationFix? = null,
@@ -1717,6 +1959,12 @@ class DemoMelodyRepository(
 
     private fun refreshPopularTracks(token: String? = accessToken) {
         if (token.isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        while (true) {
+            val previous = lastPopularRefreshStartedAt.get()
+            if (now - previous < POPULAR_TRACK_REFRESH_INTERVAL_MILLIS) return
+            if (lastPopularRefreshStartedAt.compareAndSet(previous, now)) break
+        }
         val versionAtRequest = popularRealtimeVersion.get()
         scope.launch {
             runCatching { nearbyApi.popularTracks("Bearer $token") }

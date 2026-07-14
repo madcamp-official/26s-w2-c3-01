@@ -224,6 +224,14 @@ class NearbyService(
 
     fun snapshot(userId: UUID): NearbySnapshot = snapshot(userId, enforceRateLimit = true)
 
+    /**
+     * Returns the snapshot paired with an accepted presence write. The write path already has its
+     * own, higher-frequency rate limit, so charging the separate GET snapshot quota here would
+     * make a healthy 1 Hz foreground presence stream hit 429 every minute.
+     */
+    fun snapshotAfterLocationUpdate(userId: UUID): NearbySnapshot =
+        snapshot(userId, enforceRateLimit = false)
+
     private fun snapshot(userId: UUID, enforceRateLimit: Boolean): NearbySnapshot {
         if (enforceRateLimit) rateLimiter.enforce(userId, "NEARBY_SNAPSHOT", 60, Duration.ofMinutes(1))
         val radius = discoveryRadius(userId)
@@ -525,7 +533,29 @@ class NearbyService(
     @Transactional
     fun stop(userId: UUID, clientSessionId: String) {
         val previousViewers = nearbyViewerIds(userId)
-        jdbc.update("delete from presence_sessions where user_id=? and client_session_id=?", userId, clientSessionId.take(128))
+        val normalizedSessionId = clientSessionId.take(128)
+        jdbc.update(
+            "delete from presence_sessions where user_id=? and client_session_id=?",
+            userId,
+            normalizedSessionId,
+        )
+        jdbc.update(
+            "delete from nearby_beacons where user_id=? and client_session_id=?",
+            userId,
+            normalizedSessionId,
+        )
+        jdbc.update(
+            """
+            delete from direct_proximity_measurements
+            where (viewer_user_id=? or target_user_id=?)
+              and not exists (
+                select 1 from presence_sessions where user_id=? and expires_at>now()
+              )
+            """.trimIndent(),
+            userId,
+            userId,
+            userId,
+        )
         locationLounges.reconcileAfterLocationChange()
         publishNearbySnapshotsAfterCommit(previousViewers)
     }
@@ -805,7 +835,7 @@ class NearbyController(private val nearby: NearbyService) {
     fun location(principal: Principal, @RequestBody update: LocationUpdate): NearbySnapshot {
         val userId = UUID.fromString(principal.name)
         nearby.updateLocation(userId, update)
-        return nearby.snapshot(userId)
+        return nearby.snapshotAfterLocationUpdate(userId)
     }
 
     @PostMapping("/music")
@@ -839,7 +869,7 @@ class PresenceMessageController(
             userId,
             RealtimeQueues.NEARBY,
             RealtimeEventTypes.NEARBY_SNAPSHOT,
-            nearby.snapshot(userId),
+            nearby.snapshotAfterLocationUpdate(userId),
         )
         return RealtimeEnvelope(
             type = RealtimeEventTypes.ACK,

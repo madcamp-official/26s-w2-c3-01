@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -100,7 +101,9 @@ import com.example.myapplication.ui.theme.SignalGreen
 import com.example.myapplication.ui.theme.CurrentSyncPalette
 import com.example.myapplication.ui.theme.SyncPalette
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
@@ -119,6 +122,9 @@ import kotlin.math.sqrt
 import java.util.Locale
 
 private val HIDDEN_OSM_ADDRESSES = setOf("주소 정보 없음", "OpenStreetMap building footprint")
+private const val MAP_LOCATION_MAX_AGE_MILLIS = 30_000L
+private const val MAP_PRECISE_LOCATION_MAX_ACCURACY_METERS = 50f
+private const val MAP_APPROXIMATE_LOCATION_MAX_ACCURACY_METERS = 5_000f
 
 @Composable
 fun BuildingLoungeMapScreen(
@@ -149,6 +155,8 @@ fun BuildingLoungeMapScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     var hasLocationPermission by remember { mutableStateOf(context.hasLocationPermission()) }
+    var recenterRequestId by remember { mutableStateOf(0L) }
+    var recenterTarget by remember { mutableStateOf<LatLng?>(null) }
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
@@ -182,6 +190,8 @@ fun BuildingLoungeMapScreen(
         if (hasLocationPermission) {
             context.currentLocation()?.let { location ->
                 onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
+                recenterTarget = LatLng(location.latitude, location.longitude)
+                recenterRequestId += 1L
             } ?: onLocationUnavailable()
         }
     }
@@ -208,6 +218,8 @@ fun BuildingLoungeMapScreen(
                 lounges = state.lounges,
                 userLocation = state.userLocation?.let { LatLng(it.latitude, it.longitude) },
                 hasLocationPermission = hasLocationPermission,
+                recenterRequestId = recenterRequestId,
+                recenterTarget = recenterTarget,
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -229,6 +241,8 @@ fun BuildingLoungeMapScreen(
                             coroutineScope.launch {
                                 context.currentLocation()?.let { location ->
                                     onLocationUpdate(location.latitude, location.longitude, location.accuracyOrNull())
+                                    recenterTarget = LatLng(location.latitude, location.longitude)
+                                    recenterRequestId += 1L
                                 } ?: onLocationUnavailable()
                             }
                         } else {
@@ -242,7 +256,7 @@ fun BuildingLoungeMapScreen(
                     },
                     modifier = Modifier.size(48.dp)
                 ) {
-                    Icon(Icons.Outlined.MyLocation, contentDescription = "Refresh location", tint = PaleMint)
+                    Icon(Icons.Outlined.MyLocation, contentDescription = "내 위치로 이동", tint = PaleMint)
                 }
             }
         }
@@ -284,12 +298,15 @@ private fun BuildingGoogleMap(
     lounges: List<BuildingLoungeSummaryDto>,
     userLocation: LatLng?,
     hasLocationPermission: Boolean,
+    recenterRequestId: Long,
+    recenterTarget: LatLng?,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val mapView = rememberMapViewWithLifecycle()
     var googleMap by remember { mutableStateOf<GoogleMap?>(null) }
+    var cameraInitialized by remember { mutableStateOf(false) }
     val latestUserLocation by rememberUpdatedState(userLocation)
     val visibleLounges = remember(lounges) { lounges.visibleMapLounges() }
     val palette = CurrentSyncPalette
@@ -359,12 +376,23 @@ private fun BuildingGoogleMap(
                     .icon(BitmapDescriptorFactory.defaultMarker(if (lounge.inside) markerHue else (markerHue + 12f) % 360f))
             )
         }
-        val cameraTarget = latestUserLocation ?: visibleLounges.firstOrNull()?.let {
-            LatLng(it.latitude, it.longitude)
+        if (!cameraInitialized) {
+            val cameraTarget = latestUserLocation ?: visibleLounges.firstOrNull()?.let {
+                LatLng(it.latitude, it.longitude)
+            }
+            cameraTarget?.let {
+                map.moveCamera(CameraUpdateFactory.newLatLngZoom(it, 17.1f))
+                cameraInitialized = true
+            }
         }
-        cameraTarget?.let {
-            map.animateCamera(CameraUpdateFactory.newLatLngZoom(it, 17.1f))
-        }
+    }
+
+    LaunchedEffect(googleMap, recenterRequestId, recenterTarget) {
+        if (recenterRequestId <= 0L) return@LaunchedEffect
+        val map = googleMap ?: return@LaunchedEffect
+        val target = recenterTarget ?: latestUserLocation ?: return@LaunchedEffect
+        map.animateCamera(CameraUpdateFactory.newLatLngZoom(target, 17.1f))
+        cameraInitialized = true
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -1209,18 +1237,52 @@ private fun Context.hasLocationPermission(): Boolean =
     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
         ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+private fun Context.hasFineLocationPermission(): Boolean =
+    ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+        PackageManager.PERMISSION_GRANTED
+
+internal fun mapLocationMaxAccuracyMeters(hasFineLocationPermission: Boolean): Float =
+    if (hasFineLocationPermission) {
+        MAP_PRECISE_LOCATION_MAX_ACCURACY_METERS
+    } else {
+        MAP_APPROXIMATE_LOCATION_MAX_ACCURACY_METERS
+    }
+
 @SuppressLint("MissingPermission")
 private suspend fun Context.currentLocation(): Location? {
     if (!hasLocationPermission()) return null
     val client = LocationServices.getFusedLocationProviderClient(this)
-    val current = withTimeoutOrNull(10_000) {
-        client.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null).await()
+    val maxAccuracyMeters = mapLocationMaxAccuracyMeters(hasFineLocationPermission())
+    val cancellation = CancellationTokenSource()
+    val request = CurrentLocationRequest.Builder()
+        .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+        .setMaxUpdateAgeMillis(5_000L)
+        .setDurationMillis(10_000L)
+        .build()
+    val current = try {
+        withTimeoutOrNull(10_500L) {
+            client.getCurrentLocation(request, cancellation.token).await()
+        }?.takeIf { it.isUsableMapLocation(maxAccuracyMeters) }
+    } finally {
+        cancellation.cancel()
     }
 
-    return current ?: runCatching { client.lastLocation.await() }.getOrNull()
+    return current ?: runCatching { client.lastLocation.await() }
+        .getOrNull()
+        ?.takeIf { it.isUsableMapLocation(maxAccuracyMeters) }
 }
 
 private fun Location.accuracyOrNull(): Float? = if (hasAccuracy()) accuracy else null
+
+private fun Location.isUsableMapLocation(maxAccuracyMeters: Float): Boolean {
+    val ageMillis = if (elapsedRealtimeNanos > 0L) {
+        (SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNanos).coerceAtLeast(0L) / 1_000_000L
+    } else {
+        (System.currentTimeMillis() - time).coerceAtLeast(0L)
+    }
+    return hasAccuracy() && accuracy.isFinite() && accuracy <= maxAccuracyMeters &&
+        ageMillis <= MAP_LOCATION_MAX_AGE_MILLIS
+}
 
 private fun List<BuildingLoungeSummaryDto>.visibleMapLounges(): List<BuildingLoungeSummaryDto> {
     // Dynamic Wi-Fi lounges are already merged by the server. Draw the actual circles so

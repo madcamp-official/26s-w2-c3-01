@@ -2,6 +2,7 @@ package com.example.myapplication
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.myapplication.data.local.SecureTokenStore
@@ -23,7 +24,7 @@ class MelodyBubbleFlowTest {
 
     @Test
     fun signedOutSessionShowsLoginEntry() {
-        composeRule.onNodeWithText("MELODY BUBBLE").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("SYNC").assertIsDisplayed()
         composeRule.onNodeWithText("이메일로 로그인").assertIsDisplayed()
     }
 }

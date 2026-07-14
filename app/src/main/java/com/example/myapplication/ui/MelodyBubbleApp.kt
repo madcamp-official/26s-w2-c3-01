@@ -2,12 +2,9 @@ package com.example.myapplication.ui
 
 import android.Manifest
 import android.content.Intent
-import android.app.SearchManager
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
@@ -67,6 +64,7 @@ import com.example.myapplication.core.model.PreviewPlaybackState
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.remote.LoungeMemberProfileDto
+import com.example.myapplication.music.MusicAppLauncher
 import com.example.myapplication.service.SharingForegroundService
 import com.example.myapplication.service.NowPlayingNotificationListenerService
 import com.example.myapplication.ui.components.MelodyBottomNavigationBar
@@ -144,23 +142,7 @@ fun MelodyBubbleApp(
     }
 
     fun openMusicOnDevice(title: String, artist: String, externalUrl: String? = null) {
-        val directIntent = externalUrl
-            ?.takeIf { it.startsWith("https://") }
-            ?.let { Intent(Intent.ACTION_VIEW, Uri.parse(it)) }
-        if (directIntent != null && runCatching { context.startActivity(directIntent) }.isSuccess) return
-
-        val query = "$title $artist".trim()
-        val searchIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_SEARCH)
-            .putExtra(SearchManager.QUERY, query)
-            .putExtra(MediaStore.EXTRA_MEDIA_TITLE, title)
-            .putExtra(MediaStore.EXTRA_MEDIA_ARTIST, artist)
-        if (runCatching { context.startActivity(searchIntent) }.isSuccess) return
-
-        runCatching {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/search?q=${Uri.encode(query)}"))
-            )
-        }
+        MusicAppLauncher.openTrack(context, title, artist, externalUrl)
     }
 
     fun openTrackOnDevice(track: Track) =
@@ -683,14 +665,7 @@ private fun MainShell(
                     )
                 },
                 onSearchInMusicApp = { track ->
-                    val query = "${track.title} ${track.artist}"
-                    val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_SEARCH)
-                        .putExtra(SearchManager.QUERY, query)
-                        .putExtra(MediaStore.EXTRA_MEDIA_TITLE, track.title)
-                        .putExtra(MediaStore.EXTRA_MEDIA_ARTIST, track.artist)
-                    runCatching { context.startActivity(intent) }.onFailure {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.apple.com/kr/search?term=${Uri.encode(query)}")))
-                    }
+                    MusicAppLauncher.openTrack(context, track.title, track.artist, track.externalUrl)
                 },
             )
             MainTab.LOUNGE -> BuildingLoungeMapScreen(

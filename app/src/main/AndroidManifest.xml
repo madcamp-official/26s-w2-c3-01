@@ -37,6 +37,34 @@
         android:name="android.hardware.bluetooth_le"
         android:required="false" />
 
+    <queries>
+        <intent>
+            <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MEDIA_SEARCH" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+
+        <package android:name="com.spotify.music" />
+        <package android:name="com.google.android.apps.youtube.music" />
+        <package android:name="com.apple.android.music" />
+        <package android:name="com.iloen.melon" />
+        <package android:name="com.ktmusic.geniemusic" />
+        <package android:name="skplanet.musicmate" />
+        <package android:name="com.neowiz.android.bugs" />
+        <package android:name="com.nhn.android.music" />
+        <package android:name="com.sec.android.app.music" />
+        <package android:name="com.amazon.mp3" />
+        <package android:name="com.aspiro.tidal" />
+        <package android:name="deezer.android.app" />
+        <package android:name="com.soundcloud.android" />
+    </queries>
+
     <application
         android:name=".MelodyApplication"
         android:allowBackup="false"
