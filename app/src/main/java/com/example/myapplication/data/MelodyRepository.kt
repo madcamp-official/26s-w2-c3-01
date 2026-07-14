@@ -55,8 +55,10 @@ import com.example.myapplication.data.realtime.toServerEpochMillis
 import com.example.myapplication.data.remote.ApiEnvironment
 import com.example.myapplication.data.remote.ApiClient
 import com.example.myapplication.data.remote.LocationUpdateRequest
+import com.example.myapplication.data.remote.NearbyBeaconRequest
 import com.example.myapplication.data.remote.MusicSearchRepository
 import com.example.myapplication.data.remote.NearbyReactionRequest
+import com.example.myapplication.data.remote.ResolveNearbyBeaconsRequest
 import com.example.myapplication.data.remote.PresenceSettingsUpdateRequest
 import com.example.myapplication.data.remote.RemoteChatSummary
 import com.example.myapplication.data.remote.RemoteFollowResponse
@@ -80,6 +82,7 @@ import com.example.myapplication.data.remote.jwtSubject
 import com.example.myapplication.offlineexchange.ExchangeProtocol
 import com.example.myapplication.offlineexchange.OfflineExchangeResult
 import com.example.myapplication.offlineexchange.OfflineExchangeSyncWorker
+import com.example.myapplication.nearby.PassiveNearbyDiscoveryManager
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -108,11 +111,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import retrofit2.HttpException
 
-private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 15_000L
+private const val CURRENT_LOCATION_TIMEOUT_MILLIS = 5_000L
 private const val PRESENCE_LOCATION_CACHE_MAX_AGE_MILLIS = 60_000L
+private const val STATIONARY_LOCATION_FALLBACK_MAX_AGE_MILLIS = 10 * 60_000L
 private const val CHAT_FALLBACK_SYNC_INTERVAL_MILLIS = 10_000L
 private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
@@ -227,6 +233,10 @@ class DemoMelodyRepository(
     override val state: StateFlow<MelodyUiState> = _state.asStateFlow()
 
     private var sharingJob: Job? = null
+    private val presenceSyncMutex = Mutex()
+    private val locationSyncSignal = Channel<Unit>(Channel.CONFLATED)
+    @Volatile private var latestLocationFix: LocationFix? = null
+    private var hybridDiscoveryJob: Job? = null
     private var chatSyncJob: Job? = null
     private var exchangeObserveJob: Job? = null
     private val chatRealtimeVersion = AtomicLong(0)
@@ -240,7 +250,12 @@ class DemoMelodyRepository(
     private val clientSessionId = preferences.getString("client-session-id", null)
         ?: UUID.randomUUID().toString().also { preferences.edit().putString("client-session-id", it).apply() }
     private val nearbyApi = ApiClient.createNearbyApi(environment)
-    private val nearbyProximityStabilizer = NearbyProximityStabilizer()
+    private val passiveNearbyDiscovery = PassiveNearbyDiscoveryManager(applicationContext)
+    private var directNearbyByHandle = emptyMap<String, com.example.myapplication.core.model.NearbyListener>()
+    private var passiveDiscoveryStarted = false
+    // Server distance bands are already privacy-coarsened. Apply a crossed band immediately so
+    // another user's movement is visible on the next snapshot instead of one cycle later.
+    private val nearbyProximityStabilizer = NearbyProximityStabilizer(confirmationsRequired = 1)
     private val profileApi = ApiClient.createProfileApi(environment)
     private val socialApi = ApiClient.createSocialApi(environment)
     private val musicSearchRepository = MusicSearchRepository()
@@ -260,7 +275,8 @@ class DemoMelodyRepository(
             if (_state.value.sharingState == SharingState.STARTING ||
                 _state.value.sharingState == SharingState.ACTIVE
             ) {
-                scope.launch { syncPresence(LocationFix(latitude, longitude, accuracy)) }
+                latestLocationFix = LocationFix(latitude, longitude, accuracy)
+                locationSyncSignal.trySend(Unit)
             }
         }
     }
@@ -299,6 +315,18 @@ class DemoMelodyRepository(
         scope.launch {
             realtimeClient.syncRequests.collect { request ->
                 if (request is RealtimeSyncRequest.FullSync) performFullRealtimeSync()
+            }
+        }
+        scope.launch {
+            passiveNearbyDiscovery.beaconIds.collect(::resolveDirectBeacons)
+        }
+        scope.launch {
+            for (ignored in locationSyncSignal) {
+                if (_state.value.sharingState == SharingState.STARTING ||
+                    _state.value.sharingState == SharingState.ACTIVE
+                ) {
+                    syncLatestLocationPresence()
+                }
             }
         }
         realtimeInboxStore?.let { store ->
@@ -426,21 +454,29 @@ class DemoMelodyRepository(
                     feedbackMessage = "안전한 주변 공유를 준비하고 있어요"
                 )
             }
+            startHybridDiscovery(accessToken.orEmpty())
             val synced = syncPresence()
             _state.update {
                 it.copy(
                     sharingState = SharingState.ACTIVE,
                     connectionState = if (
-                        synced && realtimeClient.connectionState.value is RealtimeConnectionState.Connected
-                    ) ConnectionState.LIVE else ConnectionState.RECONNECTING,
-                    feedbackMessage = if (synced) "실제 주변 기기와 음악을 공유 중이에요" else "연결이 복구되면 자동으로 다시 공유해요"
+                        realtimeClient.connectionState.value is RealtimeConnectionState.Connected
+                    ) ConnectionState.LIVE else ConnectionState.CONNECTING,
+                    feedbackMessage = if (synced) {
+                        "실제 주변 기기와 음악을 공유 중이에요"
+                    } else {
+                        "Nearby 탐색 중이에요. 위치가 확인되면 거리 정보도 갱신돼요"
+                    }
                 )
             }
-            var retryDelayMillis = 5_000L
+            var refreshDelayMillis = 1_000L
             while (isActive && _state.value.sharingState == SharingState.ACTIVE) {
-                delay(retryDelayMillis)
-                val recovered = syncPresence()
-                retryDelayMillis = if (recovered) 10_000L else (retryDelayMillis * 2).coerceAtMost(30_000L)
+                delay(refreshDelayMillis)
+                val recovered = syncPresence(requirePrecise = true)
+                if (recovered && hybridDiscoveryJob?.isActive != true) {
+                    startHybridDiscovery(accessToken.orEmpty())
+                }
+                refreshDelayMillis = 2_000L
             }
         }
     }
@@ -448,6 +484,12 @@ class DemoMelodyRepository(
     override fun stopSharing() {
         sharingJob?.cancel()
         sharingJob = null
+        hybridDiscoveryJob?.cancel()
+        hybridDiscoveryJob = null
+        passiveNearbyDiscovery.stop()
+        passiveDiscoveryStarted = false
+        directNearbyByHandle = emptyMap()
+        latestLocationFix = null
         nearbyProximityStabilizer.clear()
         _state.update {
             it.copy(
@@ -494,7 +536,7 @@ class DemoMelodyRepository(
             )
         }
         if (_state.value.sharingState == SharingState.ACTIVE) {
-            scope.launch { syncPresence() }
+            scope.launch { syncPresence(requirePrecise = true) }
         } else {
             startSharing()
         }
@@ -2571,6 +2613,8 @@ class DemoMelodyRepository(
     }
 
     override fun close() {
+        passiveNearbyDiscovery.stop()
+        locationSyncSignal.close()
         if (locationReceiverRegistered) {
             runCatching { applicationContext.unregisterReceiver(locationReceiver) }
             locationReceiverRegistered = false
