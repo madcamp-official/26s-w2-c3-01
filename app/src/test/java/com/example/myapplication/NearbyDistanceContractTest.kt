@@ -2,11 +2,13 @@ package com.example.myapplication
 
 import com.example.myapplication.core.model.DisplayPosition
 import com.example.myapplication.core.model.NearbyListener
+import com.example.myapplication.core.model.NearbyLoadState
 import com.example.myapplication.core.model.NearbyProximityStabilizer
 import com.example.myapplication.core.model.NearbyRingFractions
 import com.example.myapplication.core.model.Proximity
 import com.example.myapplication.core.model.abstractDisplayPosition
 import com.example.myapplication.core.model.radiusFromCenter
+import com.example.myapplication.data.keepSettledDuringRefresh
 import com.example.myapplication.service.NearbyLocationPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,6 +65,26 @@ class NearbyDistanceContractTest {
         assertTrue(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 20_000L, 45f, now))
         assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 31_000L, 45f, now))
         assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 5_000L, 51f, now))
+    }
+
+    @Test
+    fun transientRefreshDoesNotReplaceASettledNearbyState() {
+        assertEquals(
+            NearbyLoadState.READY,
+            NearbyLoadState.READY.keepSettledDuringRefresh(NearbyLoadState.LOADING),
+        )
+        assertEquals(
+            NearbyLoadState.EMPTY,
+            NearbyLoadState.EMPTY.keepSettledDuringRefresh(NearbyLoadState.ERROR),
+        )
+        assertEquals(
+            NearbyLoadState.ERROR,
+            NearbyLoadState.ERROR.keepSettledDuringRefresh(NearbyLoadState.LOADING),
+        )
+        assertEquals(
+            NearbyLoadState.ERROR,
+            NearbyLoadState.IDLE.keepSettledDuringRefresh(NearbyLoadState.ERROR),
+        )
     }
 
     private fun listener(proximity: Proximity, position: DisplayPosition) = NearbyListener(

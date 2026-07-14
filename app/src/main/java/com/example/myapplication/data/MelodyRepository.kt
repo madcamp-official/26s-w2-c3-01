@@ -124,6 +124,18 @@ private const val KEY_PROFILE_CURATION_DIRTY = "profile-curation-dirty"
 private const val KEY_PROFILE_PRIVACY_DIRTY = "profile-privacy-dirty"
 private const val KEY_HIDDEN_CHAT_ROOM_IDS = "hidden-chat-room-ids"
 
+internal fun NearbyLoadState.keepSettledDuringRefresh(
+    fallback: NearbyLoadState,
+): NearbyLoadState = when (this) {
+    NearbyLoadState.READY,
+    NearbyLoadState.EMPTY,
+    NearbyLoadState.ERROR,
+    -> this
+    NearbyLoadState.IDLE,
+    NearbyLoadState.LOADING,
+    -> fallback
+}
+
 private fun String?.isDeezerArtistImage(): Boolean =
     this?.startsWith("https://cdn-images.dzcdn.net/images/artist/") == true
 
@@ -1729,10 +1741,17 @@ class DemoMelodyRepository(
         val location = fix ?: currentLocation(allowInitialCoarseLocation = !requirePrecise)?.let {
             LocationFix(it.latitude, it.longitude, it.accuracy.takeIf(Float::isFinite))
         } ?: run {
-            _state.update {
-                it.copy(
-                    nearbyLoadState = NearbyLoadState.LOADING,
-                    nearbyErrorMessage = "Nearby로 주변을 찾는 중이에요. 위치가 확인되면 거리 정보도 갱신돼요.",
+            _state.update { current ->
+                val loadState = current.nearbyLoadState.keepSettledDuringRefresh(
+                    NearbyLoadState.LOADING,
+                )
+                current.copy(
+                    nearbyLoadState = loadState,
+                    nearbyErrorMessage = if (loadState == NearbyLoadState.LOADING) {
+                        "Nearby로 주변을 찾는 중이에요. 위치가 확인되면 거리 정보도 갱신돼요."
+                    } else {
+                        current.nearbyErrorMessage
+                    },
                 )
             }
             return false
@@ -1773,7 +1792,7 @@ class DemoMelodyRepository(
                         realtimeClient.connectionState.value is RealtimeConnectionState.Connected
                     ) ConnectionState.LIVE else ConnectionState.RECONNECTING,
                     discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
-                    nearbyLoadState = if (snapshot.items.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
+                    nearbyLoadState = if (listeners.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
                     nearbyErrorMessage = null,
                     dataSourceLabel = "SERVER LIVE",
                 )
@@ -1788,10 +1807,17 @@ class DemoMelodyRepository(
             Log.e("MelodyNearby", "Presence snapshot failed", error)
             if (!isCurrentSession(token)) return false
             _state.update { current ->
+                val loadState = current.nearbyLoadState.keepSettledDuringRefresh(
+                    NearbyLoadState.ERROR,
+                )
                 current.copy(
                     connectionState = ConnectionState.RECONNECTING,
-                    nearbyLoadState = NearbyLoadState.ERROR,
-                    nearbyErrorMessage = requestErrorMessage(error, "주변 서버에 연결하지 못했어요."),
+                    nearbyLoadState = loadState,
+                    nearbyErrorMessage = if (loadState == NearbyLoadState.ERROR) {
+                        requestErrorMessage(error, "주변 서버에 연결하지 못했어요.")
+                    } else {
+                        current.nearbyErrorMessage
+                    },
                 )
             }
             false
@@ -2177,7 +2203,7 @@ class DemoMelodyRepository(
             current.copy(
                 nearbyListeners = listeners,
                 discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
-                nearbyLoadState = if (snapshot.items.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
+                nearbyLoadState = if (listeners.isEmpty()) NearbyLoadState.EMPTY else NearbyLoadState.READY,
                 nearbyErrorMessage = null,
                 snapshotSequence = current.snapshotSequence + 1,
             )
@@ -2360,7 +2386,7 @@ class DemoMelodyRepository(
                         current.copy(
                             nearbyListeners = listeners,
                             discoveryRadiusMeters = MAX_NEARBY_RADIUS_METERS,
-                            nearbyLoadState = if (snapshot.items.isEmpty()) {
+                            nearbyLoadState = if (listeners.isEmpty()) {
                                 NearbyLoadState.EMPTY
                             } else NearbyLoadState.READY,
                             nearbyErrorMessage = null,
