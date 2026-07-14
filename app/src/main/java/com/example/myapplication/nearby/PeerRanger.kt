@@ -3,6 +3,8 @@ package com.example.myapplication.nearby
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.annotation.RequiresApi
+import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.example.myapplication.core.model.NearbyMeasurementMethod
 import com.example.myapplication.core.model.NearbyProximityConfidence
 import com.example.myapplication.core.model.Proximity
@@ -49,4 +51,44 @@ class PeerRangingCapabilityDetector(context: Context) {
         }
         add(PeerRangingTechnology.GPS)
     }
+}
+
+interface PlatformConnectedRanger {
+    val measurements: StateFlow<Map<String, PeerProximityMeasurement>>
+    fun connect(
+        localBeaconId: String,
+        remoteBeaconId: String,
+        endpointId: String,
+        initiator: Boolean,
+        client: ConnectionsClient,
+    )
+    fun receive(endpointId: String, payload: ByteArray)
+    fun disconnect(endpointId: String)
+    fun stop()
+}
+
+object PlatformConnectedRangerFactory {
+    fun create(context: Context): PlatformConnectedRanger =
+        if (Build.VERSION.SDK_INT >= 36) Api36.create(context) else NoOpPlatformConnectedRanger()
+
+    @RequiresApi(36)
+    private object Api36 {
+        fun create(context: Context): PlatformConnectedRanger = NoOpPlatformConnectedRanger()
+    }
+}
+
+private class NoOpPlatformConnectedRanger : PlatformConnectedRanger {
+    override val measurements = kotlinx.coroutines.flow.MutableStateFlow<
+        Map<String, PeerProximityMeasurement>
+    >(emptyMap())
+    override fun connect(
+        localBeaconId: String,
+        remoteBeaconId: String,
+        endpointId: String,
+        initiator: Boolean,
+        client: ConnectionsClient,
+    ) = Unit
+    override fun receive(endpointId: String, payload: ByteArray) = Unit
+    override fun disconnect(endpointId: String) = Unit
+    override fun stop() = Unit
 }
