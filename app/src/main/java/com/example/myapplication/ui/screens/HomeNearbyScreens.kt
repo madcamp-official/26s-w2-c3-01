@@ -1483,7 +1483,7 @@ private fun SelectedListenerCard(
                     }
                 }
                 Text(
-                    text = "${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label} · 유사도 ${listener.matchScore}%",
+                    text = "유사도 ${listener.matchScore}%",
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall
                 )
