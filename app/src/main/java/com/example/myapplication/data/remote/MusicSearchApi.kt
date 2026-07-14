@@ -1,8 +1,12 @@
 package com.example.myapplication.data.remote
 
 import com.example.myapplication.core.model.MusicSearchResult
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import retrofit2.http.GET
 import retrofit2.http.Query
 
@@ -54,6 +58,9 @@ class MusicSearchRepository(
     private val api: MusicSearchApi = ApiClient.createMusicSearchApi(),
     private val artistApi: DeezerArtistApi = ApiClient.createDeezerArtistApi(),
 ) {
+    private val artistImageCache = ConcurrentHashMap<String, String>()
+    private val artistImageLookupLimiter = Semaphore(6)
+
     suspend fun search(keyword: String): List<MusicSearchResult> = coroutineScope {
         val term = keyword.trim()
         require(term.isNotEmpty()) { "검색어를 입력해 주세요." }
@@ -61,13 +68,48 @@ class MusicSearchRepository(
         val deezerArtists = async {
             runCatching { artistApi.search(term).data }.getOrDefault(emptyList())
         }
-        val artistImages = deezerArtists.await()
-            .mapNotNull { artist ->
-                artist.picture_small?.takeIf { it.startsWith("https://") }
-                    ?.let { artist.name.normalizedMusicIdentity() to it }
+        val artistImages = deezerArtists.await().toArtistImageMap()
+        artistImageCache.putAll(artistImages)
+        val searchResults = songs.await().results.toSearchResults(artistImages)
+        val missingArtistImages = searchResults
+            .filter { it.artistImageUrl.isNullOrBlank() }
+            .map(MusicSearchResult::artist)
+            .distinct()
+            .map { artistName ->
+                async {
+                    artistName.normalizedMusicIdentity() to runCatching {
+                        artistImage(artistName)
+                    }.getOrNull()
+                }
             }
+            .awaitAll()
+            .mapNotNull { (artistName, imageUrl) -> imageUrl?.let { artistName to it } }
             .toMap()
-        songs.await().results.toSearchResults(artistImages)
+        searchResults.map { result ->
+            result.copy(
+                artistImageUrl = result.artistImageUrl
+                    ?: missingArtistImages[result.artist.normalizedMusicIdentity()],
+            )
+        }
+    }
+
+    suspend fun artistImage(artistName: String): String? {
+        val term = artistName.trim()
+        val normalizedName = term.normalizedMusicIdentity()
+        if (normalizedName.isEmpty()) return null
+        artistImageCache[normalizedName]?.let { return it }
+
+        return artistImageLookupLimiter.withPermit {
+            artistImageCache[normalizedName]?.let { return@withPermit it }
+            val artists = artistApi.search(term).data
+            val imageUrl = artists.toArtistImageMap()[normalizedName]
+                ?: artists.firstNotNullOfOrNull { artist ->
+                    artist.picture_small?.takeIf(String::isUsableDeezerArtistImage)
+                }
+                ?: return@withPermit null
+            artistImageCache[normalizedName] = imageUrl
+            imageUrl
+        }
     }
 
     suspend fun trackArtwork(title: String, artist: String): String? {
@@ -128,3 +170,16 @@ private fun String.highResolutionArtwork(): String =
 
 private fun String.normalizedMusicIdentity(): String =
     trim().lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), "")
+
+internal fun List<DeezerArtistDto>.toArtistImageMap(): Map<String, String> = buildMap {
+    this@toArtistImageMap.forEach { artist ->
+        val normalizedName = artist.name.normalizedMusicIdentity()
+        val imageUrl = artist.picture_small?.takeIf(String::isUsableDeezerArtistImage)
+        if (normalizedName.isNotEmpty() && imageUrl != null && normalizedName !in this) {
+            put(normalizedName, imageUrl)
+        }
+    }
+}
+
+private fun String.isUsableDeezerArtistImage(): Boolean =
+    startsWith("https://") && !contains("d41d8cd98f00b204e9800998ecf8427e", ignoreCase = true)
