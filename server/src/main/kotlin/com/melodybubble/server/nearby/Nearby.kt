@@ -427,8 +427,8 @@ class NearbyService(
     @Transactional
     fun updateMusic(userId: UUID, update: MusicUpdate) {
         rateLimiter.enforce(userId, "PRESENCE_MUSIC", 30, Duration.ofMinutes(1))
-        val previous = currentMusic(userId)
         if (!update.isPlaying) {
+            val previous = currentMusic(userId)
             jdbc.update("delete from music_statuses where user_id=?", userId)
             if (previous != null) publishMusicChanged(userId, false, null)
             return
@@ -483,15 +483,14 @@ class NearbyService(
             Timestamp.from(observedAt),
             expiresAt,
         )
-        val changed = previous == null || previous.title != normalizedTitle ||
-            previous.artist != normalizedArtist || previous.artworkUrl != normalizedArtwork
-        if (changed) {
-            publishMusicChanged(
-                userId,
-                true,
-                TrackSummary(normalizedTitle, normalizedArtist, normalizedArtwork),
-            )
-        }
+        // Publish every accepted active-playback heartbeat, not only track changes. A receiver can
+        // briefly lose its direct-radio measurement exactly when the track changes; replaying the
+        // current state lets it recover on the next client refresh without waiting for another song.
+        publishMusicChanged(
+            userId,
+            true,
+            TrackSummary(normalizedTitle, normalizedArtist, normalizedArtwork),
+        )
     }
 
     fun popularTracks(userId: UUID): List<PopularTrack> {
@@ -672,7 +671,11 @@ class NearbyService(
         }
     }
 
-    private fun musicAudience(sourceUserId: UUID): List<MusicAudienceMember> = jdbc.query(
+    private fun musicAudience(sourceUserId: UUID): List<MusicAudienceMember> =
+        (locationMusicAudience(sourceUserId) + directMusicAudience(sourceUserId))
+            .distinctBy(MusicAudienceMember::userId)
+
+    private fun locationMusicAudience(sourceUserId: UUID): List<MusicAudienceMember> = jdbc.query(
         """
         with source_locations as (
           select session.nearby_handle,location.point,session.last_seen_at
@@ -732,6 +735,87 @@ class NearbyService(
                 sourceProfileHandle = rs.getString("source_profile_handle"),
             )
         },
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+        sourceUserId,
+    )
+
+    /**
+     * A listener rendered from an opaque Nearby beacon may have no usable GPS session at all.
+     * The short-lived direct measurement is nevertheless stronger evidence that the two devices
+     * are nearby, so it must receive the same privacy-filtered music event as a GPS listener.
+     */
+    private fun directMusicAudience(sourceUserId: UUID): List<MusicAudienceMember> = jdbc.query(
+        """
+        select distinct on (measurement.viewer_user_id)
+          measurement.viewer_user_id recipient_id,
+          source_session.nearby_handle,
+          source_user.profile_handle source_profile_handle
+        from direct_proximity_measurements measurement
+        join lateral (
+          select session.nearby_handle
+          from presence_sessions session
+          where session.user_id=? and session.expires_at>now()
+          order by session.last_seen_at desc
+          limit 1
+        ) source_session on true
+        join users source_user on source_user.id=?
+        join user_privacy_settings source_privacy on source_privacy.user_id=?
+        where measurement.target_user_id=?
+          and measurement.viewer_user_id<>?
+          and measurement.expires_at>now()
+          and source_privacy.discoverable=true
+          and source_privacy.share_music=true
+          and source_privacy.discoverability_scope<>'HIDDEN'
+          and source_privacy.music_visibility<>'HIDDEN'
+          and (
+            source_privacy.discoverability_scope='NEARBY' or (
+              source_privacy.discoverability_scope='MUTUALS'
+              and exists(
+                select 1 from user_follows f
+                where f.follower_id=measurement.viewer_user_id and f.followed_id=?
+              )
+              and exists(
+                select 1 from user_follows f
+                where f.follower_id=? and f.followed_id=measurement.viewer_user_id
+              )
+            )
+          )
+          and (
+            source_privacy.music_visibility='TITLE_ARTIST' or (
+              source_privacy.music_visibility='MUTUALS'
+              and exists(
+                select 1 from user_follows f
+                where f.follower_id=measurement.viewer_user_id and f.followed_id=?
+              )
+              and exists(
+                select 1 from user_follows f
+                where f.follower_id=? and f.followed_id=measurement.viewer_user_id
+              )
+            )
+          )
+          and not exists(
+            select 1 from user_blocks block
+            where (block.blocker_id=? and block.blocked_id=measurement.viewer_user_id)
+               or (block.blocker_id=measurement.viewer_user_id and block.blocked_id=?)
+          )
+        order by measurement.viewer_user_id,measurement.observed_at desc
+        """.trimIndent(),
+        { rs, _ ->
+            MusicAudienceMember(
+                userId = UUID.fromString(rs.getString("recipient_id")),
+                sourceHandle = rs.getString("nearby_handle"),
+                sourceProfileHandle = rs.getString("source_profile_handle"),
+            )
+        },
+        sourceUserId,
         sourceUserId,
         sourceUserId,
         sourceUserId,
