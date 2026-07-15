@@ -308,7 +308,7 @@ interface MelodyRepository {
     fun setAllowReactions(enabled: Boolean)
     fun setMusicVisibility(label: String)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String)
-    fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>)
+    fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>)
     fun customizeAvatar(customization: AvatarCustomization)
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>)
     fun updateProfilePrivacy(settings: ProfilePrivacySettings)
@@ -1283,19 +1283,19 @@ class DemoMelodyRepository(
         syncPresenceSettings()
     }
 
-    override fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>) {
+    override fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>) {
         val token = accessToken ?: return
         val previousProfile = _state.value.profile
         _state.update { current -> current.copy(profileSaving = true, profile = current.profile.copy(
             accountAlias = displayName.trim(), nearbyDisplayAlias = displayName.trim(), colorHex = colorHex,
-            bio = bio.trim(), genres = genres, moods = moods,
+            bio = bio.trim(), genres = genres,
         )) }
         persistProfile(_state.value.profile)
         scope.launch {
             runCatching {
                 profileApi.update("Bearer $token", ProfileUpdateRequest(
                     displayName, "#%06X".format(colorHex and 0xFFFFFF), bio,
-                    genres, moods,
+                    genres,
                 ))
             }.onSuccess {
                 if (isCurrentSession(token)) applyRemoteProfile(it, "프로필을 변경했어요")
@@ -1661,7 +1661,6 @@ class DemoMelodyRepository(
                     avatarSeed = if (keepPendingAvatar) cachedProfile.avatarSeed else resolvedAvatar.seed,
                     avatarUrl = if (keepPendingAvatar) cachedProfile.avatarUrl else resolvedAvatar.url,
                     genres = remote.genres.orEmpty(),
-                    moods = remote.moods.orEmpty(),
                     profileHandle = remote.profileHandle.orEmpty().ifBlank { current.profile.profileHandle },
                     stats = stats,
                     tasteFingerprint = fingerprint,
@@ -1684,7 +1683,6 @@ class DemoMelodyRepository(
                     melodyNotes = remoteAlias?.notes ?: current.profile.melodyNotes,
                     melodyAliasId = remoteAlias?.id ?: current.profile.melodyAliasId,
                     melodyAliasTone = remoteAlias?.tone ?: current.profile.melodyAliasTone,
-                    melodyAliasMood = remoteAlias?.mood ?: current.profile.melodyAliasMood,
                     melodyAliasTempo = remoteAlias?.tempo ?: current.profile.melodyAliasTempo,
                     discoverable = current.discoverabilityScope != "HIDDEN",
                     musicVisibilityLabel = when (current.musicVisibility) {
@@ -1712,12 +1710,12 @@ class DemoMelodyRepository(
             .putString("profile-avatar-seed", profile.avatarSeed)
             .putString("profile-avatar", profile.avatarUrl)
             .putString("profile-genres", profile.genres.joinToString("\u001F"))
-            .putString("profile-moods", profile.moods.joinToString("\u001F"))
+            .remove("profile-moods")
             .putString("profile-handle", profile.profileHandle)
             .putString("profile-melody-notes", profile.melodyNotes.joinToString("\u001F"))
             .putString("profile-melody-id", profile.melodyAliasId)
             .putString("profile-melody-tone", profile.melodyAliasTone)
-            .putString("profile-melody-mood", profile.melodyAliasMood)
+            .remove("profile-melody-mood")
             .putInt("profile-melody-tempo", profile.melodyAliasTempo)
             .putString("profile-music-visibility", profile.musicVisibilityLabel)
             .putBoolean("profile-discoverable", profile.discoverable)
@@ -1739,12 +1737,10 @@ class DemoMelodyRepository(
             avatarSeed = preferences.getString("profile-avatar-seed", fallback.avatarSeed) ?: fallback.avatarSeed,
             avatarUrl = preferences.getString("profile-avatar", fallback.avatarUrl),
             genres = preferences.getString("profile-genres", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.genres,
-            moods = preferences.getString("profile-moods", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.moods,
             profileHandle = preferences.getString("profile-handle", fallback.profileHandle) ?: fallback.profileHandle,
             melodyNotes = preferences.getString("profile-melody-notes", null)?.split('\u001F')?.filter(String::isNotBlank) ?: fallback.melodyNotes,
             melodyAliasId = preferences.getString("profile-melody-id", fallback.melodyAliasId) ?: fallback.melodyAliasId,
             melodyAliasTone = preferences.getString("profile-melody-tone", fallback.melodyAliasTone) ?: fallback.melodyAliasTone,
-            melodyAliasMood = preferences.getString("profile-melody-mood", fallback.melodyAliasMood) ?: fallback.melodyAliasMood,
             melodyAliasTempo = preferences.getInt("profile-melody-tempo", fallback.melodyAliasTempo),
             musicVisibilityLabel = preferences.getString("profile-music-visibility", fallback.musicVisibilityLabel) ?: fallback.musicVisibilityLabel,
             discoverable = preferences.getBoolean("profile-discoverable", fallback.discoverable),
@@ -3111,7 +3107,6 @@ class DemoMelodyRepository(
 
     private fun RemoteTasteFingerprint.toDomain() = TasteFingerprint(
         genres = genres.orEmpty().map { TasteMetric(it.label, it.count, it.ratio) },
-        moods = moods.orEmpty().map { TasteMetric(it.label, it.count, it.ratio) },
     )
 
     private fun RemoteCommonTasteSummary.toDomain() = CommonTasteSummary(
@@ -3125,7 +3120,7 @@ class DemoMelodyRepository(
         calculatedAt = calculatedAt,
     )
 
-    private fun RemoteProfileMelodyAlias.toDomain() = ProfileMelodyAlias(id, notes, tone, mood, tempo)
+    private fun RemoteProfileMelodyAlias.toDomain() = ProfileMelodyAlias(id, notes, tone, tempo)
 
     private fun RemoteProfileTrack.toDomain() = ProfileTrack(
         rank = rank,
@@ -3136,7 +3131,6 @@ class DemoMelodyRepository(
         album = album,
         artworkUrl = artworkUrl,
         genreTags = genreTags.orEmpty(),
-        moodTags = moodTags.orEmpty(),
     )
 
     private fun ProfileTrack.toRemote() = RemoteProfileTrack(
@@ -3148,7 +3142,6 @@ class DemoMelodyRepository(
         album = album,
         artworkUrl = artworkUrl,
         genreTags = genreTags,
-        moodTags = moodTags,
     )
 
     private fun RemoteProfileArtist.toDomain() = ProfileArtist(
@@ -3185,7 +3178,6 @@ class DemoMelodyRepository(
             avatarSeed = resolvedAvatar.seed,
             avatarUrl = resolvedAvatar.url,
             genres = genres.orEmpty(),
-            moods = moods.orEmpty(),
             melodyAlias = melodyAlias?.toDomain(),
             stats = stats.toDomain(),
             tasteFingerprint = tasteFingerprint?.toDomain() ?: TasteFingerprint(),

@@ -11,15 +11,15 @@ class TasteEmbeddingAlgorithmTest {
         val first = TasteEmbeddingAlgorithm.encode(
             listOf(
                 TasteSignal("Indie", "GENRE", 2.0),
-                TasteSignal("Night", "MOOD", 2.0),
                 TasteSignal("DAY6", "ARTIST", 1.5),
+                TasteSignal("예뻤어 · DAY6", "TRACK", 1.0),
             )
         )
         val second = TasteEmbeddingAlgorithm.encode(
             listOf(
                 TasteSignal("Indie", "GENRE", 2.0),
-                TasteSignal("Night", "MOOD", 1.0),
                 TasteSignal("DAY6", "ARTIST", 1.5),
+                TasteSignal("예뻤어 · DAY6", "TRACK", 1.0),
             )
         )
 
@@ -47,8 +47,8 @@ class TasteEmbeddingAlgorithmTest {
     fun `confidence shrinkage prevents sparse profiles from showing perfect match`() {
         val signals = listOf(
             TasteSignal("R&B", "GENRE", 2.0),
-            TasteSignal("Calm", "MOOD", 2.0),
             TasteSignal("SZA", "ARTIST", 1.5),
+            TasteSignal("Good Days · SZA", "TRACK", 1.0),
         )
 
         val result = TasteEmbeddingAlgorithm.compare(
@@ -58,5 +58,21 @@ class TasteEmbeddingAlgorithmTest {
 
         assertEquals("LOW", result.confidence)
         assertTrue(requireNotNull(result.score) in 65..75)
+    }
+
+    @Test
+    fun `normalization maps high confidence cosine bounds to zero and one hundred`() {
+        assertEquals(0, TasteEmbeddingAlgorithm.normalizedSimilarityScore(-1.0, "HIGH"))
+        assertEquals(50, TasteEmbeddingAlgorithm.normalizedSimilarityScore(0.0, "HIGH"))
+        assertEquals(100, TasteEmbeddingAlgorithm.normalizedSimilarityScore(1.0, "HIGH"))
+    }
+
+    @Test
+    fun `unsupported taste signal types are excluded from the vector`() {
+        val vector = TasteEmbeddingAlgorithm.encode(
+            listOf(TasteSignal("legacy", "REMOVED_TYPE", 5.0))
+        )
+
+        assertEquals(0, vector.evidenceCount)
     }
 }

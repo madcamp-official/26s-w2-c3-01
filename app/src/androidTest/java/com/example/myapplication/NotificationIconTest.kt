@@ -10,6 +10,7 @@ import com.example.myapplication.data.realtime.RealtimeEvent
 import com.example.myapplication.data.realtime.RealtimeEventEnvelope
 import com.example.myapplication.data.realtime.RealtimeNotificationPayload
 import com.example.myapplication.data.realtime.RealtimeSystemNotifier
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
@@ -32,22 +33,24 @@ class NotificationIconTest {
         manager.cancelAll()
 
         try {
-            RealtimeSystemNotifier(context).present(
-                RealtimeEvent.NotificationCreated(
-                    destination = RealtimeDestinations.NOTIFICATIONS,
-                    envelope = RealtimeEventEnvelope(
-                        eventId = TEST_EVENT_ID,
-                        type = "notification.created",
-                        version = 1,
-                        timestamp = "2026-07-14T00:00:00Z",
-                        payload = RealtimeNotificationPayload(
-                            notificationId = TEST_EVENT_ID,
-                            title = "Sync",
-                            body = "notification icon verification",
+            runBlocking {
+                RealtimeSystemNotifier(context).present(
+                    RealtimeEvent.NotificationCreated(
+                        destination = RealtimeDestinations.NOTIFICATIONS,
+                        envelope = RealtimeEventEnvelope(
+                            eventId = TEST_EVENT_ID,
+                            type = "notification.created",
+                            version = 1,
+                            timestamp = "2026-07-14T00:00:00Z",
+                            payload = RealtimeNotificationPayload(
+                                notificationId = TEST_EVENT_ID,
+                                title = "Sync",
+                                body = "notification icon verification",
+                            ),
                         ),
                     ),
-                ),
-            )
+                )
+            }
 
             val posted = waitForNotification(manager)
             assertNotNull("Realtime notification was not posted", posted)

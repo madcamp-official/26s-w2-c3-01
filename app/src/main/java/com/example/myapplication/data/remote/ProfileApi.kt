@@ -11,7 +11,6 @@ import retrofit2.http.PUT
 data class RemoteTasteMetric(val label: String, val count: Int, val ratio: Double)
 data class RemoteTasteFingerprint(
     val genres: List<RemoteTasteMetric>? = emptyList(),
-    val moods: List<RemoteTasteMetric>? = emptyList(),
 )
 data class RemoteProfileStats(
     val followingCount: Int,
@@ -21,7 +20,6 @@ data class RemoteProfileMelodyAlias(
     val id: String,
     val notes: List<String>,
     val tone: String,
-    val mood: String,
     val tempo: Int,
 )
 
@@ -34,7 +32,6 @@ data class RemoteProfileTrack(
     val album: String? = null,
     val artworkUrl: String? = null,
     val genreTags: List<String>? = emptyList(),
-    val moodTags: List<String>? = emptyList(),
 )
 
 data class RemoteProfileArtist(
@@ -89,7 +86,6 @@ data class RemoteProfile(
     val avatarSeed: String? = null,
     val avatarUrl: String? = null,
     val genres: List<String>?,
-    val moods: List<String>?,
     val discoverable: Boolean,
     val shareMusic: Boolean,
     val melodyAlias: RemoteProfileMelodyAlias?,
@@ -109,7 +105,6 @@ data class RemotePublicProfile(
     val avatarSeed: String? = null,
     val avatarUrl: String? = null,
     val genres: List<String>?,
-    val moods: List<String>?,
     val melodyAlias: RemoteProfileMelodyAlias?,
     val stats: RemoteProfileStats,
     val tasteFingerprint: RemoteTasteFingerprint?,
@@ -135,7 +130,6 @@ data class ProfileUpdateRequest(
     val profileColor: String,
     val bio: String,
     val genres: List<String>,
-    val moods: List<String>,
 )
 data class AvatarCustomizationRequest(
     val eyebrowsVariant: String,

@@ -19,7 +19,6 @@ data class OnboardingRequest(
     val acceptedTerms: Boolean,
     val termsVersion: String,
     val genres: List<String>,
-    val moods: List<String>,
 )
 
 data class TokenResponse(

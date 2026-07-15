@@ -22,7 +22,6 @@ object DemoCatalog {
         album = "0.1 flaws and all.",
         externalUrl = "https://www.youtube.com/results?search_query=Blue+Night+Wave+to+Earth",
         genreTags = listOf("Indie", "R&B"),
-        moodTags = listOf("Calm", "Night")
     )
 
     val lateDrive = Track(
@@ -30,7 +29,6 @@ object DemoCatalog {
         title = "Late Drive",
         artist = "Seoul Moon",
         genreTags = listOf("City Pop"),
-        moodTags = listOf("Night")
     )
 
     val summerEnd = Track(
@@ -38,7 +36,6 @@ object DemoCatalog {
         title = "Summer End",
         artist = "Loco",
         genreTags = listOf("R&B"),
-        moodTags = listOf("Warm")
     )
 
     val indieRain = Track(
@@ -46,7 +43,6 @@ object DemoCatalog {
         title = "Indie Rain",
         artist = "Aurora",
         genreTags = listOf("Indie"),
-        moodTags = listOf("Rainy", "Calm")
     )
 
     fun initialState(isOnboardingComplete: Boolean): MelodyUiState {
@@ -192,11 +188,9 @@ object DemoCatalog {
                 avatarSeed = "demo-jh-melody",
                 avatarUrl = "https://api.dicebear.com/10.x/lorelei-neutral/svg?seed=demo-jh-melody",
                 genres = listOf("Indie", "R&B"),
-                moods = listOf("Calm", "Night"),
                 melodyNotes = listOf("C4", "E4", "G4"),
                 melodyAliasId = "mint-ring",
                 melodyAliasTone = "전자음",
-                melodyAliasMood = "밝음",
                 melodyAliasTempo = 132,
                 musicVisibilityLabel = "제목·아티스트 공개",
                 discoverable = true,

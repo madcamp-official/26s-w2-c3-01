@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 data class TasteMatchMetric(
@@ -144,12 +145,13 @@ class TasteMatchService(private val jdbc: JdbcTemplate) {
             """
             insert into taste_user_embeddings(
               user_id,model_version,algorithm_version,embedding,evidence_count,confidence,source_mask
-            ) values (?,'taste-bootstrap-v2',?,cast(? as real[]),?,?,0)
+            ) values (?,?,?,cast(? as real[]),?,?,0)
             on conflict(user_id,model_version) do update set
               algorithm_version=excluded.algorithm_version,embedding=excluded.embedding,
               evidence_count=excluded.evidence_count,confidence=excluded.confidence,calculated_at=now()
             """.trimIndent(),
             userId,
+            TasteEmbeddingAlgorithm.MODEL_VERSION,
             TasteEmbeddingAlgorithm.ALGORITHM_VERSION,
             arrayLiteral,
             vector.evidenceCount,
@@ -163,28 +165,24 @@ class TasteMatchService(private val jdbc: JdbcTemplate) {
         val args = userIds.toTypedArray()
 
         jdbc.query(
-            "select id,preferred_genres,mood_tags from users where id in ($placeholders)",
+            "select id,preferred_genres from users where id in ($placeholders)",
             { rs ->
                 val userId = UUID.fromString(rs.getString("id"))
                 splitTags(rs.getString("preferred_genres")).forEach {
                     result.getValue(userId).add(TasteSignal(it, "GENRE", 2.0))
-                }
-                splitTags(rs.getString("mood_tags")).forEach {
-                    result.getValue(userId).add(TasteSignal(it, "MOOD", 2.0))
                 }
             },
             *args,
         )
         jdbc.query(
             """
-            select user_id,title,artist_name,genre_tags,mood_tags
+            select user_id,title,artist_name,genre_tags
             from profile_signature_tracks where user_id in ($placeholders)
             """.trimIndent(),
             { rs ->
                 val userId = UUID.fromString(rs.getString("user_id"))
                 val bucket = result.getValue(userId)
                 splitTags(rs.getString("genre_tags")).forEach { bucket.add(TasteSignal(it, "GENRE", 1.5)) }
-                splitTags(rs.getString("mood_tags")).forEach { bucket.add(TasteSignal(it, "MOOD", 1.5)) }
                 bucket.add(TasteSignal(rs.getString("artist_name"), "ARTIST", 0.75))
                 bucket.add(
                     TasteSignal(
@@ -321,20 +319,23 @@ private data class MatchCacheKey(val viewerUserId: UUID, val targetUserId: UUID)
 private data class CachedMatch(val summary: TasteMatchSummary, val expiresAtNanos: Long)
 
 internal object TasteEmbeddingAlgorithm {
-    const val ALGORITHM_VERSION = "HYBRID_SIAMESE_V2_BOOTSTRAP"
+    const val MODEL_VERSION = "taste-bootstrap-v3-normalized"
+    const val ALGORITHM_VERSION = "HYBRID_SIAMESE_V3_NORMALIZED"
     private const val DIMENSIONS = 128
     private const val MINIMUM_EVIDENCE = 3
+    private val ALLOWED_SIGNAL_TYPES = setOf("GENRE", "ARTIST", "TRACK", "LISTEN")
 
     fun encode(input: List<TasteSignal>): TasteVector {
         val merged = linkedMapOf<String, TasteSignal>()
         input.forEach { signal ->
             val label = signal.label.trim().take(160)
-            if (label.isBlank() || signal.weight <= 0.0) return@forEach
-            val key = "${signal.type.uppercase()}:${label.lowercase()}"
+            val type = signal.type.uppercase()
+            if (label.isBlank() || signal.weight <= 0.0 || type !in ALLOWED_SIGNAL_TYPES) return@forEach
+            val key = "$type:${label.lowercase()}"
             val previous = merged[key]
             merged[key] = signal.copy(
                 label = label,
-                type = signal.type.uppercase(),
+                type = type,
                 // Repeated listening remains meaningful without allowing one looped song to
                 // overwhelm the user's broader explicit and historical taste evidence.
                 weight = ((previous?.weight ?: 0.0) + signal.weight).coerceAtMost(6.0),
@@ -365,16 +366,9 @@ internal object TasteEmbeddingAlgorithm {
             )
         }
 
-        val cosine = left.values.indices.sumOf { left.values[it] * right.values[it] }.coerceIn(-1.0, 1.0)
-        val rawScore = (cosine + 1.0) * 50.0
-        val reliability = when (confidence) {
-            "HIGH" -> 1.0
-            "MEDIUM" -> 0.75
-            else -> 0.45
-        }
-        val calibrated = 50.0 + reliability * (rawScore - 50.0)
+        val cosine = left.values.indices.sumOf { left.values[it] * right.values[it] }
         return TasteMatchSummary(
-            score = calibrated.toInt().coerceIn(0, 100),
+            score = normalizedSimilarityScore(cosine, confidence),
             confidence = confidence,
             metrics = reasons,
             sampleSize = sampleSize,
@@ -406,6 +400,20 @@ internal object TasteEmbeddingAlgorithm {
         evidence >= 30 -> "HIGH"
         evidence >= 10 -> "MEDIUM"
         else -> "LOW"
+    }
+
+    /** Converts cosine similarity to one bounded percentage and tempers sparse evidence. */
+    internal fun normalizedSimilarityScore(cosineSimilarity: Double, confidence: String): Int {
+        val cosine = cosineSimilarity.coerceIn(-1.0, 1.0)
+        val zeroToHundred = ((cosine + 1.0) / 2.0) * 100.0
+        val reliability = when (confidence) {
+            "HIGH" -> 1.0
+            "MEDIUM" -> 0.75
+            else -> 0.45
+        }
+        return (50.0 + reliability * (zeroToHundred - 50.0))
+            .roundToInt()
+            .coerceIn(0, 100)
     }
 
     private fun stableHash(value: String): Int {

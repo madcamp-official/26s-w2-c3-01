@@ -49,7 +49,6 @@ data class OnboardingRequest(
     val acceptedTerms: Boolean,
     val termsVersion: String,
     val genres: List<String>,
-    val moods: List<String>,
 )
 data class TokenResponse(
     val accessToken: String,
@@ -238,13 +237,12 @@ class AuthService(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Terms must be accepted")
         }
         val genres = request.genres.map(String::trim).filter(String::isNotBlank).distinct().take(8)
-        val moods = request.moods.map(String::trim).filter(String::isNotBlank).distinct().take(8)
-        if (genres.isEmpty() || moods.isEmpty()) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one genre and mood are required")
+        if (genres.isEmpty()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one genre is required")
         }
         jdbc.update("""update users set onboarding_completed=true,terms_accepted_at=now(),terms_version=?,
-            preferred_genres=?,mood_tags=?,updated_at=now() where id=?""",
-            request.termsVersion.take(32), genres.joinToString(","), moods.joinToString(","), userId)
+            preferred_genres=?,updated_at=now() where id=?""",
+            request.termsVersion.take(32), genres.joinToString(","), userId)
     }
 
     @Transactional

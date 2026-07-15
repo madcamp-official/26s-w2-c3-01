@@ -18,7 +18,6 @@ import kotlinx.coroutines.flow.Flow
 data class MelodyAliasCandidateEntity(
     @PrimaryKey val id: String,
     val name: String,
-    val mood: String,
     val tone: String,
     val tempo: Int,
     val energy: String,
@@ -30,7 +29,7 @@ data class MelodyAliasCandidateEntity(
 
 @Dao
 interface MelodyAliasCandidateDao {
-    @Query("SELECT * FROM melody_alias_candidates ORDER BY mood, tone, name")
+    @Query("SELECT * FROM melody_alias_candidates ORDER BY tone, name")
     fun observeAll(): Flow<List<MelodyAliasCandidateEntity>>
 
     @Query("SELECT COUNT(*) FROM melody_alias_candidates")
@@ -44,7 +43,7 @@ interface MelodyAliasCandidateDao {
     entities = [
         MelodyAliasCandidateEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class MelodyDatabase : RoomDatabase() {
@@ -61,7 +60,7 @@ abstract class MelodyDatabase : RoomDatabase() {
                     MelodyDatabase::class.java,
                     "melody-bubble-local.db"
                 )
-                    .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }
@@ -71,6 +70,37 @@ abstract class MelodyDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("DROP TABLE IF EXISTS offline_exchange_local")
                 db.execSQL("DROP TABLE IF EXISTS sync_outbox")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS melody_alias_candidates_new (
+                      id TEXT NOT NULL PRIMARY KEY,
+                      name TEXT NOT NULL,
+                      tone TEXT NOT NULL,
+                      tempo INTEGER NOT NULL,
+                      energy TEXT NOT NULL,
+                      notesCsv TEXT NOT NULL,
+                      rhythmCsv TEXT NOT NULL,
+                      toneJsPreset TEXT NOT NULL,
+                      melodyId TEXT NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO melody_alias_candidates_new(
+                      id,name,tone,tempo,energy,notesCsv,rhythmCsv,toneJsPreset,melodyId
+                    )
+                    SELECT id,name,tone,tempo,energy,notesCsv,rhythmCsv,toneJsPreset,melodyId
+                    FROM melody_alias_candidates
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE melody_alias_candidates")
+                db.execSQL("ALTER TABLE melody_alias_candidates_new RENAME TO melody_alias_candidates")
             }
         }
 

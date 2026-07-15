@@ -28,7 +28,6 @@ import java.util.UUID
 data class TasteMetric(val label: String, val count: Int, val ratio: Double)
 data class TasteFingerprint(
     val genres: List<TasteMetric> = emptyList(),
-    val moods: List<TasteMetric> = emptyList(),
 )
 data class ProfileStats(
     val followingCount: Int,
@@ -38,7 +37,6 @@ data class MelodyAliasProfile(
     val id: String,
     val notes: List<String>,
     val tone: String,
-    val mood: String,
     val tempo: Int,
 )
 
@@ -51,7 +49,6 @@ data class ProfileTrack(
     val album: String? = null,
     val artworkUrl: String? = null,
     val genreTags: List<String> = emptyList(),
-    val moodTags: List<String> = emptyList(),
 )
 
 data class ProfileArtist(
@@ -99,7 +96,6 @@ data class ProfileResponse(
     val avatarSeed: String,
     val avatarUrl: String,
     val genres: List<String>,
-    val moods: List<String>,
     val discoverable: Boolean,
     val shareMusic: Boolean,
     val melodyAlias: MelodyAliasProfile?,
@@ -119,7 +115,6 @@ data class PublicProfileResponse(
     val avatarSeed: String,
     val avatarUrl: String,
     val genres: List<String>,
-    val moods: List<String>,
     val melodyAlias: MelodyAliasProfile?,
     val stats: ProfileStats,
     val tasteFingerprint: TasteFingerprint,
@@ -140,7 +135,6 @@ data class ProfileUpdate(
     val profileColor: String,
     val bio: String = "",
     val genres: List<String> = emptyList(),
-    val moods: List<String> = emptyList(),
 )
 data class PrivacyUpdate(
     val discoverable: Boolean,
@@ -165,7 +159,6 @@ private data class StoredProfile(
     val avatarSeed: String,
     val avatarUrl: String?,
     val genres: List<String>,
-    val moods: List<String>,
     val discoverable: Boolean,
     val shareMusic: Boolean,
     val profileRevision: Long,
@@ -191,7 +184,6 @@ class ProfileQueryService(
             avatarSeed = stored.avatarSeed,
             avatarUrl = avatars.resolve(stored.avatarSeed, stored.avatarUrl),
             genres = stored.genres,
-            moods = stored.moods,
             discoverable = stored.discoverable,
             shareMusic = stored.shareMusic,
             melodyAlias = stored.melodyAlias,
@@ -240,7 +232,6 @@ class ProfileQueryService(
             avatarSeed = target.avatarSeed,
             avatarUrl = avatars.resolve(target.avatarSeed, target.avatarUrl),
             genres = target.genres,
-            moods = target.moods,
             melodyAlias = target.melodyAlias,
             stats = stats(target.userId),
             tasteFingerprint = tasteFingerprint(target.userId, limit = 3),
@@ -294,7 +285,6 @@ class ProfileQueryService(
                 aliasId,
                 notes,
                 rs.getString("melody_alias_tone").orEmpty(),
-                rs.getString("melody_alias_mood").orEmpty(),
                 tempo.toInt(),
             )
         } else null
@@ -307,7 +297,6 @@ class ProfileQueryService(
             avatarSeed = rs.getString("avatar_seed"),
             avatarUrl = rs.getString("avatar_data_url"),
             genres = splitTags(rs.getString("preferred_genres")),
-            moods = splitTags(rs.getString("mood_tags")),
             discoverable = rs.getBoolean("discoverable"),
             shareMusic = rs.getBoolean("share_music"),
             profileRevision = rs.getLong("profile_revision"),
@@ -334,7 +323,6 @@ class ProfileQueryService(
         val evidence = tasteEvidence(userId)
         return TasteFingerprint(
             genres = evidence.genres.toTasteMetrics(limit),
-            moods = evidence.moods.toTasteMetrics(limit),
         )
     }
 
@@ -348,7 +336,7 @@ class ProfileQueryService(
 
     private fun signatureTracks(userId: UUID): List<ProfileTrack> = jdbc.query(
         """
-        select rank,provider,provider_track_id,title,artist_name,album_name,artwork_url,genre_tags,mood_tags
+        select rank,provider,provider_track_id,title,artist_name,album_name,artwork_url,genre_tags
         from profile_signature_tracks where user_id=? order by rank
         """.trimIndent(),
         { rs, _ ->
@@ -361,7 +349,6 @@ class ProfileQueryService(
                 album = rs.getString("album_name"),
                 artworkUrl = rs.getString("artwork_url"),
                 genreTags = splitTags(rs.getString("genre_tags")),
-                moodTags = splitTags(rs.getString("mood_tags")),
             )
         },
         userId,
@@ -414,15 +401,12 @@ class ProfileQueryService(
         val tracks = signatureTracks(userId)
         val artists = favoriteArtists(userId)
         val genres = linkedMapOf<String, Double>()
-        val moods = linkedMapOf<String, Double>()
         val artistWeights = linkedMapOf<String, Double>()
         val trackWeights = linkedMapOf<String, Double>()
 
         profile.genres.forEach { genres.addWeight(it, 2.0) }
-        profile.moods.forEach { moods.addWeight(it, 2.0) }
         tracks.forEach { track ->
             track.genreTags.forEach { genres.addWeight(it, 1.5) }
-            track.moodTags.forEach { moods.addWeight(it, 1.5) }
             artistWeights.addWeight(track.artist, 0.75)
             trackWeights.addWeight("${track.title} · ${track.artist}", 1.0)
         }
@@ -430,7 +414,7 @@ class ProfileQueryService(
             artist.genreTags.forEach { genres.addWeight(it, 1.0) }
             artistWeights.addWeight(artist.name, 1.5)
         }
-        return TasteEvidence(genres, moods, artistWeights, trackWeights)
+        return TasteEvidence(genres, artistWeights, trackWeights)
     }
 
     private fun MutableMap<String, Double>.addWeight(rawLabel: String, weight: Double) {
@@ -507,20 +491,19 @@ class ProfileQueryService(
 
     private data class TasteEvidence(
         val genres: Map<String, Double>,
-        val moods: Map<String, Double>,
         val artists: Map<String, Double>,
         val tracks: Map<String, Double>,
     ) {
         val evidenceCount: Int
-            get() = genres.size + moods.size + artists.size + tracks.size
+            get() = genres.size + artists.size + tracks.size
     }
 
     companion object {
         private val PROFILE_HANDLE_REGEX = Regex("[a-z0-9_]{3,32}")
         private val PROFILE_SELECT = """
             select u.id,u.profile_handle,u.display_name,u.profile_color,u.bio,u.avatar_seed,u.avatar_data_url,
-              u.preferred_genres,u.mood_tags,u.melody_alias_id,
-              u.melody_alias_notes::text melody_alias_notes,u.melody_alias_tone,u.melody_alias_mood,
+              u.preferred_genres,u.melody_alias_id,
+              u.melody_alias_notes::text melody_alias_notes,u.melody_alias_tone,
               u.melody_alias_tempo,u.profile_revision,coalesce(p.discoverable,true) discoverable,
               coalesce(p.share_music,true) share_music,
               coalesce(p.current_music_visibility,'EVERYONE') current_music_visibility,
@@ -550,10 +533,10 @@ class ProfileController(
         val color = request.profileColor.takeIf { it.matches(Regex("#[0-9A-Fa-f]{6}")) } ?: "#6750A4"
         require(name.length >= 2) { "Display name must contain at least 2 characters" }
         jdbc.update(
-            """update users set display_name=?,profile_color=?,bio=?,preferred_genres=?,mood_tags=?,
+            """update users set display_name=?,profile_color=?,bio=?,preferred_genres=?,
                profile_revision=profile_revision+1,updated_at=now() where id=?""",
             name, color, request.bio.trim().take(160),
-            request.genres.cleanTags().joinToString(","), request.moods.cleanTags().joinToString(","), userId,
+            request.genres.cleanTags().joinToString(","), userId,
         )
         tasteMatches.markDirty(userId, "PROFILE_UPDATED")
         return profiles.me(userId)
@@ -640,7 +623,6 @@ class ProfileController(
                 album = track.album.cleanOptional(160),
                 artworkUrl = track.artworkUrl.cleanHttpsUrl(),
                 genreTags = track.genreTags.cleanTags(),
-                moodTags = track.moodTags.cleanTags(),
             )
         }
         val artists = request.favoriteArtists.mapIndexed { index, artist ->
@@ -659,11 +641,11 @@ class ProfileController(
             jdbc.update(
                 """
                 insert into profile_signature_tracks(
-                  user_id,rank,provider,provider_track_id,title,artist_name,album_name,artwork_url,genre_tags,mood_tags
-                ) values (?,?,?,?,?,?,?,?,?,?)
+                  user_id,rank,provider,provider_track_id,title,artist_name,album_name,artwork_url,genre_tags
+                ) values (?,?,?,?,?,?,?,?,?)
                 """.trimIndent(),
                 userId, track.rank, track.provider, track.providerTrackId, track.title, track.artist,
-                track.album, track.artworkUrl, track.genreTags.joinToString(","), track.moodTags.joinToString(","),
+                track.album, track.artworkUrl, track.genreTags.joinToString(","),
             )
         }
         jdbc.update("delete from profile_favorite_artists where user_id=?", userId)

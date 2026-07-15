@@ -623,7 +623,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
 
     fun completeOnboarding(
         genres: List<String>,
-        moods: List<String>,
         favoriteArtists: List<ProfileArtist>,
         signatureTracks: List<ProfileTrack>,
     ) {
@@ -632,13 +631,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         if (current != null) _loginState.value = current.copy(onboardingComplete = true)
         val profile = repository.state.value.profile
         repository.updateProfile(
-            profile.accountAlias, profile.colorHex, profile.bio, genres, moods,
+            profile.accountAlias, profile.colorHex, profile.bio, genres,
         )
         repository.updateProfileCuration(signatureTracks, favoriteArtists)
         clearMusicSearch()
         val access = accessToken ?: return
         viewModelScope.launch {
-            authRepository.completeOnboarding(access, genres, moods)
+            authRepository.completeOnboarding(access, genres)
         }
     }
     fun selectTab(tab: MainTab) = repository.selectTab(tab)
@@ -674,8 +673,8 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     fun setMusicVisibility(label: String) = repository.setMusicVisibility(label)
     fun updatePresenceSettings(radiusMeters: Int, discoverabilityScope: String, musicVisibility: String) =
         repository.updatePresenceSettings(radiusMeters, discoverabilityScope, musicVisibility)
-    fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>, moods: List<String>) =
-        repository.updateProfile(displayName, colorHex, bio, genres, moods)
+    fun updateProfile(displayName: String, colorHex: Long, bio: String, genres: List<String>) =
+        repository.updateProfile(displayName, colorHex, bio, genres)
     fun customizeAvatar(customization: AvatarCustomization) = repository.customizeAvatar(customization)
     fun updateProfileCuration(signatureTracks: List<ProfileTrack>, favoriteArtists: List<ProfileArtist>) =
         repository.updateProfileCuration(signatureTracks, favoriteArtists)

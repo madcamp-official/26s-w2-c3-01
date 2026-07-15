@@ -46,7 +46,7 @@ class MusicOnboardingTest {
                     onRetryGenreCatalog = {},
                     onSearchMusic = {},
                     onClearMusicSearch = {},
-                    onComplete = { _, _, artists, tracks ->
+                    onComplete = { _, artists, tracks ->
                         completedArtists = artists.map { it.name }
                         completedTracks = tracks.map { it.title }
                     },

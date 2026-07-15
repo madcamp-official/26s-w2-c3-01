@@ -106,7 +106,6 @@ data class Track(
     val platform: String = "MANUAL",
     val externalUrl: String? = null,
     val genreTags: List<String> = emptyList(),
-    val moodTags: List<String> = emptyList()
 )
 
 data class NearbyListener(
@@ -199,11 +198,9 @@ data class ProfileSettings(
     val avatarSeed: String,
     val avatarUrl: String?,
     val genres: List<String>,
-    val moods: List<String>,
     val melodyNotes: List<String>,
     val melodyAliasId: String,
     val melodyAliasTone: String,
-    val melodyAliasMood: String,
     val melodyAliasTempo: Int,
     val musicVisibilityLabel: String,
     val discoverable: Boolean,
@@ -226,7 +223,6 @@ data class ProfileTrack(
     val album: String? = null,
     val artworkUrl: String? = null,
     val genreTags: List<String> = emptyList(),
-    val moodTags: List<String> = emptyList(),
 )
 
 data class ProfileArtist(
@@ -306,7 +302,6 @@ data class TasteMetric(
 
 data class TasteFingerprint(
     val genres: List<TasteMetric> = emptyList(),
-    val moods: List<TasteMetric> = emptyList(),
 )
 
 data class ProfileStats(
@@ -318,7 +313,6 @@ data class ProfileMelodyAlias(
     val id: String,
     val notes: List<String>,
     val tone: String,
-    val mood: String,
     val tempo: Int,
 )
 
@@ -337,7 +331,6 @@ data class PublicProfile(
     val avatarSeed: String,
     val avatarUrl: String?,
     val genres: List<String>,
-    val moods: List<String>,
     val melodyAlias: ProfileMelodyAlias?,
     val stats: ProfileStats,
     val tasteFingerprint: TasteFingerprint,
@@ -356,7 +349,6 @@ data class PublicProfile(
 data class MelodyAliasCandidate(
     val id: String,
     val name: String,
-    val mood: String,
     val tone: String,
     val tempo: Int,
     val energy: String,

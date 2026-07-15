@@ -57,7 +57,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -87,7 +87,7 @@ class MyProfileScreenTest {
     }
 
     @Test
-    fun genreAndMoodExpandInPlaceWithoutRedundantHeadings() {
+    fun genreExpandsInPlaceWithoutRedundantHeadings() {
         composeRule.setContent {
             MelodyBubbleTheme {
                 MyScreen(
@@ -102,7 +102,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -127,13 +127,6 @@ class MyProfileScreenTest {
         composeRule.onAllNodesWithText("Melon 기준").assertCountEquals(0)
         composeRule.onNodeWithText("K-Pop").assertIsDisplayed()
 
-        val mood = composeRule.onNodeWithText("무드").performScrollTo()
-        val moodTopBefore = mood.fetchSemanticsNode().boundsInRoot.top
-        mood.performClick()
-        composeRule.waitForIdle()
-        val moodTopAfter = composeRule.onNodeWithText("무드").fetchSemanticsNode().boundsInRoot.top
-        assertEquals(moodTopBefore, moodTopAfter, 1f)
-        composeRule.onNodeWithText("Calm").assertIsDisplayed()
     }
 
     @Test
@@ -152,7 +145,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -174,7 +167,6 @@ class MyProfileScreenTest {
 
         composeRule.onNodeWithText("테스트 리스너").performClick()
         composeRule.onNodeWithTag("profile_name_input").assertTextContains("테스트 리스너")
-        composeRule.onNodeWithText("무드").assertIsDisplayed()
     }
 
     @Test
@@ -193,7 +185,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -232,7 +224,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -277,7 +269,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -329,7 +321,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Success("검색", results),
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -372,7 +364,7 @@ class MyProfileScreenTest {
                     onOpenFollowing = {},
                     onOpenFollowers = {},
                     onOpenSettings = {},
-                    onProfileUpdate = { _, _, _, _, _ -> },
+                    onProfileUpdate = { _, _, _, _ -> },
                     onProfileCurationUpdate = { _, _ -> },
                     musicSearchState = MusicSearchUiState.Idle,
                     genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
@@ -402,11 +394,9 @@ class MyProfileScreenTest {
         avatarSeed = "test-listener",
         avatarUrl = null,
         genres = emptyList(),
-        moods = emptyList(),
         melodyNotes = emptyList(),
         melodyAliasId = "",
         melodyAliasTone = "",
-        melodyAliasMood = "",
         melodyAliasTempo = 0,
         musicVisibilityLabel = "제목과 아티스트 공개",
         discoverable = true,

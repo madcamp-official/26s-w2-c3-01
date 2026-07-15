@@ -30,22 +30,18 @@ def main() -> None:
     features: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     with psycopg.connect(args.database_url) as connection:
         with connection.cursor() as cursor:
-            cursor.execute("select id,preferred_genres,mood_tags from users")
-            for user_id, genres, moods in cursor:
+            cursor.execute("select id,preferred_genres from users")
+            for user_id, genres in cursor:
                 for genre in split_tags(genres):
                     features[str(user_id)][f"genre:{genre.lower()}"] += 2.0
-                for mood in split_tags(moods):
-                    features[str(user_id)][f"mood:{mood.lower()}"] += 2.0
 
-            cursor.execute("select user_id,title,artist_name,genre_tags,mood_tags from profile_signature_tracks")
-            for user_id, title, artist, genres, moods in cursor:
+            cursor.execute("select user_id,title,artist_name,genre_tags from profile_signature_tracks")
+            for user_id, title, artist, genres in cursor:
                 bucket = features[str(user_id)]
                 bucket[f"artist:{artist.strip().lower()}"] += 0.75
                 bucket[f"track:{title.strip().lower()}|{artist.strip().lower()}"] += 1.0
                 for genre in split_tags(genres):
                     bucket[f"genre:{genre.lower()}"] += 1.5
-                for mood in split_tags(moods):
-                    bucket[f"mood:{mood.lower()}"] += 1.5
 
             cursor.execute("select user_id,artist_name,genre_tags from profile_favorite_artists")
             for user_id, artist, genres in cursor:

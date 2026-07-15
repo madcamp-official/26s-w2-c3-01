@@ -2,6 +2,7 @@ package com.example.myapplication.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -10,6 +11,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -108,6 +110,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.inset
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.onFocusChanged
@@ -164,13 +170,12 @@ fun OnboardingScreen(
     onSearchMusic: (String) -> Unit,
     onClearMusicSearch: () -> Unit,
     onPreviewMusic: (MusicSearchResult) -> Unit = {},
-    onComplete: (List<String>, List<String>, List<ProfileArtist>, List<ProfileTrack>) -> Unit,
+    onComplete: (List<String>, List<ProfileArtist>, List<ProfileTrack>) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var page by remember { mutableIntStateOf(0) }
     var acceptedTerms by rememberSaveable { mutableStateOf(false) }
     var genres by rememberSaveable { mutableStateOf(emptySet<String>()) }
-    var moods by rememberSaveable { mutableStateOf(setOf("Calm", "Night")) }
     var favoriteArtists by remember { mutableStateOf<List<ProfileArtist>>(emptyList()) }
     var signatureTracks by remember { mutableStateOf<List<ProfileTrack>>(emptyList()) }
     var selectionDialogSection by rememberSaveable { mutableStateOf<String?>(null) }
@@ -183,7 +188,7 @@ fun OnboardingScreen(
     )
     val descriptions = listOf(
         "서비스 이용약관과 개인정보 처리방침에 동의해야 Sync를 시작할 수 있어요.",
-        "좋아하는 장르와 분위기를 선택해 주세요. 추천과 주변 취향 유사도에 사용됩니다.",
+        "좋아하는 장르를 선택해 주세요. 추천과 주변 취향 유사도에 사용됩니다.",
         "이름을 검색해 프로필에 보여줄 아티스트를 최대 3명까지 선택해 주세요.",
         "검색 결과에서 내 음악 취향을 대표하는 곡을 최대 3곡까지 골라 주세요.",
         "주변 공유는 자동으로 켜지지 않아요. 홈에서 직접 시작하고 언제든 알림에서 중지할 수 있어요."
@@ -273,19 +278,6 @@ fun OnboardingScreen(
                     onChange = { genres = it.toSet() },
                     onRetry = onRetryGenreCatalog,
                 )
-                Text("선호 분위기", style = MaterialTheme.typography.titleMedium)
-                listOf(
-                    listOf("Calm", "Night", "Dreamy"),
-                    listOf("Bright", "Energetic", "Warm"),
-                ).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { label ->
-                            FilterChip(selected = label in moods, onClick = {
-                                moods = if (label in moods) moods - label else moods + label
-                            }, label = { Text(label) })
-                        }
-                    }
-                }
             }
             if (page == 2) {
                 MusicCatalogSearch(
@@ -383,7 +375,7 @@ fun OnboardingScreen(
                     onClearMusicSearch()
                     page += 1
                 } else {
-                    onComplete(genres.toList(), moods.toList(), favoriteArtists, signatureTracks)
+                    onComplete(genres.toList(), favoriteArtists, signatureTracks)
                 }
             },
             modifier = Modifier
@@ -392,7 +384,7 @@ fun OnboardingScreen(
             shape = RoundedCornerShape(18.dp),
             enabled = when (page) {
                 0 -> acceptedTerms
-                1 -> genres.isNotEmpty() && moods.isNotEmpty()
+                1 -> genres.isNotEmpty()
                 2 -> favoriteArtists.isNotEmpty()
                 3 -> signatureTracks.isNotEmpty()
                 else -> true
@@ -1374,7 +1366,7 @@ fun MyScreen(
     onOpenFollowing: () -> Unit,
     onOpenFollowers: () -> Unit,
     onOpenSettings: () -> Unit,
-    onProfileUpdate: (String, Long, String, List<String>, List<String>) -> Unit,
+    onProfileUpdate: (String, Long, String, List<String>) -> Unit,
     onCustomizeAvatar: (AvatarCustomization) -> Unit,
     onProfileCurationUpdate: (List<ProfileTrack>, List<ProfileArtist>) -> Unit,
     musicSearchState: MusicSearchUiState,
@@ -1397,7 +1389,6 @@ fun MyScreen(
     var name by rememberSaveable(profile.accountAlias) { mutableStateOf(profile.accountAlias) }
     var bio by rememberSaveable(profile.bio) { mutableStateOf(profile.bio) }
     var genres by rememberSaveable(profile.genres) { mutableStateOf(profile.genres) }
-    var moods by rememberSaveable(profile.moods) { mutableStateOf(profile.moods) }
     var signatureTracks by remember(profile.signatureTracks) { mutableStateOf(profile.signatureTracks) }
     var favoriteArtists by remember(profile.favoriteArtists) { mutableStateOf(profile.favoriteArtists) }
     val avatarEditorScope = rememberCoroutineScope()
@@ -1413,13 +1404,11 @@ fun MyScreen(
     }
     var avatarCustomizationDirty by remember(profile.avatarUrl) { mutableStateOf(false) }
     var genreExpanded by rememberSaveable { mutableStateOf(false) }
-    var moodExpanded by rememberSaveable { mutableStateOf(false) }
 
     fun resetEditorDrafts() {
         name = profile.accountAlias
         bio = profile.bio
         genres = profile.genres
-        moods = profile.moods
         signatureTracks = profile.signatureTracks
         favoriteArtists = profile.favoriteArtists
         avatarCustomization = AvatarProfileResolver.customizationFrom(profile.avatarUrl)
@@ -1430,7 +1419,6 @@ fun MyScreen(
         avatarEditorLoading = false
         avatarEditorLoadFailed = false
         genreExpanded = false
-        moodExpanded = false
     }
 
     fun openAvatarEditor() {
@@ -1550,25 +1538,12 @@ fun MyScreen(
                     onRetry = onRetryGenreCatalog,
                 )
             }
-            Spacer(Modifier.height(10.dp))
-            ExpandableProfileTagSection(
-                title = "무드",
-                selectedCount = moods.size,
-                expanded = moodExpanded,
-                onToggle = { moodExpanded = !moodExpanded },
-            ) {
-                ProfileTagEditor(
-                    options = listOf("Calm", "Night", "Dreamy", "Bright", "Energetic", "Warm"),
-                    selected = moods,
-                    onChange = { moods = it },
-                )
-            }
             Spacer(Modifier.height(26.dp))
             Button(
                 onClick = {
                     awaitingProfileSave = true
                     profileSaveStarted = false
-                    onProfileUpdate(name, profile.colorHex, bio, genres, moods)
+                    onProfileUpdate(name, profile.colorHex, bio, genres)
                     if (avatarCustomizationDirty) onCustomizeAvatar(avatarCustomization)
                 },
                 enabled = name.trim().length >= 2 && !awaitingProfileSave,
@@ -1740,7 +1715,7 @@ fun MyScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                            (profile.genres + profile.moods).distinct().take(3).forEach {
+                            profile.genres.distinct().take(3).forEach {
                                 LightProfileTag(it.uppercase(), accent, outline)
                             }
                         }
@@ -1850,7 +1825,7 @@ fun MyScreen(
                 }
             }
         }
-        val discoveredTaste = (profile.tasteFingerprint.genres + profile.tasteFingerprint.moods).take(4)
+        val discoveredTaste = profile.tasteFingerprint.genres.take(4)
         val measuredTaste = discoveredTaste.filter { it.ratio > 0.0 }
         val discoveredLabels = discoveredTaste.map { it.label }.distinct().take(4)
         item {
@@ -1860,7 +1835,7 @@ fun MyScreen(
                 Spacer(Modifier.height(8.dp))
                 when {
                     measuredTaste.isNotEmpty() -> measuredTaste.forEach { metric ->
-                        LightTasteMetric(metric.label, (metric.ratio * 100).roundToInt(), ink, muted, accent)
+                        ProfileTasteMetric(metric.label, (metric.ratio * 100).roundToInt(), ink, muted, accent)
                     }
                     discoveredLabels.isNotEmpty() -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         discoveredLabels.take(3).forEach { label -> LightProfileTag(label, accent, outline) }
@@ -2116,6 +2091,16 @@ fun PublicProfileScreen(
                         }
                     }
                 }
+                profile.commonTaste?.score?.let { score ->
+                    item {
+                        NormalizedTasteSimilarityPanel(
+                            score = score,
+                            outline = outline,
+                            ink = ink,
+                            muted = muted,
+                        )
+                    }
+                }
                 if (profile.signatureTracks.isNotEmpty()) {
                     item {
                         ProfileLightPanel(outline = outline, ink = ink) {
@@ -2156,45 +2141,6 @@ fun PublicProfileScreen(
                                         ArtistArtwork(artist, lavender, 52.dp)
                                         Spacer(Modifier.height(5.dp))
                                         Text(artist.name, color = ink, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                val fallbackTaste = (profile.tasteFingerprint.genres + profile.tasteFingerprint.moods).take(4)
-                if (profile.commonTaste != null || fallbackTaste.isNotEmpty()) item {
-                    ProfileLightPanel(outline = outline, ink = ink) {
-                        Text(if (profile.commonTaste != null) "공통 취향" else "음악 취향", color = ink, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(10.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                val metrics = profile.commonTaste?.metrics.orEmpty()
-                                if (metrics.isNotEmpty()) {
-                                    metrics.forEach { metric ->
-                                        LightTasteMetric(metric.label, metric.score, ink, muted, lavender)
-                                    }
-                                } else {
-                                    fallbackTaste.forEach { metric ->
-                                        LightTasteMetric(metric.label, (metric.ratio * 100).roundToInt(), ink, muted, lavender)
-                                    }
-                                }
-                            }
-                            profile.commonTaste?.let { taste ->
-                                Spacer(Modifier.width(14.dp))
-                                Surface(
-                                    modifier = Modifier.size(82.dp),
-                                    shape = CircleShape,
-                                    color = MelodyBubbleColors.SurfaceSelected,
-                                    contentColor = lavender,
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                        Text("취향 겹침", style = MaterialTheme.typography.labelSmall)
-                                        Text(
-                                            taste.score?.let { "$it%" } ?: "분석 중",
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontWeight = FontWeight.Bold,
-                                        )
                                     }
                                 }
                             }
@@ -2258,7 +2204,7 @@ private fun PublicProfileHero(
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        val tasteTags = (profile.genres + profile.moods).distinct().take(4)
+        val tasteTags = profile.genres.distinct().take(4)
         if (tasteTags.isNotEmpty()) {
             Spacer(Modifier.height(9.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -2494,7 +2440,7 @@ private fun ArtistArtwork(
 }
 
 @Composable
-private fun LightTasteMetric(label: String, score: Int, ink: Color, muted: Color, accent: Color) {
+private fun ProfileTasteMetric(label: String, score: Int, ink: Color, muted: Color, accent: Color) {
     val normalizedScore = score.coerceIn(0, 100)
     val progress = normalizedScore / 100f
     val gradientEnd = accent.copy(alpha = similarityGradientEndAlpha(normalizedScore))
@@ -2508,21 +2454,13 @@ private fun LightTasteMetric(label: String, score: Int, ink: Color, muted: Color
                 .height(6.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .background(MelodyBubbleColors.SurfaceSelected)
-                .testTag("taste_similarity_bar_$label")
-                .semantics {
-                    progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f, 100)
-                },
         ) {
             if (progress > 0f) {
                 Box(
                     Modifier
                         .fillMaxHeight()
                         .fillMaxWidth(progress)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(accent.copy(alpha = 0.12f), gradientEnd),
-                            ),
-                        ),
+                        .background(Brush.horizontalGradient(listOf(accent.copy(alpha = 0.12f), gradientEnd))),
                 )
             }
         }
@@ -2531,6 +2469,89 @@ private fun LightTasteMetric(label: String, score: Int, ink: Color, muted: Color
 
 internal fun similarityGradientEndAlpha(score: Int): Float =
     0.12f + (score.coerceIn(0, 100) / 100f) * 0.83f
+
+@Composable
+private fun NormalizedTasteSimilarityPanel(
+    score: Int,
+    outline: Color,
+    ink: Color,
+    muted: Color,
+) {
+    val normalizedScore = score.coerceIn(0, 100)
+    val animatedProgress by animateFloatAsState(
+        targetValue = normalizedScore / 100f,
+        animationSpec = tween(durationMillis = 900, easing = FastOutSlowInEasing),
+        label = "taste-similarity-progress",
+    )
+    val rainbow = listOf(
+        Color(0xFFFF3B30),
+        Color(0xFFFF9500),
+        Color(0xFFFFCC00),
+        Color(0xFF34C759),
+        Color(0xFF00C7BE),
+        Color(0xFF007AFF),
+        Color(0xFFAF52DE),
+    )
+
+    ProfileLightPanel(outline = outline, ink = ink) {
+        Text("취향 유사도", color = ink, fontWeight = FontWeight.Bold)
+        Text(
+            "장르 · 아티스트 · 대표곡 · 청취 기록을 하나의 점수로 정규화했어요",
+            color = muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(18.dp))
+        Box(
+            modifier = Modifier
+                .size(142.dp)
+                .align(Alignment.CenterHorizontally)
+                .testTag("normalized_taste_similarity_ring")
+                .semantics {
+                    progressBarRangeInfo = ProgressBarRangeInfo(
+                        current = normalizedScore.toFloat(),
+                        range = 0f..100f,
+                        steps = 100,
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val strokeWidth = 13.dp.toPx()
+                val style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                inset(strokeWidth / 2f) {
+                    drawArc(
+                        color = MelodyBubbleColors.SurfaceSelected,
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        style = style,
+                    )
+                    if (animatedProgress > 0f) {
+                        rotate(degrees = -90f, pivot = center) {
+                            drawArc(
+                                brush = Brush.sweepGradient(rainbow, center = center),
+                                startAngle = 0f,
+                                sweepAngle = 359.99f * animatedProgress,
+                                useCenter = false,
+                                style = style,
+                            )
+                        }
+                    }
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "$normalizedScore%",
+                    color = ink,
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Black,
+                )
+                Text("나와 겹치는 취향", color = muted, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+}
 
 @Composable
 private fun ConnectionCount(

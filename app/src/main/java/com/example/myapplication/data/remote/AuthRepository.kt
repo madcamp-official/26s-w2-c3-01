@@ -34,11 +34,10 @@ class AuthRepository(
     suspend fun completeOnboarding(
         accessToken: String,
         genres: List<String>,
-        moods: List<String>,
     ): Result<Unit> = runCatching {
         authApi.completeOnboarding(
             "Bearer $accessToken",
-            OnboardingRequest(true, "2026-07-11", genres, moods),
+            OnboardingRequest(true, "2026-07-11", genres),
         )
     }
 

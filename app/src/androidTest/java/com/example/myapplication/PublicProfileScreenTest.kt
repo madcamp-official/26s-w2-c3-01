@@ -11,7 +11,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
-import com.example.myapplication.core.model.CommonTasteMetric
 import com.example.myapplication.core.model.CommonTasteSummary
 import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.ProfileNowPlaying
@@ -46,7 +45,6 @@ class PublicProfileScreenTest {
                         avatarSeed = "night-listener",
                         avatarUrl = null,
                         genres = listOf("R&B", "Indie"),
-                        moods = listOf("Night"),
                         melodyAlias = null,
                         stats = ProfileStats(followerCount = 3),
                         tasteFingerprint = TasteFingerprint(
@@ -87,7 +85,6 @@ class PublicProfileScreenTest {
                         avatarSeed = "mintwave",
                         avatarUrl = null,
                         genres = listOf("Indie"),
-                        moods = listOf("Calm", "Night"),
                         melodyAlias = null,
                         stats = ProfileStats(followingCount = 12, followerCount = 34),
                         tasteFingerprint = TasteFingerprint(),
@@ -114,7 +111,7 @@ class PublicProfileScreenTest {
                         ),
                         commonTaste = CommonTasteSummary(
                             score = 87,
-                            metrics = listOf(CommonTasteMetric("잔잔한 멜로디", "MOOD", 89, 3)),
+                            metrics = emptyList(),
                             algorithmVersion = "COMMON_TASTE_V1",
                             sampleSize = 8,
                             calculatedAt = "2026-07-13T00:00:00Z",
@@ -134,14 +131,14 @@ class PublicProfileScreenTest {
         composeRule.onNodeWithText("메시지 보내기").performClick()
         composeRule.runOnIdle { assertTrue(messageRequested) }
         composeRule.onNodeWithText("지금 듣는 음악").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("취향 유사도").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("normalized_taste_similarity_ring").assertRangeInfoEquals(
+            ProgressBarRangeInfo(87f, 0f..100f, 100),
+        )
         composeRule.onNodeWithText("요즘 나를 설명하는 3곡").performScrollTo().assertIsDisplayed()
         composeRule.onAllNodesWithText("1").assertCountEquals(0)
         composeRule.onNodeWithTag("public_profile_list").performScrollToIndex(4)
         composeRule.onNodeWithText("최애 아티스트 3명").assertIsDisplayed()
-        composeRule.onNodeWithTag("public_profile_list").performScrollToIndex(5)
-        composeRule.onNodeWithText("87%").assertIsDisplayed()
-        composeRule.onNodeWithTag("taste_similarity_bar_잔잔한 멜로디").assertRangeInfoEquals(
-            ProgressBarRangeInfo(0.89f, 0f..1f, 100),
-        )
+        composeRule.onNodeWithText("87%").performScrollTo().assertIsDisplayed()
     }
 }
