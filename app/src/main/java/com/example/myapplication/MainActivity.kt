@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        viewModel.stopMusicPreview()
         if (receiverRegistered) {
             unregisterReceiver(sharingStateReceiver)
             receiverRegistered = false

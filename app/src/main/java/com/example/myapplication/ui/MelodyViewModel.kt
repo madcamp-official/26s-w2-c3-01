@@ -1200,7 +1200,6 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         selectedSubLoungeId = snapshot.id,
                         subLoungeSnapshot = snapshot,
                     )
-                    playLatestLoungeRecommendation(snapshot)
                 }
         }
     }
