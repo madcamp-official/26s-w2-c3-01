@@ -35,6 +35,7 @@ data class LocationLoungeChatRoomDto(
     val updatedAt: String,
     val status: String,
     val memberCount: Int = 0,
+    val canDelete: Boolean = false,
 )
 
 data class CreateLocationLoungeChatRoomRequestDto(val title: String)
@@ -253,7 +254,7 @@ class LocationLoungeRepository(
         style = null,
         memberCount = memberCount,
         joined = joined,
-        canDelete = false,
+        canDelete = canDelete,
         listeningStatuses = emptyList(),
         cards = recommendationCards,
         poll = LoungePollStateDto(emptyList(), null),

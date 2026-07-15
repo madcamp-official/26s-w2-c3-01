@@ -48,6 +48,7 @@ data class LoungeChatRoomSummary(
     val updatedAt: Instant,
     val status: String,
     val memberCount: Int,
+    val canDelete: Boolean,
 )
 data class LoungeChatMessage(
     val id: UUID,
@@ -525,7 +526,7 @@ class LocationLoungeService(
     private fun chatRoomsUnchecked(userId: UUID, loungeId: UUID) = jdbc.query(
         """
         SELECT room.id,room.lounge_id,room.owner_id,room.title,room.created_at,room.updated_at,room.status,
-               coalesce(member.active,false) joined,
+               coalesce(member.active,false) joined,room.owner_id=? can_delete,
                (SELECT count(*) FROM location_lounge_chat_members active_member
                 WHERE active_member.chat_room_id=room.id AND active_member.active=true) member_count
         FROM location_lounge_chat_rooms room
@@ -537,9 +538,9 @@ class LocationLoungeService(
                 UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("lounge_id")),
                 UUID.fromString(rs.getString("owner_id")), rs.getString("title"), rs.getBoolean("joined"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("status"), rs.getInt("member_count"),
+                rs.getString("status"), rs.getInt("member_count"), rs.getBoolean("can_delete"),
             )
-        }, userId, loungeId,
+        }, userId, userId, loungeId,
     )
 
     private fun activeDisksForUpdate(): List<LoungeDisk> = jdbc.query(

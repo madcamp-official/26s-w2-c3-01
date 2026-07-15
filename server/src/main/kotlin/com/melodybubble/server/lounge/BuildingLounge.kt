@@ -495,11 +495,11 @@ class BuildingLoungeService(
         requireActiveBuildingSession(userId, loungeId)
         jdbc.query("SELECT pg_advisory_xact_lock(hashtext(?))", { _, _ -> Unit }, "sub-lounges:$loungeId")
         if (activeSubLoungeCount(loungeId) >= MAX_SUB_LOUNGES) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "하위 라운지는 최대 5개까지 만들 수 있습니다")
+            throw ResponseStatusException(HttpStatus.CONFLICT, "사운드룸은 최대 5개까지 만들 수 있습니다")
         }
         val title = request.title.trim().take(80)
         if (title.length < 2) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "하위 라운지 이름은 2자 이상이어야 합니다.")
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "사운드룸 이름은 2자 이상이어야 합니다.")
         }
         val style = request.style?.trim()?.take(80)?.ifBlank { null }
         val duplicate = jdbc.queryForObject(
@@ -509,7 +509,7 @@ class BuildingLoungeService(
             title,
         ) == true
         if (duplicate) {
-            throw ResponseStatusException(HttpStatus.CONFLICT, "같은 이름의 하위 라운지가 이미 있어요.")
+            throw ResponseStatusException(HttpStatus.CONFLICT, "같은 이름의 사운드룸이 이미 있어요.")
         }
         val id = jdbc.query(
             "INSERT INTO sub_lounges(building_lounge_id, creator_user_id, title, style) VALUES (?, ?, ?, ?) RETURNING id",

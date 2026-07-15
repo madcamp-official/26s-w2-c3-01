@@ -348,10 +348,10 @@ class SubLoungeRealtimeService(
             "select building_lounge_id,creator_user_id from sub_lounges where id=? and active=true",
             { rs, _ -> UUID.fromString(rs.getString("building_lounge_id")) to UUID.fromString(rs.getString("creator_user_id")) },
             subLoungeId,
-        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "하위 라운지를 찾을 수 없습니다.")
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "사운드룸을 찾을 수 없습니다.")
         val (buildingLoungeId, creatorUserId) = room
         if (creatorUserId != userId) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "하위 라운지 생성자만 삭제할 수 있습니다.")
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "사운드룸 생성자만 삭제할 수 있습니다.")
         }
         rateLimiter.enforce(userId, "SUB_LOUNGE_DELETE", 10, Duration.ofMinutes(1))
         jdbc.update("update sub_lounges set active=false where id=? and creator_user_id=?", subLoungeId, userId)
@@ -450,7 +450,7 @@ class SubLoungeRealtimeService(
             """.trimIndent(),
             { rs, _ -> arrayOf(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5)) },
             subLoungeId,
-        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "하위 라운지를 찾을 수 없습니다.")
+        ).firstOrNull() ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "사운드룸을 찾을 수 없습니다.")
         return SubLoungeSnapshot(
             id = UUID.fromString(room[0]),
             buildingLoungeId = UUID.fromString(room[1]),
@@ -544,7 +544,7 @@ class SubLoungeRealtimeService(
 
     private fun requireMember(userId: UUID, subLoungeId: UUID) {
         if (!hasActiveMembership(jdbc, userId, subLoungeId)) {
-            throw ResponseStatusException(HttpStatus.FORBIDDEN, "하위 라운지 참가가 필요합니다.")
+            throw ResponseStatusException(HttpStatus.FORBIDDEN, "사운드룸 참가가 필요합니다.")
         }
     }
 

@@ -337,7 +337,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                             ).getOrDefault(emptyList())
                             _buildingLoungeState.value = _buildingLoungeState.value.copy(
                                 subLounges = rooms,
-                                message = "하위 라운지가 삭제됐어요.",
+                                message = "사운드룸이 삭제됐어요.",
                             )
                         }
                         return@collect
@@ -911,7 +911,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                     openSubLounge(created.id)
                 }
                 .onFailure {
-                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "하위 라운지를 만들지 못했어요.")
+                    _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "사운드룸을 만들지 못했어요.")
                 }
         }
     }
@@ -935,7 +935,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 .onFailure {
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         detailLoading = false,
-                        message = "하위 라운지에 입장하지 못했어요.",
+                        message = "사운드룸에 입장하지 못했어요.",
                     )
                 }
         }
@@ -948,7 +948,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             locationLoungeRepository.leaveChatRoom(token, subLoungeId)
             clearSelectedSubLounge()
-            _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "하위 라운지에서 나왔어요.")
+            _buildingLoungeState.value = _buildingLoungeState.value.copy(message = "사운드룸에서 나왔어요.")
         }
     }
 
@@ -976,12 +976,12 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         .getOrDefault(emptyList())
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         subLounges = rooms,
-                        message = "하위 라운지를 삭제했어요.",
+                        message = "사운드룸을 삭제했어요.",
                     )
                 }
                 .onFailure {
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
-                        message = "하위 라운지를 삭제하지 못했어요.",
+                        message = "사운드룸을 삭제하지 못했어요.",
                     )
                 }
         }

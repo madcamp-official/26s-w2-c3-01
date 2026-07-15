@@ -498,7 +498,7 @@ private fun LoungeBottomSheetPanel(
                 Text(
                     state.message ?: when {
                         !hasLocationPermission -> "주변 건물을 찾으려면 위치 권한이 필요해요."
-                        entered != null -> "사용자가 만든 하위 라운지 ${state.subLounges.size}개"
+                        entered != null -> "사용자가 만든 사운드룸 ${state.subLounges.size}개"
                         insideLounges.isNotEmpty() -> "눌러서 입장할 건물을 선택하세요."
                         recommended.isNotEmpty() -> "가까운 위치 라운지를 확인할 수 있어요."
                         state.loadFailed -> "서버 연결을 확인하고 다시 시도해 주세요."
@@ -705,7 +705,7 @@ private fun SubLoungeList(
 ) {
     if (subLounges.isEmpty()) {
         EmptyLoungePanel(
-            "아직 하위 라운지가 없어요",
+            "아직 사운드룸이 없어요",
             "위의 ‘사운드룸 열기’를 눌러 첫 번째 방을 만들어 보세요.",
         )
         return
@@ -790,11 +790,11 @@ private fun SubLoungeDetailScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "하위 라운지 뒤로가기")
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "사운드룸 뒤로가기")
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        snapshot?.title ?: "하위 라운지 연결 중",
+                        snapshot?.title ?: "사운드룸 연결 중",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -1111,7 +1111,7 @@ private fun SubLoungeDetailScreen(
                     ) {
                         Icon(Icons.Outlined.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                         Spacer(Modifier.width(8.dp))
-                        Text("하위 라운지 삭제", color = MaterialTheme.colorScheme.error)
+                        Text("사운드룸 삭제", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -1122,7 +1122,7 @@ private fun SubLoungeDetailScreen(
                 ) {
                     Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("하위 라운지 나가기")
+                    Text("사운드룸 나가기")
                 }
             }
         }
@@ -1132,7 +1132,7 @@ private fun SubLoungeDetailScreen(
     if (confirmDeleteVisible) {
         AlertDialog(
             onDismissRequest = { confirmDeleteVisible = false },
-            title = { Text("하위 라운지를 삭제할까요?") },
+            title = { Text("사운드룸을 삭제할까요?") },
             text = { Text("추천 음악과 참여 정보가 함께 삭제되며 되돌릴 수 없습니다.") },
             confirmButton = {
                 TextButton(onClick = {

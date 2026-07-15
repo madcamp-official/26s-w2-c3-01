@@ -147,6 +147,7 @@ fun HomeScreen(
 ) {
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
+    val nearbyTabListeners = visibleListeners.filter { it.matchesTasteThreshold(60) }
 
     LazyColumn(
         modifier = modifier
@@ -178,7 +179,7 @@ fun HomeScreen(
         }
         item {
             CompactRadar(
-                listeners = visibleListeners,
+                listeners = nearbyTabListeners,
                 onOpenNearby = onOpenNearby
             )
         }
@@ -719,7 +720,7 @@ private fun CompactRadar(
                     .padding(18.dp)
             ) {
                 Text(
-                    text = "sync map",
+                    text = "Sync Map",
                     color = MelodyBubbleColors.Text,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
