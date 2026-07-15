@@ -1,3 +1,5 @@
+<img width="1016" height="372" alt="image" src="https://github.com/user-attachments/assets/6c32512f-e8b6-429d-a767-4f9f1d3e3b0c" />
+
 # 26s-w2-c3-01
 
 ## 공통과제 II : 협업형 실전 산출물 제작 (2인 1팀)
