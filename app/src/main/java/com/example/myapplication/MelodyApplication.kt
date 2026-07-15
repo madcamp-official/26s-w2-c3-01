@@ -22,6 +22,7 @@ class MelodyApplication : Application() {
         private set
     lateinit var realtimeInboxStore: RealtimeInboxStore
         private set
+    private lateinit var systemNotifier: RealtimeSystemNotifier
 
     @Volatile
     var isAppInForeground: Boolean = false
@@ -50,12 +51,12 @@ class MelodyApplication : Application() {
             realtimeClient.disconnect()
         }
         registerActivityLifecycleCallbacks(ForegroundCallbacks())
-        val notifier = RealtimeSystemNotifier(this)
+        systemNotifier = RealtimeSystemNotifier(this)
         applicationScope.launch {
             realtimeClient.events.collect { event ->
                 realtimeInboxStore.record(event)
                 if (!isAppInForeground || event is RealtimeEvent.NearbyReactionCreated) {
-                    notifier.present(event)
+                    systemNotifier.present(event)
                 }
             }
         }
@@ -68,6 +69,7 @@ class MelodyApplication : Application() {
 
     private inner class ForegroundCallbacks : ActivityLifecycleCallbacks {
         override fun onActivityStarted(activity: Activity) {
+            if (startedActivityCount == 0) systemNotifier.clearChatBundles()
             startedActivityCount += 1
             isAppInForeground = startedActivityCount > 0
         }

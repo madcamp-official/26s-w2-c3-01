@@ -52,6 +52,8 @@ data class ChatMessageCreatedPayload(
     val clientMessageId: UUID,
     val roomId: UUID,
     val senderAlias: String,
+    val senderProfileHandle: String?,
+    val senderAvatarUrl: String,
     val content: String,
     val sentAt: Instant,
     val isMine: Boolean,
@@ -267,11 +269,17 @@ class ChatService(
     }
 
     private fun publishMessageCreated(senderId: UUID, message: DirectChatMessage) {
-        val senderAlias = jdbc.queryForObject(
-            "select display_name from users where id=?",
-            String::class.java,
+        val sender = jdbc.query(
+            "select display_name,profile_handle,avatar_seed,avatar_data_url from users where id=?",
+            { rs, _ ->
+                SenderIdentity(
+                    alias = rs.getString("display_name") ?: "Listener",
+                    profileHandle = rs.getString("profile_handle"),
+                    avatarUrl = avatars.resolve(rs.getString("avatar_seed"), rs.getString("avatar_data_url")),
+                )
+            },
             senderId,
-        ) ?: "Listener"
+        ).firstOrNull() ?: SenderIdentity("Listener", null, avatars.resolve("listener-$senderId", null))
         roomMembers(message.roomId).forEach { memberId ->
             realtime.toUserAfterCommit(
                 memberId,
@@ -281,7 +289,9 @@ class ChatService(
                     messageId = message.messageId,
                     clientMessageId = requireNotNull(message.clientMessageId),
                     roomId = message.roomId,
-                    senderAlias = senderAlias,
+                    senderAlias = sender.alias,
+                    senderProfileHandle = sender.profileHandle,
+                    senderAvatarUrl = sender.avatarUrl,
                     content = message.content,
                     sentAt = message.sentAt,
                     isMine = memberId == senderId,
@@ -290,6 +300,12 @@ class ChatService(
             publishRoomUpdated(memberId, message.roomId)
         }
     }
+
+    private data class SenderIdentity(
+        val alias: String,
+        val profileHandle: String?,
+        val avatarUrl: String,
+    )
 
     private fun publishMessageRead(readerId: UUID, roomId: UUID, lastReadMessageId: UUID, readAt: Instant) {
         val readerAlias = jdbc.queryForObject(

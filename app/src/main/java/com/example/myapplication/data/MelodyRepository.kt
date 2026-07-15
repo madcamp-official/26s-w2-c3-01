@@ -1073,7 +1073,8 @@ class DemoMelodyRepository(
             isMine = true,
             content = trimmed.take(1_000),
             sentAtLabel = "지금",
-            deliveryState = DeliveryState.PENDING
+            deliveryState = DeliveryState.PENDING,
+            sentAtEpochMillis = System.currentTimeMillis(),
         )
         _state.update { current ->
             current.copy(
@@ -2499,6 +2500,7 @@ class DemoMelodyRepository(
                 sentAtLabel = chatSentAtLabel(payload.sentAt ?: event.envelope.timestamp),
                 deliveryState = existing?.deliveryState?.takeIf { it == DeliveryState.READ }
                     ?: DeliveryState.SENT,
+                sentAtEpochMillis = (payload.sentAt ?: event.envelope.timestamp).toServerEpochMillis(),
             )
             val mergedMessages = when {
                 existing != null -> currentMessages.map { if (it.messageId == messageId) delivered else it }
@@ -3034,6 +3036,7 @@ class DemoMelodyRepository(
                                                 } else previous?.deliveryState?.takeIf {
                                                     it == DeliveryState.READ
                                                 } ?: DeliveryState.SENT,
+                                                message.sentAt.toServerEpochMillis(),
                                             )
                                         }
                                         val remoteClientIds = remoteMessages

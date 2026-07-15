@@ -450,15 +450,26 @@ class LocationLoungeService(
         if (type !in LOCATION_CARD_REACTION_TYPES) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "지원하지 않는 리액션입니다.")
         }
-        jdbc.update(
+        val removed = jdbc.update(
             """
-            INSERT INTO location_lounge_card_reactions(card_id,user_id,reaction_type)
-            VALUES (?,?,?) ON CONFLICT(card_id,user_id,reaction_type) DO NOTHING
+            DELETE FROM location_lounge_card_reactions
+            WHERE card_id=? AND user_id=? AND reaction_type=?
             """.trimIndent(),
             cardId,
             userId,
             type,
         )
+        if (removed == 0) {
+            jdbc.update(
+                """
+                INSERT INTO location_lounge_card_reactions(card_id,user_id,reaction_type)
+                VALUES (?,?,?) ON CONFLICT(card_id,user_id,reaction_type) DO NOTHING
+                """.trimIndent(),
+                cardId,
+                userId,
+                type,
+            )
+        }
         return cardsUnchecked(userId, roomId).first { it.id == cardId }
     }
 

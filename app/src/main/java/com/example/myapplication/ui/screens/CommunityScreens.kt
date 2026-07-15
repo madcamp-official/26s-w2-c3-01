@@ -1016,6 +1016,7 @@ fun ChatScreen(
     onStopPreview: () -> Unit = {},
     onBack: () -> Unit,
     onSend: (String) -> Unit,
+    onOpenProfile: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var input by remember { mutableStateOf("") }
@@ -1029,6 +1030,7 @@ fun ChatScreen(
         )
     }
     messageAnimationTracker.observe(messages.map(ChatMessage::clientMessageId))
+    val timeline = remember(messages) { buildChatTimeline(messages) }
 
     val submitMessage = {
         if (input.isNotBlank()) {
@@ -1043,7 +1045,7 @@ fun ChatScreen(
             // The first item is the chat notice. A new AnimatedVisibility row starts at zero
             // height, so one early scroll leaves the fully-expanded bubble below the viewport.
             // Follow the entry/IME animation until layout settles and pin the actual last item.
-            val latestItemIndex = messages.size
+            val latestItemIndex = timeline.size
             messageListState.animateScrollToItem(latestItemIndex)
             repeat(CHAT_LATEST_SCROLL_SETTLE_ATTEMPTS) {
                 delay(CHAT_LATEST_SCROLL_SETTLE_DELAY_MILLIS)
@@ -1065,7 +1067,11 @@ fun ChatScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "뒤로")
             }
-            ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 42.dp)
+            ProfileAvatar(
+                chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 42.dp,
+                stableIdentity = chat.peerHandle,
+                modifier = Modifier.clickable { onOpenProfile(chat.peerHandle) },
+            )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(chat.peerAlias, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -1089,7 +1095,7 @@ fun ChatScreen(
                 .weight(1f)
                 .fillMaxWidth(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             item {
                 Text(
@@ -1099,15 +1105,30 @@ fun ChatScreen(
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            items(messages, key = { it.clientMessageId }) { message ->
-                val animateEntry = remember(message.clientMessageId) {
-                    messageAnimationTracker.claimEntryAnimation(message.clientMessageId)
+            items(timeline, key = { item ->
+                when (item) {
+                    is ChatTimelineItem.DateDivider -> "date_${item.dayKey}"
+                    is ChatTimelineItem.Message -> item.message.clientMessageId
                 }
-                ChatMessageRow(
-                    chat = chat,
-                    message = message,
-                    animateEntry = animateEntry,
-                )
+            }) { item ->
+                when (item) {
+                    is ChatTimelineItem.DateDivider -> ChatDateDivider(item.label)
+                    is ChatTimelineItem.Message -> {
+                        val message = item.message
+                        val animateEntry = remember(message.clientMessageId) {
+                            messageAnimationTracker.claimEntryAnimation(message.clientMessageId)
+                        }
+                        ChatMessageRow(
+                            chat = chat,
+                            message = message,
+                            showAvatar = item.showAvatar,
+                            showTime = item.showTime,
+                            timeLabel = item.timeLabel,
+                            onOpenProfile = { onOpenProfile(chat.peerHandle) },
+                            animateEntry = animateEntry,
+                        )
+                    }
+                }
             }
         }
         Row(
@@ -1147,9 +1168,31 @@ fun ChatScreen(
 }
 
 @Composable
+private fun ChatDateDivider(label: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Surface(color = MossSurfaceHigh, shape = RoundedCornerShape(20.dp)) {
+            Text(
+                label,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                color = MutedMint,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
 private fun ChatMessageRow(
     chat: ChatPreview,
     message: ChatMessage,
+    showAvatar: Boolean,
+    showTime: Boolean,
+    timeLabel: String,
+    onOpenProfile: () -> Unit,
     animateEntry: Boolean,
 ) {
     var visible by remember(message.clientMessageId) { mutableStateOf(!animateEntry) }
@@ -1179,8 +1222,20 @@ private fun ChatMessageRow(
             horizontalArrangement = if (message.isMine) Arrangement.End else Arrangement.Start,
         ) {
             if (!message.isMine) {
-                ProfileAvatar(chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 32.dp)
+                if (showAvatar) {
+                    ProfileAvatar(
+                        chat.peerAvatarUrl, chat.peerAlias, chat.peerColorHex, 32.dp,
+                        stableIdentity = chat.peerHandle,
+                        modifier = Modifier.clickable(onClick = onOpenProfile),
+                    )
+                } else {
+                    Spacer(Modifier.width(32.dp))
+                }
                 Spacer(Modifier.width(8.dp))
+            }
+            if (message.isMine && showTime) {
+                ChatMessageMeta(message, timeLabel)
+                Spacer(Modifier.width(6.dp))
             }
             Surface(
                 shape = RoundedCornerShape(
@@ -1196,33 +1251,32 @@ private fun ChatMessageRow(
             ) {
                 Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 8.dp)) {
                     Text(message.content, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.height(3.dp))
-                    Row(
-                        modifier = Modifier.align(Alignment.End),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            message.sentAtLabel,
-                            color = MutedMint,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        if (message.isMine) {
-                            Text(
-                                when (message.deliveryState) {
-                                    DeliveryState.PENDING -> "전송 중"
-                                    DeliveryState.SENT -> "안 읽음"
-                                    DeliveryState.READ -> "읽음"
-                                    DeliveryState.FAILED -> "실패 · 다시 시도"
-                                },
-                                color = MutedMint,
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
                 }
             }
+            if (!message.isMine && showTime) {
+                Spacer(Modifier.width(6.dp))
+                ChatMessageMeta(message, timeLabel)
+            }
         }
+    }
+}
+
+@Composable
+private fun ChatMessageMeta(message: ChatMessage, timeLabel: String) {
+    Column(horizontalAlignment = if (message.isMine) Alignment.End else Alignment.Start) {
+        if (message.isMine) {
+            Text(
+                when (message.deliveryState) {
+                    DeliveryState.PENDING -> "전송 중"
+                    DeliveryState.SENT -> "안 읽음"
+                    DeliveryState.READ -> "읽음"
+                    DeliveryState.FAILED -> "전송 실패"
+                },
+                color = MutedMint,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        Text(timeLabel, color = MutedMint, style = MaterialTheme.typography.labelSmall)
     }
 }
 

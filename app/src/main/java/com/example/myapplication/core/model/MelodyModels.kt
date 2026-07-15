@@ -187,7 +187,8 @@ data class ChatMessage(
     val isMine: Boolean,
     val content: String,
     val sentAtLabel: String,
-    val deliveryState: DeliveryState
+    val deliveryState: DeliveryState,
+    val sentAtEpochMillis: Long? = null,
 )
 
 data class ProfileSettings(

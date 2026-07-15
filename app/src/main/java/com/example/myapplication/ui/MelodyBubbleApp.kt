@@ -533,6 +533,7 @@ fun MelodyBubbleApp(
                         onStopPreview = viewModel::stopMusicPreview,
                         onBack = { navController.popBackStack() },
                         onSend = { viewModel.sendChat(roomId, it) },
+                        onOpenProfile = { navController.navigate(Route.publicProfile(it)) },
                         modifier = Modifier.statusBarsPadding()
                     )
                 }

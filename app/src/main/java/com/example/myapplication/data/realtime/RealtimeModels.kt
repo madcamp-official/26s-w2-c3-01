@@ -41,6 +41,8 @@ data class ChatMessageCreatedPayload(
     val clientMessageId: String? = null,
     val roomId: String? = null,
     val senderAlias: String? = null,
+    val senderProfileHandle: String? = null,
+    val senderAvatarUrl: String? = null,
     val content: String? = null,
     val sentAt: String? = null,
     val isMine: Boolean? = null,
