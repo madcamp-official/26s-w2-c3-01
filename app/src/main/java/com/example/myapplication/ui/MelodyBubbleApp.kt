@@ -77,7 +77,6 @@ import com.example.myapplication.ui.screens.InboxScreen
 import com.example.myapplication.ui.screens.LoginScreen
 import com.example.myapplication.ui.screens.MyScreen
 import com.example.myapplication.ui.screens.NearbyScreen
-import com.example.myapplication.ui.screens.NearbyMusicFilter
 import com.example.myapplication.ui.screens.NotificationScreen
 import com.example.myapplication.ui.screens.OnboardingScreen
 import com.example.myapplication.ui.screens.PublicProfileScreen
@@ -446,16 +445,6 @@ fun MelodyBubbleApp(
                     LaunchedEffect(Unit) { navController.popBackStack() }
                 } else {
                     LaunchedEffect(profileHandle) { viewModel.loadPublicProfile(profileHandle) }
-                    LaunchedEffect(
-                        profileHandle,
-                        state.selectedPublicProfile?.profileHandle,
-                        state.selectedPublicProfile?.nowPlaying?.title,
-                        state.selectedPublicProfile?.nowPlaying?.artist,
-                    ) {
-                        state.selectedPublicProfile
-                            ?.takeIf { it.profileHandle == profileHandle }
-                            ?.let(viewModel::autoPlayPublicProfileNowPlaying)
-                    }
                     DisposableEffect(profileHandle) {
                         onDispose {
                             viewModel.clearPublicProfile()
@@ -602,8 +591,7 @@ private fun MainShell(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var similarityThreshold by rememberSaveable { mutableFloatStateOf(60f) }
-    var nearbyMusicFilter by rememberSaveable { mutableStateOf(NearbyMusicFilter.ALL) }
+    var similarityThreshold by rememberSaveable { mutableFloatStateOf(0f) }
 
     DisposableEffect(lifecycleOwner, state.selectedTab, state.sharingState) {
         fun updateLocationProfile(started: Boolean) {
@@ -648,10 +636,8 @@ private fun MainShell(
                 state = state,
                 modifier = contentModifier,
                 similarityThreshold = similarityThreshold.toInt(),
-                musicFilter = nearbyMusicFilter,
                 onSimilarityThresholdChange = { similarityThreshold = it.toFloat() },
                 onRetry = viewModel::retrySharing,
-                onMusicFilterChange = { nearbyMusicFilter = it },
                 onSelectListener = {
                     viewModel.selectNearby(it.nearbyHandle)
                     it.currentTrack?.let { track ->
@@ -698,6 +684,7 @@ private fun MainShell(
                 onSendSearchedTrack = viewModel::sendSearchedTrackToLounge,
                 onDeleteCard = viewModel::deleteLoungeCard,
                 onReactToCard = viewModel::reactToLoungeCard,
+                onPlayRecommendedTrack = { title, artist -> viewModel.playMusicPreview(title, artist) },
                 onVote = viewModel::voteInSubLounge,
                 onRefreshSubLounge = viewModel::refreshSubLounge,
                 onOpenProfile = onOpenProfile,

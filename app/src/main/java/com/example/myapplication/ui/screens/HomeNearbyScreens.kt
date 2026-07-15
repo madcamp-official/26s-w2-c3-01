@@ -65,6 +65,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -83,6 +84,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -114,11 +116,6 @@ import coil3.compose.AsyncImage
 
 private val ScreenHorizontalPadding = 20.dp
 
-enum class NearbyMusicFilter(val label: String) {
-    ALL("전체"),
-    SAME_MUSIC("같은 앨범/가수/노래")
-}
-
 private enum class MusicMatchLevel {
     NONE,
     ALBUM_OR_ARTIST,
@@ -147,7 +144,6 @@ fun HomeScreen(
 ) {
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
-    val nearbyTabListeners = visibleListeners.filter { it.matchesTasteThreshold(60) }
 
     LazyColumn(
         modifier = modifier
@@ -179,7 +175,7 @@ fun HomeScreen(
         }
         item {
             CompactRadar(
-                listeners = nearbyTabListeners,
+                listeners = visibleListeners,
                 onOpenNearby = onOpenNearby
             )
         }
@@ -213,11 +209,9 @@ fun HomeScreen(
 fun NearbyScreen(
     state: MelodyUiState,
     modifier: Modifier = Modifier,
-    similarityThreshold: Int = 60,
-    musicFilter: NearbyMusicFilter = NearbyMusicFilter.ALL,
+    similarityThreshold: Int = 0,
     onSimilarityThresholdChange: (Int) -> Unit = {},
     onRetry: () -> Unit = {},
-    onMusicFilterChange: (NearbyMusicFilter) -> Unit = {},
     onSelectListener: (NearbyListener) -> Unit = {},
     onOpenListenerDetail: (NearbyListener) -> Unit = {},
     onOpenTrack: (Track) -> Unit = {},
@@ -230,12 +224,9 @@ fun NearbyScreen(
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
     val currentTrack = state.currentTrack
-    val musicFilteredListeners = visibleListeners.filter {
-        it.matchesMusicFilter(currentTrack, musicFilter)
-    }
     // A missing score means that there is not enough evidence yet; keep that user visible and
     // describe the state honestly instead of inventing a midpoint percentage.
-    val filteredListeners = musicFilteredListeners.filter { it.matchesTasteThreshold(similarityThreshold) }
+    val filteredListeners = visibleListeners.filter { it.matchesTasteThreshold(similarityThreshold) }
     val selected = filteredListeners.firstOrNull {
         it.nearbyHandle == state.selectedNearbyHandle
     }
@@ -280,12 +271,6 @@ fun NearbyScreen(
                     onRetry = onRetry,
                 )
             }
-        }
-        item {
-            NearbyMusicFilterRow(
-                selectedFilter = musicFilter,
-                onFilterChange = onMusicFilterChange
-            )
         }
         item {
             SimilarityFilter(
@@ -700,13 +685,28 @@ private fun CompactRadar(
                         style = Stroke(width = 1.dp.toPx())
                     )
                 }
+                val clusterLabelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = android.graphics.Color.WHITE
+                    textAlign = android.graphics.Paint.Align.CENTER
+                    textSize = 10.dp.toPx()
+                    typeface = android.graphics.Typeface.DEFAULT_BOLD
+                }
                 markers.take(6).forEach { marker ->
                     val position = marker.position.safePosition()
+                    val center = Offset(size.width * position.x, size.height * position.y)
                     drawCircle(
-                        color = MelodyBubbleColors.Text,
-                        radius = (if (marker.isCluster) 11.dp else 7.dp).toPx(),
-                        center = Offset(size.width * position.x, size.height * position.y)
+                        color = if (marker.isCluster) MelodyBubbleColors.Primary else MelodyBubbleColors.Text,
+                        radius = (if (marker.isCluster) 13.dp else 7.dp).toPx(),
+                        center = center,
                     )
+                    if (marker.isCluster) {
+                        drawContext.canvas.nativeCanvas.drawText(
+                            "+${marker.listeners.size}",
+                            center.x,
+                            center.y - (clusterLabelPaint.ascent() + clusterLabelPaint.descent()) / 2,
+                            clusterLabelPaint,
+                        )
+                    }
                 }
                 drawCircle(
                     color = MelodyBubbleColors.Primary,
@@ -1076,46 +1076,6 @@ private fun TrackArtwork(
 }
 
 @Composable
-private fun NearbyMusicFilterRow(
-    selectedFilter: NearbyMusicFilter,
-    onFilterChange: (NearbyMusicFilter) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        NearbyMusicFilter.entries.forEach { filter ->
-            FilterChip(
-                selected = selectedFilter == filter,
-                onClick = { onFilterChange(filter) },
-                modifier = Modifier.height(44.dp),
-                label = {
-                    Text(
-                        text = filter.label,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MelodyBubbleColors.Primary,
-                    selectedLabelColor = MelodyBubbleColors.OnPrimary,
-                    containerColor = MelodyBubbleColors.Surface,
-                    labelColor = MelodyBubbleColors.TextMuted
-                ),
-                border = FilterChipDefaults.filterChipBorder(
-                    enabled = true,
-                    selected = selectedFilter == filter,
-                    borderColor = MelodyBubbleColors.Border,
-                    selectedBorderColor = MelodyBubbleColors.Primary
-                )
-            )
-        }
-    }
-}
-
-@Composable
 private fun SimilarityFilter(
     threshold: Int,
     resultCount: Int,
@@ -1140,33 +1100,20 @@ private fun SimilarityFilter(
             )
         }
         Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf(60, 75, 90).forEach { value ->
-                FilterChip(
-                    selected = threshold == value,
-                    onClick = { onThresholdChange(value) },
-                    modifier = Modifier.height(48.dp),
-                    label = { Text("$value% 이상") },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MelodyBubbleColors.Primary,
-                        selectedLabelColor = MelodyBubbleColors.OnPrimary,
-                        containerColor = MelodyBubbleColors.Surface,
-                        labelColor = MelodyBubbleColors.TextMuted
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        enabled = true,
-                        selected = threshold == value,
-                        borderColor = MelodyBubbleColors.Border,
-                        selectedBorderColor = MelodyBubbleColors.Primary
-                    )
-                )
-            }
-        }
+        Slider(
+            value = threshold.toFloat(),
+            onValueChange = { onThresholdChange((it / 10f).toInt() * 10) },
+            valueRange = 0f..100f,
+            steps = 9,
+        )
+        Text(
+            text = "$threshold% 이상",
+            modifier = Modifier.fillMaxWidth(),
+            color = MelodyBubbleColors.Primary,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -1892,14 +1839,6 @@ private fun com.example.myapplication.core.model.DisplayPosition.safePosition() 
     x = x.coerceIn(0.08f, 0.92f),
     y = y.coerceIn(0.10f, 0.90f)
 )
-
-private fun NearbyListener.matchesMusicFilter(
-    currentTrack: Track,
-    filter: NearbyMusicFilter
-): Boolean = when (filter) {
-    NearbyMusicFilter.ALL -> true
-    NearbyMusicFilter.SAME_MUSIC -> musicMatchLevel(currentTrack) != MusicMatchLevel.NONE
-}
 
 private fun NearbyListener.musicMatchLevel(currentTrack: Track): MusicMatchLevel {
     val listenerTrack = this.currentTrack ?: return MusicMatchLevel.NONE

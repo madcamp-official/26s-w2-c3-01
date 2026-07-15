@@ -254,7 +254,7 @@ class NearbyDistanceContractTest {
     }
 
     @Test
-    fun mapZoomsWhenEveryoneIsInsideTenMetersAndKeepsListenersSeparate() {
+    fun mapZoomsWhenEveryoneIsInsideTenMetersAndClustersOverlaps() {
         val listeners = listOf(
             listener(Proximity.WITHIN_10M, DisplayPosition(0.53f, 0.50f), "one"),
             listener(Proximity.WITHIN_10M, DisplayPosition(0.54f, 0.50f), "two"),
@@ -262,9 +262,9 @@ class NearbyDistanceContractTest {
 
         assertTrue(shouldZoomNearbyMap(listeners))
         val markers = nearbyMapMarkers(listeners)
-        assertEquals(2, markers.size)
-        assertTrue(markers.none { it.isCluster })
-        assertEquals(0.56f, markers.first { it.listeners.single().nearbyHandle == "one" }.position.x, 0.001f)
+        assertEquals(1, markers.size)
+        assertTrue(markers.single().isCluster)
+        assertEquals(2, markers.single().listeners.size)
     }
 
     @Test

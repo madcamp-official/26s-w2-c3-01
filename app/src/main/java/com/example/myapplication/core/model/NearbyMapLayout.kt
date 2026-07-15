@@ -19,12 +19,7 @@ fun nearbyMapMarkers(
     clusterDistance: Float = 0.16f,
 ): List<NearbyMapMarker> {
     val positioned = listeners.map { it to it.mapPosition(zoomed) }
-    if (zoomed) return positioned.map { (listener, position) -> NearbyMapMarker(listOf(listener), position) }
-
-    val inner = positioned.filter { (listener, _) -> listener.proximity == Proximity.WITHIN_10M }
-        .sortedBy { it.first.nearbyHandle }
-    val outer = positioned.filter { (listener, _) -> listener.proximity == Proximity.WITHIN_20M }
-    val remaining = inner.toMutableList()
+    val remaining = positioned.sortedBy { it.first.nearbyHandle }.toMutableList()
     val markers = mutableListOf<NearbyMapMarker>()
 
     while (remaining.isNotEmpty()) {
@@ -51,7 +46,6 @@ fun nearbyMapMarkers(
         )
     }
 
-    markers += outer.map { (listener, position) -> NearbyMapMarker(listOf(listener), position) }
     return markers.sortedBy(NearbyMapMarker::stableKey)
 }
 

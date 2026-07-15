@@ -148,6 +148,7 @@ fun BuildingLoungeMapScreen(
     onSendSearchedTrack: (LoungeMusicSearchResultDto) -> Unit,
     onDeleteCard: (String) -> Unit,
     onReactToCard: (String, String) -> Unit,
+    onPlayRecommendedTrack: (String, String) -> Unit,
     onVote: (String) -> Unit,
     onRefreshSubLounge: () -> Unit,
     onOpenProfile: (String) -> Unit,
@@ -226,6 +227,7 @@ fun BuildingLoungeMapScreen(
             onSendSearchedTrack = onSendSearchedTrack,
             onDeleteCard = onDeleteCard,
             onReactToCard = onReactToCard,
+            onPlayRecommendedTrack = onPlayRecommendedTrack,
             onVote = onVote,
             onRefresh = onRefreshSubLounge,
             onOpenProfile = onOpenProfile,
@@ -752,6 +754,7 @@ private fun SubLoungeDetailScreen(
     onSendSearchedTrack: (LoungeMusicSearchResultDto) -> Unit,
     onDeleteCard: (String) -> Unit,
     onReactToCard: (String, String) -> Unit,
+    onPlayRecommendedTrack: (String, String) -> Unit,
     onVote: (String) -> Unit,
     onRefresh: () -> Unit,
     onOpenProfile: (String) -> Unit,
@@ -858,9 +861,6 @@ private fun SubLoungeDetailScreen(
             }
 
             snapshot?.let { room ->
-                val latestCardId = room.cards.maxWithOrNull(
-                    compareBy({ it.createdAt }, { it.id }),
-                )?.id
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         MetricPanel("참여자", "${room.memberCount}명", Modifier.weight(1f), onClick = onOpenMembers)
@@ -1029,8 +1029,7 @@ private fun SubLoungeDetailScreen(
                     item { EmptyLoungePanel("첫 추천을 기다리고 있어요", "좋아하는 곡으로 대화를 시작해 보세요.") }
                 } else {
                     items(room.cards, key = { it.id }) { card ->
-                        val previewActive = card.id == latestCardId &&
-                            previewPlaybackState.matches(card.trackTitle, card.artistName) &&
+                        val previewActive = previewPlaybackState.matches(card.trackTitle, card.artistName) &&
                             (previewPlaybackState.isLoading || previewPlaybackState.isPlaying || previewPlaybackState.isPaused)
                         val senderHandle = card.senderProfileHandle
                             ?: room.members.orEmpty().firstOrNull { it.displayName == card.senderAlias }?.profileHandle
@@ -1046,7 +1045,11 @@ private fun SubLoungeDetailScreen(
                                         card.trackTitle,
                                         style = MaterialTheme.typography.titleMedium,
                                         fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.weight(1f),
+                                        color = SignalGreen,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onPlayRecommendedTrack(card.trackTitle, card.artistName) }
+                                            .padding(vertical = 4.dp),
                                     )
                                     if (previewActive) {
                                         PreviewEqualizerBars(
