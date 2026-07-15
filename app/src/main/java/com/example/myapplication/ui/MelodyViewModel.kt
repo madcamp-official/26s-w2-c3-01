@@ -45,7 +45,8 @@ import java.util.UUID
 import retrofit2.HttpException
 import java.io.IOException
 
-private const val NEARBY_PREVIEW_TRACK_STABILITY_MILLIS = 1_500L
+private const val NEARBY_PREVIEW_TRACK_STABILITY_MILLIS = 700L
+private const val STOPPED_PREVIEW_FOLLOW_KEY = "\u0000stopped"
 
 internal fun List<NearbyListener>.findPreviewSource(
     nearbyHandle: String?,
@@ -168,6 +169,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private var followedNearbyHandle: String? = null
     private var followedNearbyProfileHandle: String? = null
     private var followedNearbyTrackKey: String? = null
+    private var followedNearbyPendingTrackKey: String? = null
 
     val uiState = repository.state
     val loginState = _loginState.asStateFlow()
@@ -233,15 +235,27 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 if (!previewActive) {
                     followedNearbyTransitionJob?.cancel()
                     followedNearbyTransitionJob = null
+                    followedNearbyPendingTrackKey = null
                     return@collect
                 }
                 val trackKey = track?.previewFollowKey()
                 if (trackKey == followedNearbyTrackKey) {
                     followedNearbyTransitionJob?.cancel()
                     followedNearbyTransitionJob = null
+                    followedNearbyPendingTrackKey = null
+                    return@collect
+                }
+                val candidateKey = trackKey ?: STOPPED_PREVIEW_FOLLOW_KEY
+                if (followedNearbyTransitionJob?.isActive == true &&
+                    followedNearbyPendingTrackKey == candidateKey
+                ) {
+                    // Presence snapshots arrive about once per second. Do not restart the
+                    // stability window for an unchanged candidate or a 1.5 second debounce can
+                    // never finish.
                     return@collect
                 }
                 followedNearbyTransitionJob?.cancel()
+                followedNearbyPendingTrackKey = candidateKey
                 followedNearbyTransitionJob = viewModelScope.launch {
                     delay(NEARBY_PREVIEW_TRACK_STABILITY_MILLIS)
                     val latestListener = repository.state.value.nearbyListeners.findPreviewSource(
@@ -253,8 +267,13 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                         followedNearbyProfileHandle = it.profileHandle ?: followedNearbyProfileHandle
                     }
                     val latestTrack = latestListener?.currentTrack
+                    val latestCandidateKey = latestTrack?.previewFollowKey()
+                        ?: STOPPED_PREVIEW_FOLLOW_KEY
                     followedNearbyTransitionJob = null
-                    if (latestTrack == null) {
+                    followedNearbyPendingTrackKey = null
+                    if (latestCandidateKey != candidateKey) {
+                        return@launch
+                    } else if (latestTrack == null) {
                         stopMusicPreview()
                     } else if (latestTrack.previewFollowKey() != followedNearbyTrackKey) {
                         playMusicPreview(
@@ -645,29 +664,58 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         previewLookupJob?.cancel()
         followedNearbyTransitionJob?.cancel()
         followedNearbyTransitionJob = null
+        followedNearbyPendingTrackKey = null
+        val requestedTrackKey = previewFollowKey(title, artist)
+        val latestSource = if (sourceNearbyHandle == null && sourceNearbyProfileHandle == null) {
+            null
+        } else {
+            repository.state.value.nearbyListeners.findPreviewSource(
+                sourceNearbyHandle,
+                sourceNearbyProfileHandle,
+            )
+        }
+        // The clicked listener object can be one snapshot behind the repository. Resolve it again
+        // after registering the follow target so a track change racing with the tap cannot start
+        // (and then keep) the previous song's preview.
+        val latestTrack = latestSource?.currentTrack
+        val resolvedTitle = latestTrack?.title ?: title
+        val resolvedArtist = latestTrack?.artist ?: artist
+        val resolvedArtworkUrl = latestTrack?.artworkUrl ?: artworkUrl
+        val resolvedTrackKey = previewFollowKey(resolvedTitle, resolvedArtist)
+        val resolvedPreviewUrl = previewUrl.takeIf { requestedTrackKey == resolvedTrackKey }
         if (sourceNearbyHandle == null) {
             clearFollowedNearbyPreview()
         } else {
-            followedNearbyHandle = sourceNearbyHandle
-            followedNearbyProfileHandle = sourceNearbyProfileHandle
+            followedNearbyHandle = latestSource?.nearbyHandle ?: sourceNearbyHandle
+            followedNearbyProfileHandle = latestSource?.profileHandle ?: sourceNearbyProfileHandle
                 ?: repository.state.value.nearbyListeners
                     .firstOrNull { it.nearbyHandle == sourceNearbyHandle }
                     ?.profileHandle
-            followedNearbyTrackKey = previewFollowKey(title, artist)
+            followedNearbyTrackKey = resolvedTrackKey
         }
-        if (!previewUrl.isNullOrBlank()) {
-            musicPreviewPlayer.play(previewUrl, title, artist, artworkUrl)
+        if (!resolvedPreviewUrl.isNullOrBlank()) {
+            musicPreviewPlayer.play(
+                resolvedPreviewUrl,
+                resolvedTitle,
+                resolvedArtist,
+                resolvedArtworkUrl,
+            )
             return
         }
-        musicPreviewPlayer.beginLookup(title, artist, artworkUrl)
+        musicPreviewPlayer.beginLookup(resolvedTitle, resolvedArtist, resolvedArtworkUrl)
         previewLookupJob = viewModelScope.launch {
-            runCatching { musicSearchRepository.findTrackMedia(title, artist) }
+            runCatching { musicSearchRepository.findTrackMedia(resolvedTitle, resolvedArtist) }
                 .onSuccess { match ->
                     val url = match?.previewUrl
                     if (url == null) {
                         musicPreviewPlayer.stop("정확한 미리듣기를 찾지 못했어요.")
                     } else {
-                        musicPreviewPlayer.play(url, title, artist, match.artworkUrl ?: artworkUrl)
+                        musicPreviewPlayer.play(
+                            url,
+                            resolvedTitle,
+                            resolvedArtist,
+                            match.artworkUrl ?: resolvedArtworkUrl,
+                        )
                     }
                 }
                 .onFailure { musicPreviewPlayer.stop("미리듣기를 찾지 못했어요.") }
@@ -685,6 +733,7 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
     private fun clearFollowedNearbyPreview() {
         followedNearbyTransitionJob?.cancel()
         followedNearbyTransitionJob = null
+        followedNearbyPendingTrackKey = null
         followedNearbyHandle = null
         followedNearbyProfileHandle = null
         followedNearbyTrackKey = null
