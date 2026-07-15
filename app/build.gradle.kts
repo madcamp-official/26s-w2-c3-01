@@ -31,7 +31,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.madcamp.sync"
         minSdk = 24
         targetSdk = 35
         versionCode = 1

@@ -1747,7 +1747,7 @@ fun MyScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                if (nowPlayingTrack != null) {
+                if (nowPlayingActive && nowPlayingTrack != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ProfileArtwork(nowPlayingTrack.artworkUrl, accent, 52.dp)
                         Spacer(Modifier.width(11.dp))

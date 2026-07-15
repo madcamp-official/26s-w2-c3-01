@@ -18,6 +18,7 @@ import com.example.myapplication.core.model.MusicSearchResult
 import com.example.myapplication.core.model.ProfileArtist
 import com.example.myapplication.core.model.ProfileSettings
 import com.example.myapplication.core.model.ProfileTrack
+import com.example.myapplication.core.model.Track
 import com.example.myapplication.data.AvatarCustomization
 import com.example.myapplication.ui.GenreCatalogUiState
 import com.example.myapplication.ui.screens.MyScreen
@@ -206,6 +207,47 @@ class MyProfileScreenTest {
         list.performScrollToIndex(5)
         composeRule.onNodeWithText("좋아하는 아티스트를 알려주세요").assertIsDisplayed()
         composeRule.onNodeWithText("취향 정보가 쌓이면 여기에 보여요").assertIsDisplayed()
+    }
+
+    @Test
+    fun pausedDetectedTrackIsNotShownAsCurrentlyPlaying() {
+        composeRule.setContent {
+            MelodyBubbleTheme {
+                MyScreen(
+                    profile = emptyProfile(),
+                    profileSaving = false,
+                    feedbackMessage = null,
+                    followingCount = 0,
+                    followerCount = 0,
+                    nowPlayingTrack = Track(
+                        id = "paused-track",
+                        title = "멈춘 노래",
+                        artist = "테스트 아티스트",
+                        album = null,
+                        artworkUrl = null,
+                        externalUrl = null,
+                    ),
+                    nowPlayingActive = false,
+                    onLoadConnections = {},
+                    onOpenFollowing = {},
+                    onOpenFollowers = {},
+                    onOpenSettings = {},
+                    onProfileUpdate = { _, _, _, _ -> },
+                    onProfileCurationUpdate = { _, _ -> },
+                    musicSearchState = MusicSearchUiState.Idle,
+                    genreCatalogState = GenreCatalogUiState(genres = listOf("K-Pop", "록")),
+                    onRetryGenreCatalog = {},
+                    onSearchMusic = {},
+                    onClearMusicSearch = {},
+                    onPreviewMusic = {},
+                    onCustomizeAvatar = {},
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("my_profile_list").performScrollToIndex(2)
+        composeRule.onNodeWithText("재생 중인 음악이 아직 없어요").assertIsDisplayed()
+        composeRule.onAllNodesWithText("멈춘 노래").assertCountEquals(0)
     }
 
     @Test
