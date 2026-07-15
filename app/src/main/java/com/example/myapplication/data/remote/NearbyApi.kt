@@ -149,6 +149,17 @@ interface NearbyApi {
         @Header("Authorization") authorization: String
     ): List<RemoteReceivedReaction>
 
+    @DELETE("api/v1/nearby/reactions/{reactionId}")
+    suspend fun dismissReceivedReaction(
+        @Header("Authorization") authorization: String,
+        @Path("reactionId") reactionId: String,
+    )
+
+    @DELETE("api/v1/nearby/reactions")
+    suspend fun dismissAllReceivedReactions(
+        @Header("Authorization") authorization: String,
+    )
+
     @POST("api/v1/nearby/location")
     suspend fun updateLocation(
         @Header("Authorization") authorization: String,

@@ -1162,12 +1162,22 @@ class DemoMelodyRepository(
     override fun clearNotifications() {
         realtimeInboxStore?.deleteAll(_state.value.notifications.map(InboxNotification::id))
         _state.update { it.copy(notifications = emptyList()) }
+        accessToken?.let { token ->
+            scope.launch {
+                runCatching { nearbyApi.dismissAllReceivedReactions("Bearer $token") }
+            }
+        }
     }
 
     override fun deleteNotification(notificationId: String) {
         realtimeInboxStore?.delete(notificationId)
         _state.update { current ->
             current.copy(notifications = current.notifications.filterNot { it.id == notificationId })
+        }
+        accessToken?.let { token ->
+            scope.launch {
+                runCatching { nearbyApi.dismissReceivedReaction("Bearer $token", notificationId) }
+            }
         }
     }
 

@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
@@ -81,6 +82,10 @@ class NearbyReactionService(
             from nearby_reactions reaction
             join users sender on sender.id=reaction.sender_id
             where reaction.recipient_id=?
+              and not exists(
+                select 1 from nearby_reaction_dismissals dismissal
+                where dismissal.reaction_id=reaction.id and dismissal.recipient_id=?
+              )
             order by reaction.created_at desc,reaction.id desc
             limit ?
             """.trimIndent(),
@@ -98,7 +103,42 @@ class NearbyReactionService(
                 )
             },
             recipientId,
+            recipientId,
             limit.coerceIn(1, 100),
+        )
+    }
+
+    @Transactional
+    fun dismiss(recipientId: UUID, reactionId: UUID) {
+        val inserted = jdbc.update(
+            """
+            insert into nearby_reaction_dismissals(reaction_id,recipient_id)
+            select id,recipient_id from nearby_reactions where id=? and recipient_id=?
+            on conflict(reaction_id,recipient_id) do nothing
+            """.trimIndent(),
+            reactionId,
+            recipientId,
+        )
+        if (inserted == 0) {
+            val exists = jdbc.queryForObject(
+                "select exists(select 1 from nearby_reactions where id=? and recipient_id=?)",
+                Boolean::class.java,
+                reactionId,
+                recipientId,
+            ) == true
+            if (!exists) throw ResponseStatusException(HttpStatus.NOT_FOUND, "알림을 찾을 수 없습니다.")
+        }
+    }
+
+    @Transactional
+    fun dismissAll(recipientId: UUID) {
+        jdbc.update(
+            """
+            insert into nearby_reaction_dismissals(reaction_id,recipient_id)
+            select id,recipient_id from nearby_reactions where recipient_id=?
+            on conflict(reaction_id,recipient_id) do nothing
+            """.trimIndent(),
+            recipientId,
         )
     }
 
@@ -291,6 +331,15 @@ class NearbyReactionController(private val reactions: NearbyReactionService) {
         principal: Principal,
         @RequestParam(defaultValue = "100") limit: Int,
     ) = reactions.received(UUID.fromString(principal.name), limit)
+
+    @DeleteMapping("/reactions/{reactionId}")
+    fun dismiss(
+        principal: Principal,
+        @PathVariable reactionId: UUID,
+    ) = reactions.dismiss(UUID.fromString(principal.name), reactionId)
+
+    @DeleteMapping("/reactions")
+    fun dismissAll(principal: Principal) = reactions.dismissAll(UUID.fromString(principal.name))
 
     @PostMapping("/{nearbyHandle}/reactions")
     fun send(
