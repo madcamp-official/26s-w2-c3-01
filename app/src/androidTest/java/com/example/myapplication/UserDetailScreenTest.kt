@@ -5,6 +5,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import com.example.myapplication.core.model.CommonTasteSummary
 import com.example.myapplication.core.model.DisplayPosition
 import com.example.myapplication.core.model.NearbyListener
 import com.example.myapplication.core.model.Proximity
@@ -36,6 +37,13 @@ class UserDetailScreenTest {
                         currentTrack = Track("track", "새벽의 온도", "Clouded Steps"),
                         commonGenres = listOf("Indie"),
                         relationship = RelationshipStatus.FOLLOWS_ME,
+                        tasteMatch = CommonTasteSummary(
+                            score = 82,
+                            metrics = emptyList(),
+                            algorithmVersion = "test",
+                            sampleSize = 1,
+                            calculatedAt = "2026-07-15T00:00:00Z",
+                        ),
                     ),
                 )
             }
@@ -43,6 +51,9 @@ class UserDetailScreenTest {
 
         composeRule.onNodeWithText("리액션").assertIsDisplayed()
         composeRule.onNodeWithText("맞팔").assertIsDisplayed()
+        composeRule.onNodeWithText("취향 유사도 82%").assertIsDisplayed()
+        composeRule.onAllNodesWithText("10m 안쪽").assertCountEquals(0)
+        composeRule.onAllNodesWithText("바로 근처").assertCountEquals(0)
         composeRule.onAllNodesWithText("현재 듣는 음악").assertCountEquals(0)
         composeRule.onAllNodesWithText("음악 리액션 보내기").assertCountEquals(0)
         composeRule.onAllNodesWithText("맞팔하기").assertCountEquals(0)

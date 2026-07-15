@@ -1583,7 +1583,7 @@ private fun ListenerIdentity(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label} · ${listener.tasteSimilarityLabel()}",
+                text = listener.tasteSimilarityLabel(),
                 color = MelodyBubbleColors.TextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
