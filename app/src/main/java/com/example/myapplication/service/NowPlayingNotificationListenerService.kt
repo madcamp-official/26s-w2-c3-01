@@ -220,6 +220,7 @@ class NowPlayingNotificationListenerService : NotificationListenerService() {
                 durationMs = text.durationMs,
                 positionMs = text.positionMs,
                 positionObservedAtEpochMs = text.positionObservedAtEpochMs,
+                sourcePackage = playbackPackageName,
                 isPlaying = isPlaying,
             )
         } else {

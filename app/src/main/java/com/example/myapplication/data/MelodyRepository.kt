@@ -61,6 +61,7 @@ import com.example.myapplication.data.remote.NearbyReactionRequest
 import com.example.myapplication.data.remote.ResolveNearbyBeaconsRequest
 import com.example.myapplication.data.remote.PresenceSettingsUpdateRequest
 import com.example.myapplication.data.remote.RemoteChatSummary
+import com.example.myapplication.data.remote.RemoteCommonTasteSummary
 import com.example.myapplication.data.remote.RemoteFollowResponse
 import com.example.myapplication.data.remote.RemoteNearbyBubble
 import com.example.myapplication.data.remote.RemotePopularTrack
@@ -77,6 +78,7 @@ import com.example.myapplication.data.remote.RemoteProfileTrack
 import com.example.myapplication.data.remote.RemoteProfileArtist
 import com.example.myapplication.data.remote.RemotePublicProfile
 import com.example.myapplication.data.remote.RemoteTasteFingerprint
+import com.example.myapplication.data.remote.TasteFeedbackRequest
 import com.example.myapplication.data.remote.RemoteSocialConnection
 import com.example.myapplication.data.remote.jwtSubject
 import com.example.myapplication.nearby.PassiveNearbyDiscoveryManager
@@ -295,6 +297,7 @@ interface MelodyRepository {
     fun loadSocialConnections()
     fun unfollowRelationship(relationshipId: String)
     fun loadPublicProfile(profileHandle: String)
+    fun recordTasteFeedback(profileHandle: String, action: String)
     fun clearPublicProfile()
     fun followPublicProfile()
     fun sendChat(roomId: String, content: String)
@@ -407,6 +410,7 @@ class DemoMelodyRepository(
         nowMillis = SystemClock::elapsedRealtime,
     )
     private val profileApi = ApiClient.createProfileApi(environment)
+    private val tasteApi = ApiClient.createTasteApi(environment)
     private val socialApi = ApiClient.createSocialApi(environment)
     private val musicSearchRepository = MusicSearchRepository()
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationContext)
@@ -969,6 +973,7 @@ class DemoMelodyRepository(
                         )
                     }
                     resolvePublicProfileArtwork(profile)
+                    recordTasteFeedback(profile.profileHandle, "PROFILE_OPEN")
                 }
                 .onFailure { error ->
                     if (!isCurrentSession(token) ||
@@ -993,6 +998,23 @@ class DemoMelodyRepository(
         publicProfileRequestVersion.incrementAndGet()
         _state.update {
             it.copy(selectedPublicProfile = null, publicProfileLoading = false, publicProfileError = null)
+        }
+    }
+
+    override fun recordTasteFeedback(profileHandle: String, action: String) {
+        val token = accessToken ?: return
+        if (profileHandle.isBlank() || profileHandle == _state.value.profile.profileHandle) return
+        scope.launch {
+            runCatching {
+                tasteApi.recordFeedback(
+                    "Bearer $token",
+                    TasteFeedbackRequest(
+                        clientFeedbackId = UUID.randomUUID().toString(),
+                        targetProfileHandle = profileHandle,
+                        action = action,
+                    ),
+                )
+            }
         }
     }
 
@@ -1374,6 +1396,7 @@ class DemoMelodyRepository(
     }
 
     override fun updateProfilePrivacy(settings: ProfilePrivacySettings) {
+        presenceSyncCoordinator.setListeningInsightsEnabled(settings.listeningInsightsEnabled)
         _state.update { current ->
             val legacyVisibility = when (settings.currentMusicVisibility) {
                 "MUTUALS" -> "MUTUALS"
@@ -1673,6 +1696,9 @@ class DemoMelodyRepository(
             )
         }
         persistProfile(_state.value.profile)
+        presenceSyncCoordinator.setListeningInsightsEnabled(
+            _state.value.profile.privacy.listeningInsightsEnabled,
+        )
         resolveOwnProfileArtistArtwork()
     }
 
@@ -2338,6 +2364,7 @@ class DemoMelodyRepository(
             } ?: RelationshipStatus.NONE,
             canReact = canReact ?: true,
             avatarUrl = resolvedAvatar.url,
+            tasteMatch = tasteMatch?.toDomain(),
         )
     }
 
@@ -3084,6 +3111,17 @@ class DemoMelodyRepository(
         moods = moods.orEmpty().map { TasteMetric(it.label, it.count, it.ratio) },
     )
 
+    private fun RemoteCommonTasteSummary.toDomain() = CommonTasteSummary(
+        score = score,
+        confidence = confidence,
+        metrics = metrics.orEmpty().map {
+            CommonTasteMetric(it.label, it.type, it.score, it.evidenceCount)
+        },
+        algorithmVersion = algorithmVersion,
+        sampleSize = sampleSize,
+        calculatedAt = calculatedAt,
+    )
+
     private fun RemoteProfileMelodyAlias.toDomain() = ProfileMelodyAlias(id, notes, tone, mood, tempo)
 
     private fun RemoteProfileTrack.toDomain() = ProfileTrack(
@@ -3176,15 +3214,7 @@ class DemoMelodyRepository(
                 )
             },
             commonTaste = commonTaste?.let { taste ->
-                CommonTasteSummary(
-                    score = taste.score,
-                    metrics = taste.metrics.orEmpty().map {
-                        CommonTasteMetric(it.label, it.type, it.score, it.evidenceCount)
-                    },
-                    algorithmVersion = taste.algorithmVersion,
-                    sampleSize = taste.sampleSize,
-                    calculatedAt = taste.calculatedAt,
-                )
+                taste.toDomain()
             },
             sectionStates = sectionStates.orEmpty(),
         )

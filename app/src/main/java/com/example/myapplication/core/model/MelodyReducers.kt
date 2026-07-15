@@ -35,7 +35,10 @@ object MelodyReducers {
         }
         return NearbyDeltaResult(
             sequence = delta.sequence,
-            listeners = byHandle.values.sortedByDescending { it.matchScore },
+            listeners = byHandle.values.sortedWith(
+                compareByDescending<NearbyListener> { it.tasteMatch?.score ?: -1 }
+                    .thenBy { it.displayAlias.lowercase() },
+            ),
             applied = true
         )
     }

@@ -102,6 +102,7 @@ import com.example.myapplication.core.model.NearbyRingFractions
 import com.example.myapplication.core.model.nearbyMapMarkers
 import com.example.myapplication.core.model.shouldZoomNearbyMap
 import com.example.myapplication.core.model.PopularTrack
+import com.example.myapplication.core.model.matchesTasteThreshold
 import com.example.myapplication.core.model.RelationshipStatus
 import com.example.myapplication.core.model.SharingState
 import com.example.myapplication.core.model.Track
@@ -228,9 +229,12 @@ fun NearbyScreen(
     val isSharingActive = state.sharingState == SharingState.ACTIVE
     val visibleListeners = if (isSharingActive) state.nearbyListeners else emptyList()
     val currentTrack = state.currentTrack
-    val filteredListeners = visibleListeners.filter {
+    val musicFilteredListeners = visibleListeners.filter {
         it.matchesMusicFilter(currentTrack, musicFilter)
     }
+    // A missing score means that there is not enough evidence yet; keep that user visible and
+    // describe the state honestly instead of inventing a midpoint percentage.
+    val filteredListeners = musicFilteredListeners.filter { it.matchesTasteThreshold(similarityThreshold) }
     val selected = filteredListeners.firstOrNull {
         it.nearbyHandle == state.selectedNearbyHandle
     }
@@ -280,6 +284,13 @@ fun NearbyScreen(
             NearbyMusicFilterRow(
                 selectedFilter = musicFilter,
                 onFilterChange = onMusicFilterChange
+            )
+        }
+        item {
+            SimilarityFilter(
+                threshold = similarityThreshold,
+                resultCount = filteredListeners.size,
+                onThresholdChange = onSimilarityThresholdChange,
             )
         }
         item {
@@ -866,7 +877,7 @@ private fun ListenerStrip(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = "유사도 ${listener.matchScore}%",
+                        text = listener.tasteSimilarityLabel(),
                         color = MelodyBubbleColors.TextMuted,
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1
@@ -1338,7 +1349,7 @@ private fun ListenerMapBubble(
             .semantics {
                 contentDescription = buildString {
                     append(listener.displayAlias)
-                    append(", 취향 유사도 ${listener.matchScore}%")
+                    append(", ${listener.tasteSimilarityLabel()}")
                     append(", ${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label}")
                     if (listener.isPlaying) append(", 음악 재생 중")
                     if (musicMatchLevel == MusicMatchLevel.SONG) append(", 같은 노래 재생 중")
@@ -1483,7 +1494,7 @@ private fun SelectedListenerCard(
                     }
                 }
                 Text(
-                    text = "유사도 ${listener.matchScore}%",
+                    text = listener.tasteSimilarityLabel(),
                     color = MelodyBubbleColors.TextMuted,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1617,7 +1628,7 @@ private fun ListenerIdentity(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label} · 취향 ${listener.matchScore}%",
+                text = "${if (listener.isDirectlyDetected) "바로 근처" else listener.proximity.label} · ${listener.tasteSimilarityLabel()}",
                 color = MelodyBubbleColors.TextMuted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1692,6 +1703,7 @@ private fun Track.hasExternalMusicLink(): Boolean = externalUrl?.startsWith("htt
 
 @Composable
 private fun CommonTasteCard(listener: NearbyListener) {
+    val taste = listener.tasteMatch
     MelodyCard {
         Text(
             text = "공통 취향",
@@ -1700,24 +1712,38 @@ private fun CommonTasteCard(listener: NearbyListener) {
             fontWeight = FontWeight.SemiBold
         )
         Spacer(Modifier.height(10.dp))
-        if (listener.commonGenres.isEmpty()) {
+        if (taste == null || taste.score == null) {
             Text(
-                text = "아직 공통 장르 데이터가 없어요",
+                text = "취향을 분석할 데이터가 조금 더 필요해요",
                 color = MelodyBubbleColors.TextMuted,
                 style = MaterialTheme.typography.bodyMedium
             )
+        } else if (taste.metrics.isEmpty()) {
+            Text(
+                text = "취향 유사도 ${taste.score}% · 신뢰도 ${taste.confidence.toKoreanConfidence()}",
+                color = MelodyBubbleColors.Text,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+            )
         } else {
+            Text(
+                text = "취향 유사도 ${taste.score}% · 신뢰도 ${taste.confidence.toKoreanConfidence()}",
+                color = MelodyBubbleColors.Text,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listener.commonGenres.forEach { genre ->
+                taste.metrics.forEach { metric ->
                     AssistChip(
                         onClick = {},
                         modifier = Modifier.height(48.dp),
-                        label = { Text(genre) },
+                        label = { Text("${metric.label} ${metric.score}%") },
                         enabled = false,
                         colors = AssistChipDefaults.assistChipColors(
                             disabledContainerColor = MelodyBubbleColors.SurfaceSelected,
@@ -1733,6 +1759,15 @@ private fun CommonTasteCard(listener: NearbyListener) {
             }
         }
     }
+}
+
+private fun NearbyListener.tasteSimilarityLabel(): String =
+    tasteMatch?.score?.let { "취향 유사도 $it%" } ?: "취향 분석 중"
+
+private fun String.toKoreanConfidence(): String = when (uppercase()) {
+    "HIGH" -> "높음"
+    "MEDIUM" -> "보통"
+    else -> "낮음"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -6,6 +6,8 @@ import com.melodybubble.server.realtime.RealtimePublisher
 import com.melodybubble.server.lounge.LocationLoungeService
 import com.melodybubble.server.realtime.RealtimeQueues
 import com.melodybubble.server.safety.ActionRateLimiter
+import com.melodybubble.server.taste.TasteMatchService
+import com.melodybubble.server.taste.TasteMatchSummary
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -110,7 +112,8 @@ data class NearbyBubble(
     val avatarUrl: String?,
     val profileColor: String,
     val displayPosition: AbstractPosition,
-    val matchScore: Int,
+    val matchScore: Int?,
+    val tasteMatch: TasteMatchSummary? = null,
     val proximity: String,
     val distanceConfidence: String = DistanceConfidence.UNKNOWN.name,
     val distanceAccuracyMeters: Double? = null,
@@ -174,11 +177,13 @@ class NearbyService(
     private val rateLimiter: ActionRateLimiter,
     private val realtime: RealtimePublisher,
     private val locationLounges: LocationLoungeService,
+    private val tasteMatches: TasteMatchService,
     @Value("\${app.nearby.presence-ttl-seconds:90}") private val presenceTtlSeconds: Long,
     @Value("\${app.nearby.max-radius-meters:20}") private val maxRadiusMeters: Int,
 ) {
-    fun directBubble(viewerId: UUID, targetId: UUID): NearbyBubble? = jdbc.query(
-        """
+    fun directBubble(viewerId: UUID, targetId: UUID): NearbyBubble? {
+        val bubble = jdbc.query(
+            """
         select coalesce(ps.nearby_handle,concat('d_',replace(u.id::text,'-',''))) nearby_handle,
           u.profile_handle,u.display_name,u.avatar_seed,u.avatar_data_url,u.profile_color,
           (p.allow_reactions and ps.nearby_handle is not null) allow_reactions,
@@ -207,10 +212,10 @@ class NearbyService(
           and not exists(select 1 from user_blocks b where
             (b.blocker_id=? and b.blocked_id=u.id) or (b.blocker_id=u.id and b.blocked_id=?))
         limit 1
-        """.trimIndent(),
-        { rs, _ ->
-            val handle = rs.getString("nearby_handle")
-            NearbyBubble(
+            """.trimIndent(),
+            { rs, _ ->
+                val handle = rs.getString("nearby_handle")
+                NearbyBubble(
                 nearbyHandle = handle,
                 profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
@@ -218,18 +223,24 @@ class NearbyService(
                 avatarUrl = rs.getString("avatar_data_url"),
                 profileColor = rs.getString("profile_color"),
                 displayPosition = abstractPosition(handle, ProximityBand.WITHIN_10M),
-                matchScore = 65 + stable(handle, 31),
+                matchScore = null,
                 proximity = ProximityBand.WITHIN_10M.name,
                 relationship = rs.getString("relationship"),
                 canReact = rs.getBoolean("allow_reactions"),
                 track = rs.getString("track_title")?.let {
                     TrackSummary(it, rs.getString("artist_name"), rs.getString("album_art_url"))
                 },
-            )
-        },
-        viewerId, viewerId, viewerId, viewerId, targetId, viewerId,
-        viewerId, viewerId, viewerId, viewerId,
-    ).firstOrNull()
+                )
+            },
+            viewerId, viewerId, viewerId, viewerId, targetId, viewerId,
+            viewerId, viewerId, viewerId, viewerId,
+        ).firstOrNull() ?: return null
+        val tasteMatch = tasteMatches.match(viewerId, targetId, "NEARBY")
+        return bubble.copy(
+            matchScore = tasteMatch?.score,
+            tasteMatch = tasteMatch,
+        )
+    }
 
     fun snapshot(userId: UUID): NearbySnapshot = snapshot(userId, enforceRateLimit = true)
 
@@ -342,16 +353,17 @@ class NearbyService(
             add(userId)
             addAll(repeatedUserIds.takeLast(4))
         }.toTypedArray()
-        val items = jdbc.query(sql, { rs, _ ->
+        val rows = jdbc.query(sql, { rs, _ ->
+            val targetUserId = UUID.fromString(rs.getString("user_id"))
             val handle = rs.getString("nearby_handle")
-            val direct = directProximityByTarget[UUID.fromString(rs.getString("user_id"))]
+            val direct = directProximityByTarget[targetUserId]
             val distanceMeters = rs.getDouble("distance_meters").coerceAtMost(radius.toDouble())
             val viewerAccuracy = rs.getDouble("viewer_accuracy_meters").takeUnless { rs.wasNull() }
             val targetAccuracy = rs.getDouble("target_accuracy_meters").takeUnless { rs.wasNull() }
             val combinedAccuracy = combinedHorizontalAccuracyMeters(viewerAccuracy, targetAccuracy)
             val band = direct?.first ?: proximityBand(distanceMeters)
                 ?: ProximityBand.WITHIN_20M
-            NearbyBubble(
+            targetUserId to NearbyBubble(
                 nearbyHandle = handle,
                 profileHandle = rs.getString("profile_handle"),
                 displayAlias = rs.getString("display_name"),
@@ -359,7 +371,7 @@ class NearbyService(
                 avatarUrl = rs.getString("avatar_data_url"),
                 profileColor = rs.getString("profile_color"),
                 displayPosition = abstractPosition(handle, band),
-                matchScore = 65 + stable(handle, 31),
+                matchScore = null,
                 proximity = band.name,
                 distanceConfidence = (direct?.second
                     ?: distanceConfidence(distanceMeters, combinedAccuracy)).name,
@@ -371,6 +383,18 @@ class NearbyService(
                 },
             )
         }, *args)
+        val tasteByTarget = tasteMatches.matchMany(
+            userId,
+            rows.map(Pair<UUID, NearbyBubble>::first),
+            "NEARBY",
+        )
+        val items = rows.map { (targetUserId, bubble) ->
+            val tasteMatch = tasteByTarget[targetUserId]
+            bubble.copy(
+                matchScore = tasteMatch?.score,
+                tasteMatch = tasteMatch,
+            )
+        }
         return NearbySnapshot(radiusMeters = radius, items = items)
     }
 
@@ -933,7 +957,6 @@ class NearbyService(
         }
     }
 
-    private fun stable(value: String, modulo: Int) = (value.hashCode().toUInt().toLong() % modulo).toInt()
 }
 
 @RestController

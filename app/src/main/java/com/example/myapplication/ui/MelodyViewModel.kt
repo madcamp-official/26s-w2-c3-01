@@ -711,6 +711,9 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         val resolvedArtworkUrl = latestTrack?.artworkUrl ?: artworkUrl
         val resolvedTrackKey = previewFollowKey(resolvedTitle, resolvedArtist)
         val resolvedPreviewUrl = previewUrl.takeIf { requestedTrackKey == resolvedTrackKey }
+        (latestSource?.profileHandle ?: sourceNearbyProfileHandle)?.let {
+            repository.recordTasteFeedback(it, "PREVIEW_PLAY")
+        }
         if (sourceNearbyHandle == null) {
             clearFollowedNearbyPreview()
         } else {

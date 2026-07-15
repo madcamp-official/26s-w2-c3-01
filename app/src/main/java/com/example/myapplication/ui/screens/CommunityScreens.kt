@@ -2136,7 +2136,11 @@ fun PublicProfileScreen(
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                         Text("취향 겹침", style = MaterialTheme.typography.labelSmall)
-                                        Text("${taste.score}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            taste.score?.let { "$it%" } ?: "분석 중",
+                                            style = MaterialTheme.typography.headlineSmall,
+                                            fontWeight = FontWeight.Bold,
+                                        )
                                     }
                                 }
                             }

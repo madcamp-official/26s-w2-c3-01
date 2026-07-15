@@ -17,3 +17,6 @@ local.properties
 .kotlin/
 .env
 server/.env
+__pycache__/
+*.py[cod]
+ml/taste_match/artifacts/

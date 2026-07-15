@@ -115,7 +115,7 @@ data class NearbyListener(
     val displayAlias: String,
     val colorHex: Long,
     val displayPosition: DisplayPosition,
-    val matchScore: Int,
+    val matchScore: Int?,
     val proximity: Proximity,
     val proximityConfidence: NearbyProximityConfidence = NearbyProximityConfidence.UNKNOWN,
     val isPlaying: Boolean,
@@ -126,7 +126,11 @@ data class NearbyListener(
     val isNew: Boolean = false,
     val avatarUrl: String? = null,
     val isDirectlyDetected: Boolean = false,
+    val tasteMatch: CommonTasteSummary? = null,
 )
+
+fun NearbyListener.matchesTasteThreshold(threshold: Int): Boolean =
+    tasteMatch?.score?.let { it >= threshold.coerceIn(0, 100) } != false
 
 data class PopularTrack(
     val track: Track,
@@ -285,7 +289,8 @@ data class CommonTasteMetric(
 )
 
 data class CommonTasteSummary(
-    val score: Int,
+    val score: Int?,
+    val confidence: String = "LOW",
     val metrics: List<CommonTasteMetric>,
     val algorithmVersion: String,
     val sampleSize: Int,

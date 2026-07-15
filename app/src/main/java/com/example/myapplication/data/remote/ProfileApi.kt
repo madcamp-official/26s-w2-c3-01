@@ -73,7 +73,8 @@ data class RemoteCommonTasteMetric(
 )
 
 data class RemoteCommonTasteSummary(
-    val score: Int,
+    val score: Int?,
+    val confidence: String = "LOW",
     val metrics: List<RemoteCommonTasteMetric>? = emptyList(),
     val algorithmVersion: String,
     val sampleSize: Int,

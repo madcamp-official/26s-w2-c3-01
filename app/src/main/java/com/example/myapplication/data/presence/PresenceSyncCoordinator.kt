@@ -34,6 +34,7 @@ data class DetectedPlaybackState(
     val durationMs: Long? = null,
     val positionMs: Long? = null,
     val positionObservedAtEpochMs: Long? = null,
+    val sourcePackage: String? = null,
     val observedAtEpochMs: Long = System.currentTimeMillis(),
 )
 
@@ -55,6 +56,7 @@ class PresenceSyncCoordinator private constructor(
     )
     private val tokenStore = SecureTokenStore(applicationContext)
     private val musicSearchRepository = MusicSearchRepository()
+    private val listeningInsightsCollector = ListeningInsightsCollector(applicationContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val _detectedPlayback = MutableStateFlow(readPersistedPlayback())
     private val syncSignals = Channel<Unit>(Channel.CONFLATED)
@@ -95,7 +97,13 @@ class PresenceSyncCoordinator private constructor(
         accessToken = null
         activeSubLoungeId = null
         lastSyncedFingerprint = null
+        listeningInsightsCollector.setEnabled(false)
         syncSignals.trySend(Unit)
+    }
+
+    fun setListeningInsightsEnabled(enabled: Boolean) {
+        listeningInsightsCollector.setEnabled(enabled)
+        if (enabled) scheduleLatestSync(force = true)
     }
 
     fun onPlaybackDetected(
@@ -107,6 +115,7 @@ class PresenceSyncCoordinator private constructor(
         durationMs: Long? = null,
         positionMs: Long? = null,
         positionObservedAtEpochMs: Long? = null,
+        sourcePackage: String? = null,
         isPlaying: Boolean = true,
     ) {
         val safeTitle = title.toSafeMetadata(MAX_TITLE_LENGTH)
@@ -132,6 +141,7 @@ class PresenceSyncCoordinator private constructor(
                 durationMs = durationMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
                 positionMs = positionMs?.takeIf { it in 0..MAX_MEDIA_DURATION_MILLIS },
                 positionObservedAtEpochMs = positionObservedAtEpochMs,
+                sourcePackage = sourcePackage?.take(MAX_PACKAGE_NAME_LENGTH),
             )
         )
         if (safeArtworkUrl == null) {
@@ -208,6 +218,7 @@ class PresenceSyncCoordinator private constructor(
     }
 
     private fun updatePlayback(playback: DetectedPlaybackState) {
+        listeningInsightsCollector.onPlayback(playback)
         persist(playback)
         _detectedPlayback.value = playback
         scheduleLatestSync()
@@ -255,6 +266,11 @@ class PresenceSyncCoordinator private constructor(
             if (accessToken != token) continue
 
             if (result.isSuccess) {
+                // Taste-event delivery is intentionally best-effort. A transient analytics
+                // failure must never delay the live nearby now-playing update.
+                runCatching {
+                    listeningInsightsCollector.checkpointAndUpload("Bearer $token")
+                }
                 lastSyncedFingerprint = fingerprint
                 if (_detectedPlayback.value.fingerprint() != fingerprint) {
                     retryDelayMillis = INITIAL_RETRY_DELAY_MILLIS
@@ -331,7 +347,7 @@ class PresenceSyncCoordinator private constructor(
         "${track?.title.orEmpty()}\u001F${track?.artist.orEmpty()}\u001F${track?.album.orEmpty()}\u001F" +
             "${track?.artworkUrl.orEmpty()}\u001F${track?.platform.orEmpty()}\u001F${artworkUrl.orEmpty()}\u001F" +
             "${durationMs ?: -1}\u001F${positionMs ?: -1}\u001F" +
-            "$isPlaying\u001F$verifiedInCurrentProcess\u001F${activeSubLoungeId.orEmpty()}"
+            "${sourcePackage.orEmpty()}\u001F$isPlaying\u001F$verifiedInCurrentProcess\u001F${activeSubLoungeId.orEmpty()}"
 
     companion object {
         const val PREFERENCES_NAME = "melody_bubble_now_playing_fallback"
@@ -347,6 +363,7 @@ class PresenceSyncCoordinator private constructor(
         private const val MAX_ALBUM_LENGTH = 160
         private const val MAX_SOURCE_LENGTH = 32
         private const val MAX_URL_LENGTH = 2_000
+        private const val MAX_PACKAGE_NAME_LENGTH = 255
         private const val MAX_MEDIA_DURATION_MILLIS = 86_400_000L
         private const val INITIAL_RETRY_DELAY_MILLIS = 1_000L
         private const val MAX_RETRY_DELAY_MILLIS = 30_000L

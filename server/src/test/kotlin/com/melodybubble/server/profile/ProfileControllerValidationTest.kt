@@ -2,6 +2,7 @@ package com.melodybubble.server.profile
 
 import com.melodybubble.server.nearby.NearbyService
 import com.melodybubble.server.safety.ActionRateLimiter
+import com.melodybubble.server.taste.TasteMatchService
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.mockito.Mockito.mock
@@ -16,6 +17,7 @@ class ProfileControllerValidationTest {
         mock(ActionRateLimiter::class.java),
         mock(ProfileQueryService::class.java),
         mock(AvatarUrlFactory::class.java),
+        mock(TasteMatchService::class.java),
     )
     private val principal = Principal { UUID.randomUUID().toString() }
 

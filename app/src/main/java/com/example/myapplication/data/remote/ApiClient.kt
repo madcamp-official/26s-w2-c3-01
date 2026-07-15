@@ -91,6 +91,9 @@ object ApiClient {
     fun createNearbyApi(environment: ApiEnvironment = ApiEnvironment()): NearbyApi =
         authenticatedRetrofit(environment).create(NearbyApi::class.java)
 
+    fun createTasteApi(environment: ApiEnvironment = ApiEnvironment()): TasteApi =
+        authenticatedRetrofit(environment).create(TasteApi::class.java)
+
     fun createProfileApi(environment: ApiEnvironment = ApiEnvironment()): ProfileApi =
         authenticatedRetrofit(environment).create(ProfileApi::class.java)
 

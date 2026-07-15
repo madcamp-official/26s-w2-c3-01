@@ -2,6 +2,9 @@ package com.melodybubble.server.profile
 
 import com.melodybubble.server.nearby.NearbyService
 import com.melodybubble.server.safety.ActionRateLimiter
+import com.melodybubble.server.taste.TasteMatchMetric
+import com.melodybubble.server.taste.TasteMatchService
+import com.melodybubble.server.taste.TasteMatchSummary
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -79,20 +82,8 @@ data class NowPlayingProfile(
     val expiresAt: Instant,
 )
 
-data class CommonTasteMetric(
-    val label: String,
-    val type: String,
-    val score: Int,
-    val evidenceCount: Int,
-)
-
-data class CommonTasteSummary(
-    val score: Int,
-    val metrics: List<CommonTasteMetric>,
-    val algorithmVersion: String = "COMMON_TASTE_V1",
-    val sampleSize: Int,
-    val calculatedAt: Instant = Instant.now(),
-)
+typealias CommonTasteMetric = TasteMatchMetric
+typealias CommonTasteSummary = TasteMatchSummary
 
 data class SharedFollowerPreview(
     val profileHandle: String,
@@ -186,6 +177,7 @@ private data class StoredProfile(
 class ProfileQueryService(
     private val jdbc: JdbcTemplate,
     private val avatars: AvatarUrlFactory,
+    private val tasteMatches: TasteMatchService,
 ) {
     fun me(userId: UUID): ProfileResponse {
         val stored = storedByUserId(userId)
@@ -236,10 +228,9 @@ class ProfileQueryService(
             mutual = mutual,
         )
         val nowPlaying = if (currentMusicVisible) nowPlaying(target.userId) else null
-        val commonTaste = if (viewerId == target.userId) null else commonTaste(
-            viewerId = viewerId,
-            targetId = target.userId,
-        )
+        val commonTaste = if (viewerId == target.userId) null else {
+            tasteMatches.match(viewerId, target.userId, "PROFILE").takeIf { it?.score != null }
+        }
         val sharedFollowers = sharedFollowers(viewerId, target.userId)
         return PublicProfileResponse(
             profileHandle = target.profileHandle,
@@ -418,39 +409,6 @@ class ProfileQueryService(
         userId,
     ).firstOrNull()
 
-    private fun commonTaste(
-        viewerId: UUID,
-        targetId: UUID,
-    ): CommonTasteSummary? {
-        val viewer = tasteEvidence(viewerId)
-        val target = tasteEvidence(targetId)
-        if (viewer.evidenceCount < 3 || target.evidenceCount < 3) return null
-
-        val genreScore = weightedJaccard(viewer.genres, target.genres)
-        val moodScore = weightedJaccard(viewer.moods, target.moods)
-        val artistScore = weightedJaccard(viewer.artists, target.artists)
-        val trackScore = weightedJaccard(viewer.tracks, target.tracks)
-        val total = (
-            genreScore * 0.35 + moodScore * 0.35 + artistScore * 0.20 + trackScore * 0.10
-            ).toInt().coerceIn(0, 100)
-
-        val metrics = buildList {
-            addAll(overlapMetrics(viewer.genres, target.genres, "GENRE"))
-            addAll(overlapMetrics(viewer.moods, target.moods, "MOOD"))
-            if (size < 4) addAll(overlapMetrics(viewer.artists, target.artists, "ARTIST"))
-        }.sortedWith(
-            compareByDescending<CommonTasteMetric> { it.score }
-                .thenByDescending { it.evidenceCount }
-                .thenBy { it.label },
-        ).distinctBy { it.type to it.label.lowercase() }.take(4)
-
-        return CommonTasteSummary(
-            score = total,
-            metrics = metrics,
-            sampleSize = viewer.evidenceCount + target.evidenceCount,
-        )
-    }
-
     private fun tasteEvidence(userId: UUID): TasteEvidence {
         val profile = storedByUserId(userId)
         val tracks = signatureTracks(userId)
@@ -473,31 +431,6 @@ class ProfileQueryService(
             artistWeights.addWeight(artist.name, 1.5)
         }
         return TasteEvidence(genres, moods, artistWeights, trackWeights)
-    }
-
-    private fun weightedJaccard(left: Map<String, Double>, right: Map<String, Double>): Double {
-        val keys = left.keys + right.keys
-        if (keys.isEmpty()) return 0.0
-        val denominator = keys.sumOf { maxOf(left[it] ?: 0.0, right[it] ?: 0.0) }
-        if (denominator <= 0.0) return 0.0
-        return keys.sumOf { minOf(left[it] ?: 0.0, right[it] ?: 0.0) } / denominator * 100.0
-    }
-
-    private fun overlapMetrics(
-        left: Map<String, Double>,
-        right: Map<String, Double>,
-        type: String,
-    ): List<CommonTasteMetric> = left.keys.intersect(right.keys).mapNotNull { key ->
-        val leftWeight = left[key] ?: return@mapNotNull null
-        val rightWeight = right[key] ?: return@mapNotNull null
-        val largest = maxOf(leftWeight, rightWeight)
-        if (largest <= 0.0) return@mapNotNull null
-        CommonTasteMetric(
-            label = key,
-            type = type,
-            score = ((minOf(leftWeight, rightWeight) / largest) * 100).toInt().coerceIn(0, 100),
-            evidenceCount = minOf(leftWeight, rightWeight).toInt().coerceAtLeast(1),
-        )
     }
 
     private fun MutableMap<String, Double>.addWeight(rawLabel: String, weight: Double) {
@@ -606,6 +539,7 @@ class ProfileController(
     private val rateLimiter: ActionRateLimiter,
     private val profiles: ProfileQueryService,
     private val avatars: AvatarUrlFactory,
+    private val tasteMatches: TasteMatchService,
 ) {
     @GetMapping fun me(principal: Principal): ProfileResponse = profiles.me(principal.userId())
 
@@ -621,6 +555,7 @@ class ProfileController(
             name, color, request.bio.trim().take(160),
             request.genres.cleanTags().joinToString(","), request.moods.cleanTags().joinToString(","), userId,
         )
+        tasteMatches.markDirty(userId, "PROFILE_UPDATED")
         return profiles.me(userId)
     }
 
@@ -744,6 +679,7 @@ class ProfileController(
             )
         }
         jdbc.update("update users set profile_revision=profile_revision+1,updated_at=now() where id=?", userId)
+        tasteMatches.markDirty(userId, "CURATION_UPDATED")
         return profiles.me(userId)
     }
 
@@ -775,6 +711,11 @@ class ProfileController(
             userId, currentMusic, request.listeningInsightsEnabled, listening,
             currentMusic.toLegacyMusicVisibility(), currentMusic != "PRIVATE",
         )
+        if (!request.listeningInsightsEnabled) {
+            jdbc.update("delete from music_listen_events where user_id=?", userId)
+            jdbc.update("delete from taste_user_embeddings where user_id=?", userId)
+        }
+        tasteMatches.markDirty(userId, "PRIVACY_UPDATED")
         nearby.publishPrivacyAudienceChangesAfterCommit(userId, previousAudience)
         return profiles.me(userId)
     }
