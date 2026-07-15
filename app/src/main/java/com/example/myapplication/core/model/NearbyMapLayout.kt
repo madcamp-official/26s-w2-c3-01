@@ -1,5 +1,8 @@
 package com.example.myapplication.core.model
 
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
 
 data class NearbyMapMarker(
@@ -16,37 +19,39 @@ fun shouldZoomNearbyMap(listeners: List<NearbyListener>): Boolean =
 fun nearbyMapMarkers(
     listeners: List<NearbyListener>,
     zoomed: Boolean = shouldZoomNearbyMap(listeners),
-    clusterDistance: Float = 0.16f,
+    minimumDistance: Float = 0.16f,
 ): List<NearbyMapMarker> {
-    val positioned = listeners.map { it to it.mapPosition(zoomed) }
-    val remaining = positioned.sortedBy { it.first.nearbyHandle }.toMutableList()
-    val markers = mutableListOf<NearbyMapMarker>()
-
-    while (remaining.isNotEmpty()) {
-        val group = mutableListOf(remaining.removeAt(0))
-        var expanded = true
-        while (expanded) {
-            expanded = false
-            val iterator = remaining.iterator()
-            while (iterator.hasNext()) {
-                val candidate = iterator.next()
-                if (group.any { (_, position) -> position.distanceTo(candidate.second) < clusterDistance }) {
-                    group += candidate
-                    iterator.remove()
-                    expanded = true
-                }
-            }
+    val placed = mutableListOf<DisplayPosition>()
+    return listeners.sortedBy(NearbyListener::nearbyHandle).map { listener ->
+        val desired = listener.mapPosition(zoomed)
+        val candidates = listOf(desired) + placementCandidates(listener, zoomed)
+        val position = candidates.firstOrNull { candidate ->
+            placed.all { it.distanceTo(candidate) >= minimumDistance }
+        } ?: candidates.maxBy { candidate ->
+            placed.minOfOrNull { it.distanceTo(candidate) } ?: Float.MAX_VALUE
         }
-        markers += NearbyMapMarker(
-            listeners = group.map { it.first },
-            position = DisplayPosition(
-                x = group.map { it.second.x }.average().toFloat(),
-                y = group.map { it.second.y }.average().toFloat(),
-            ),
-        )
+        placed += position
+        NearbyMapMarker(listOf(listener), position)
     }
+}
 
-    return markers.sortedBy(NearbyMapMarker::stableKey)
+private fun placementCandidates(listener: NearbyListener, zoomed: Boolean): List<DisplayPosition> {
+    val radii = when {
+        zoomed -> listOf(0.14f, 0.27f, 0.40f)
+        listener.proximity == Proximity.WITHIN_10M -> listOf(0.09f, 0.19f)
+        else -> listOf(0.29f, 0.40f)
+    }
+    val angleOffset = ((listener.nearbyHandle.hashCode().toUInt().toLong() % 360L) * PI / 180.0)
+    return radii.flatMapIndexed { ringIndex, radius ->
+        val slots = if (radius < 0.15f) 8 else if (radius < 0.30f) 12 else 18
+        (0 until slots).map { slot ->
+            val angle = angleOffset + (2.0 * PI * slot / slots) + ringIndex * 0.17
+            DisplayPosition(
+                x = (0.5 + cos(angle) * radius).toFloat(),
+                y = (0.5 + sin(angle) * radius).toFloat(),
+            )
+        }
+    }
 }
 
 private fun NearbyListener.mapPosition(zoomed: Boolean): DisplayPosition {

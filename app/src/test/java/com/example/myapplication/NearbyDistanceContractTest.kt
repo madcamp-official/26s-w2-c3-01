@@ -254,7 +254,7 @@ class NearbyDistanceContractTest {
     }
 
     @Test
-    fun mapZoomsWhenEveryoneIsInsideTenMetersAndClustersOverlaps() {
+    fun mapZoomsWhenEveryoneIsInsideTenMetersAndSeparatesOverlaps() {
         val listeners = listOf(
             listener(Proximity.WITHIN_10M, DisplayPosition(0.53f, 0.50f), "one"),
             listener(Proximity.WITHIN_10M, DisplayPosition(0.54f, 0.50f), "two"),
@@ -262,13 +262,13 @@ class NearbyDistanceContractTest {
 
         assertTrue(shouldZoomNearbyMap(listeners))
         val markers = nearbyMapMarkers(listeners)
-        assertEquals(1, markers.size)
-        assertTrue(markers.single().isCluster)
-        assertEquals(2, markers.single().listeners.size)
+        assertEquals(2, markers.size)
+        assertTrue(markers.none { it.isCluster })
+        assertTrue(markers[0].position.distanceFrom(markers[1].position) >= 0.16f)
     }
 
     @Test
-    fun fullMapClustersOverlappingInnerListenersAndKeepsOuterListenersSeparate() {
+    fun fullMapSeparatesOverlappingListeners() {
         val listeners = listOf(
             listener(Proximity.WITHIN_10M, DisplayPosition(0.50f, 0.50f), "one"),
             listener(Proximity.WITHIN_10M, DisplayPosition(0.54f, 0.50f), "two"),
@@ -278,9 +278,13 @@ class NearbyDistanceContractTest {
 
         assertFalse(shouldZoomNearbyMap(listeners))
         val markers = nearbyMapMarkers(listeners)
-        assertEquals(2, markers.size)
-        assertEquals(3, markers.single { it.isCluster }.listeners.size)
-        assertEquals("outer", markers.single { !it.isCluster }.listeners.single().nearbyHandle)
+        assertEquals(4, markers.size)
+        assertTrue(markers.none { it.isCluster })
+        markers.forEachIndexed { index, marker ->
+            markers.drop(index + 1).forEach { other ->
+                assertTrue(marker.position.distanceFrom(other.position) >= 0.16f)
+            }
+        }
     }
 
     @Test
@@ -475,6 +479,12 @@ class NearbyDistanceContractTest {
         elapsedRealtimeNanos = elapsedNanos,
         source = "gps",
     )
+
+    private fun DisplayPosition.distanceFrom(other: DisplayPosition): Float {
+        val dx = x - other.x
+        val dy = y - other.y
+        return kotlin.math.sqrt(dx * dx + dy * dy)
+    }
 
     private fun listener(
         proximity: Proximity,
