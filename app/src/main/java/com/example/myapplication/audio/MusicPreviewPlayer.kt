@@ -1,5 +1,6 @@
 package com.example.myapplication.audio
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -9,6 +10,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.animation.LinearInterpolator
 import com.example.myapplication.core.model.PreviewPlaybackState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +38,7 @@ class MusicPreviewPlayer(context: Context) {
             .build()
     } else null
     private var player: MediaPlayer? = null
+    private var volumeAnimator: ValueAnimator? = null
     private var remainingPreviewMillis = PREVIEW_LIMIT_MS
     private var playbackStartedAtMillis = 0L
     private val _state = MutableStateFlow(PreviewPlaybackState())
@@ -67,7 +70,12 @@ class MusicPreviewPlayer(context: Context) {
             setAudioAttributes(attributes)
             setDataSource(url)
             setOnPreparedListener {
+                // A newly-created player can briefly reach the speaker before some vendor audio
+                // effects have applied the media-stream gain. Start silent and fade up so that
+                // initialization cannot produce a short full-scale burst.
+                it.setVolume(0f, 0f)
                 it.start()
+                fadeIn(it)
                 _state.value = PreviewPlaybackState(title, artist, artworkUrl, isPlaying = true)
                 remainingPreviewMillis = PREVIEW_LIMIT_MS
                 schedulePreviewEnd()
@@ -88,6 +96,8 @@ class MusicPreviewPlayer(context: Context) {
     private fun pause() {
         val activePlayer = player ?: return
         if (!activePlayer.isPlaying) return
+        volumeAnimator?.cancel()
+        volumeAnimator = null
         activePlayer.pause()
         remainingPreviewMillis = (remainingPreviewMillis -
             (SystemClock.elapsedRealtime() - playbackStartedAtMillis)).coerceAtLeast(0L)
@@ -98,6 +108,7 @@ class MusicPreviewPlayer(context: Context) {
     private fun resume() {
         val activePlayer = player ?: return
         if (!_state.value.isPaused || remainingPreviewMillis <= 0L) return
+        activePlayer.setVolume(1f, 1f)
         activePlayer.start()
         _state.value = _state.value.copy(isPlaying = true, isPaused = false)
         schedulePreviewEnd()
@@ -108,8 +119,25 @@ class MusicPreviewPlayer(context: Context) {
         handler.postDelayed(::stop, remainingPreviewMillis)
     }
 
+    private fun fadeIn(activePlayer: MediaPlayer) {
+        volumeAnimator?.cancel()
+        volumeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = FADE_IN_DURATION_MS
+            interpolator = LinearInterpolator()
+            addUpdateListener { animator ->
+                if (player === activePlayer) {
+                    val volume = animator.animatedValue as Float
+                    runCatching { activePlayer.setVolume(volume, volume) }
+                }
+            }
+            start()
+        }
+    }
+
     fun stop(errorMessage: String? = null) {
         handler.removeCallbacksAndMessages(null)
+        volumeAnimator?.cancel()
+        volumeAnimator = null
         player?.let { runCatching { it.stop() }; it.release() }
         player = null
         remainingPreviewMillis = PREVIEW_LIMIT_MS
@@ -125,5 +153,8 @@ class MusicPreviewPlayer(context: Context) {
 
     fun release() = stop()
 
-    private companion object { const val PREVIEW_LIMIT_MS = 30_000L }
+    private companion object {
+        const val PREVIEW_LIMIT_MS = 30_000L
+        const val FADE_IN_DURATION_MS = 400L
+    }
 }
