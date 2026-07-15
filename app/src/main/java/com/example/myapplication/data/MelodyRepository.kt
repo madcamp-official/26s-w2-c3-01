@@ -411,6 +411,7 @@ class DemoMelodyRepository(
     private val musicSearchRepository = MusicSearchRepository()
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(applicationContext)
     @Volatile private var accessToken: String? = null
+    private val latestLocationFixLock = Any()
     private var locationReceiverRegistered = false
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -428,7 +429,9 @@ class DemoMelodyRepository(
             if (_state.value.sharingState == SharingState.STARTING ||
                 _state.value.sharingState == SharingState.ACTIVE
             ) {
-                latestLocationFix = LocationFix(latitude, longitude, accuracy, source, observedAt)
+                rememberLatestLocationFix(
+                    LocationFix(latitude, longitude, accuracy, source, observedAt),
+                )
                 locationSyncSignal.trySend(Unit)
             }
         }
@@ -672,7 +675,9 @@ class DemoMelodyRepository(
         pendingDirectResolve?.cancel()
         passiveNearbyDiscovery.stop()
         passiveDiscoveryStarted = false
-        latestLocationFix = null
+        synchronized(latestLocationFixLock) {
+            latestLocationFix = null
+        }
         nearbyProximityStabilizer.clear()
         explicitlyRemovedNearbyHandles.clear()
         lastMusicEventAtByHandle.clear()
@@ -2058,10 +2063,25 @@ class DemoMelodyRepository(
 
     private suspend fun syncLatestLocationPresence(): Boolean =
         presenceSyncMutex.withLock {
-            val fix = latestLocationFix ?: return@withLock false
+            val fix = reusableLatestLocationFix() ?: return@withLock false
             awaitPresenceSyncSlot()
             syncPresenceLocked(fix, requirePrecise = true)
         }
+
+    private fun reusableLatestLocationFix(): LocationFix? = synchronized(latestLocationFixLock) {
+        latestLocationFix?.takeIf {
+            NearbyLocationPolicy.isReusableForPresenceKeepAlive(it.accuracyMeters)
+        }
+    }
+
+    private fun rememberLatestLocationFix(candidate: LocationFix) {
+        synchronized(latestLocationFixLock) {
+            val current = latestLocationFix
+            if (current == null || candidate.observedAtEpochMillis >= current.observedAtEpochMillis) {
+                latestLocationFix = candidate
+            }
+        }
+    }
 
     private suspend fun awaitPresenceSyncSlot() {
         val elapsed = SystemClock.elapsedRealtime()
@@ -2077,7 +2097,9 @@ class DemoMelodyRepository(
     ): Boolean {
         val token = accessToken ?: return false
         val nearbyVersionAtRequest = nearbyRealtimeVersion.get()
-        val location = fix ?: currentLocation(allowInitialCoarseLocation = !requirePrecise)?.let {
+        val freshLocation = fix ?: currentLocation(
+            allowInitialCoarseLocation = !requirePrecise,
+        )?.let {
             LocationFix(
                 it.latitude,
                 it.longitude,
@@ -2085,7 +2107,8 @@ class DemoMelodyRepository(
                 it.provider.orEmpty(),
                 it.time,
             )
-        } ?: run {
+        }
+        val location = freshLocation ?: reusableLatestLocationFix() ?: run {
             _state.update { current ->
                 val loadState = current.nearbyLoadState.keepSettledDuringRefresh(
                     NearbyLoadState.LOADING,
@@ -2118,6 +2141,9 @@ class DemoMelodyRepository(
                 )
             )
             if (!isCurrentSession(token)) return@runCatching false
+            if (NearbyLocationPolicy.isReusableForPresenceKeepAlive(location.accuracyMeters)) {
+                rememberLatestLocationFix(location)
+            }
             val incomingListeners = preserveNewerRealtimeMusic(
                 mergeDirectNearby(snapshot.items.map { it.toDomain() }),
                 snapshot.generatedAt,

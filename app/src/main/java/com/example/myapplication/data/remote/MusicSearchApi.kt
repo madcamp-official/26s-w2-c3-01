@@ -88,7 +88,7 @@ class MusicSearchRepository(
         val directMatch = exactTitleCandidates.firstOrNull {
             it.artist.withoutMusicQualifier().normalizedMusicIdentity() == normalizedArtist
         }
-        val resolved = directMatch ?: run {
+        val storefrontMatch = directMatch ?: run {
             // The Korean storefront localizes some artist names (ILLIT -> 아일릿). Resolve the
             // storefront artist id separately, then use it to disambiguate identical song titles.
             val artistResults = api.search(term = safeArtist, limit = 30)
@@ -101,6 +101,19 @@ class MusicSearchRepository(
                 localizedArtistId != null && it.artistId == localizedArtistId
             } ?: exactTitleCandidates.firstOrNull()
                 ?.takeIf { combinedResults.firstOrNull() === it }
+        }
+        val resolved = storefrontMatch ?: run {
+            // Some Korean catalog entries localize both the artist and title
+            // (DAY6 / You Were Beautiful -> 데이식스 / 예뻤어). Never guess which localized
+            // result is equivalent. Instead, consult a storefront that preserves the supplied
+            // metadata and accept only an exact title + artist match. When the same recording is
+            // listed on multiple albums, all exact candidates must still agree on release day and
+            // duration closely enough to rule out a distinct version with the same display name.
+            api.search(
+                term = "$safeTitle $safeArtist",
+                country = FALLBACK_METADATA_STOREFRONT,
+                limit = 30,
+            ).results.toSearchResults().safeExactCrossStoreMatch(safeTitle, safeArtist)
         }
         return resolved?.also { trackMediaCache[cacheKey] = it }
     }
@@ -184,7 +197,36 @@ class MusicSearchRepository(
         }
 
     suspend fun genres(): List<String> = SUPPORTED_PROFILE_GENRES
+
+    private companion object {
+        const val FALLBACK_METADATA_STOREFRONT = "US"
+    }
 }
+
+private fun List<MusicSearchResult>.safeExactCrossStoreMatch(
+    title: String,
+    artist: String,
+): MusicSearchResult? {
+    val normalizedTitle = title.normalizedMusicIdentity()
+    val normalizedArtist = artist.withoutMusicQualifier().normalizedMusicIdentity()
+    val exactCandidates = filter { candidate ->
+        candidate.title.normalizedMusicIdentity() == normalizedTitle &&
+            candidate.artist.withoutMusicQualifier().normalizedMusicIdentity() == normalizedArtist &&
+            candidate.previewUrl?.startsWith("https://") == true
+    }
+    if (exactCandidates.isEmpty()) return null
+    if (exactCandidates.size == 1) return exactCandidates.single()
+
+    val releaseDays = exactCandidates.map { it.releaseDate?.take(10) }
+    if (releaseDays.any { it.isNullOrBlank() } || releaseDays.distinct().size != 1) return null
+    val durations = exactCandidates.map { it.durationSeconds }.filter { it > 0 }
+    if (durations.size != exactCandidates.size ||
+        durations.maxOrNull()!! - durations.minOrNull()!! > MAX_EQUIVALENT_RECORDING_DURATION_DELTA_SECONDS
+    ) return null
+    return exactCandidates.first()
+}
+
+private const val MAX_EQUIVALENT_RECORDING_DURATION_DELTA_SECONDS = 3
 
 internal val SUPPORTED_PROFILE_GENRES = listOf(
     "발라드",

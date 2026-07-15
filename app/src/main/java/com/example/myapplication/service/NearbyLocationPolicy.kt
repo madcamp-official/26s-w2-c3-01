@@ -25,6 +25,16 @@ object NearbyLocationPolicy {
     const val INITIAL_MAX_ACCURACY_METERS = 50f
     const val INITIAL_MAX_AGE_MILLIS = 30_000L
 
+    /**
+     * A foreground sharing session may temporarily stop receiving fresh fixes while the device is
+     * stationary or dozing. Reusing the last precise fix keeps the server-side presence alive; a
+     * new location callback still replaces it immediately when the device moves.
+     */
+    fun isReusableForPresenceKeepAlive(accuracyMeters: Float?): Boolean =
+        accuracyMeters != null &&
+            accuracyMeters.isFinite() &&
+            accuracyMeters <= MAX_ACCURACY_METERS
+
     fun isUsable(
         observedAtMillis: Long,
         accuracyMeters: Float?,

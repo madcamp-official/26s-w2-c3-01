@@ -10,10 +10,201 @@ import com.example.myapplication.data.remote.MusicSearchApi
 import com.example.myapplication.data.remote.MusicSearchRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MusicSearchRepositoryTest {
+    @Test
+    fun resolvesLocalizedTitleOnlyThroughExactCrossStoreMetadata() = runBlocking {
+        val officialPreview = "https://audio.example/day6-official.m4a"
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ): ITunesSearchResponse = when {
+                country == "US" -> ITunesSearchResponse(
+                    resultCount = 3,
+                    results = listOf(
+                        ITunesSongDto(
+                            trackId = 10L,
+                            artistId = 100L,
+                            trackName = "You Were Beautiful",
+                            artistName = "DAY6",
+                            releaseDate = "2017-02-06T12:00:00Z",
+                            trackTimeMillis = 283_160L,
+                            previewUrl = officialPreview,
+                        ),
+                        ITunesSongDto(
+                            trackId = 12L,
+                            artistId = 100L,
+                            trackName = "You Were Beautiful",
+                            artistName = "DAY6",
+                            releaseDate = "2017-02-06T12:00:00Z",
+                            trackTimeMillis = 283_160L,
+                            previewUrl = "https://audio.example/day6-album-copy.m4a",
+                        ),
+                        ITunesSongDto(
+                            trackId = 11L,
+                            artistId = 999L,
+                            trackName = "You Were Beautiful",
+                            artistName = "Shin Giwon",
+                            releaseDate = "2020-02-02T12:00:00Z",
+                            trackTimeMillis = 287_143L,
+                            previewUrl = "https://audio.example/piano-cover.m4a",
+                        ),
+                    ),
+                )
+                term == "DAY6" -> ITunesSearchResponse(
+                    resultCount = 1,
+                    results = listOf(
+                        ITunesSongDto(
+                            trackId = 3L,
+                            artistId = 100L,
+                            trackName = "예뻤어",
+                            artistName = "데이식스",
+                        ),
+                    ),
+                )
+                else -> ITunesSearchResponse(
+                    resultCount = 2,
+                    results = listOf(
+                        ITunesSongDto(
+                            trackId = 1L,
+                            artistId = 100L,
+                            trackName = "예뻤어",
+                            artistName = "데이식스",
+                            previewUrl = "https://audio.example/localized-official.m4a",
+                        ),
+                        ITunesSongDto(
+                            trackId = 2L,
+                            artistId = 999L,
+                            trackName = "You Were Beautiful",
+                            artistName = "신기원",
+                            previewUrl = "https://audio.example/piano-cover.m4a",
+                        ),
+                    ),
+                )
+            }
+        }
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String) = DeezerArtistSearchResponse()
+        }
+
+        val result = MusicSearchRepository(api, artistApi)
+            .findTrackMedia("You Were Beautiful", "DAY6")
+
+        assertEquals(officialPreview, result?.previewUrl)
+        assertEquals("DAY6", result?.artist)
+    }
+
+    @Test
+    fun rejectsCrossStoreFallbackWhenExactMetadataPointsOnlyToAnotherArtist() = runBlocking {
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ) = if (country == "US") {
+                ITunesSearchResponse(
+                    resultCount = 1,
+                    results = listOf(
+                        ITunesSongDto(
+                            trackId = 20L,
+                            artistId = 999L,
+                            trackName = "You Were Beautiful",
+                            artistName = "Shin Giwon",
+                            previewUrl = "https://audio.example/piano-cover.m4a",
+                        ),
+                    ),
+                )
+            } else {
+                ITunesSearchResponse()
+            }
+        }
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String) = DeezerArtistSearchResponse()
+        }
+
+        val result = MusicSearchRepository(api, artistApi)
+            .findTrackMedia("You Were Beautiful", "DAY6")
+
+        assertNull(result)
+    }
+
+    @Test
+    fun rejectsAmbiguousCrossStoreVersionsEvenWhenArtistAndTitleMatch() = runBlocking {
+        val api = object : MusicSearchApi {
+            override suspend fun genres(
+                rootGenreId: Int,
+                country: String,
+                language: String,
+            ): Map<String, ITunesGenreDto> = emptyMap()
+
+            override suspend fun search(
+                term: String,
+                country: String,
+                media: String,
+                entity: String,
+                limit: Int,
+                explicit: String,
+            ) = if (country == "US") {
+                ITunesSearchResponse(
+                    resultCount = 2,
+                    results = listOf(
+                        ITunesSongDto(
+                            trackId = 30L,
+                            artistId = 100L,
+                            trackName = "Same Name",
+                            artistName = "Same Artist",
+                            releaseDate = "2020-01-01T12:00:00Z",
+                            trackTimeMillis = 180_000L,
+                            previewUrl = "https://audio.example/first-version.m4a",
+                        ),
+                        ITunesSongDto(
+                            trackId = 31L,
+                            artistId = 100L,
+                            trackName = "Same Name",
+                            artistName = "Same Artist",
+                            releaseDate = "2024-01-01T12:00:00Z",
+                            trackTimeMillis = 220_000L,
+                            previewUrl = "https://audio.example/second-version.m4a",
+                        ),
+                    ),
+                )
+            } else {
+                ITunesSearchResponse()
+            }
+        }
+        val artistApi = object : DeezerArtistApi {
+            override suspend fun search(artistName: String) = DeezerArtistSearchResponse()
+        }
+
+        val result = MusicSearchRepository(api, artistApi)
+            .findTrackMedia("Same Name", "Same Artist")
+
+        assertNull(result)
+    }
+
     @Test
     fun resolvesLocalizedArtistByArtistIdWhenTrackTitleIsAmbiguous() = runBlocking {
         val correctPreview = "https://audio.example/illit.m4a"

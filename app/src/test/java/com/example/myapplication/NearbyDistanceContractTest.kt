@@ -173,6 +173,14 @@ class NearbyDistanceContractTest {
         assertTrue(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 20_000L, 45f, now))
         assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 31_000L, 45f, now))
         assertFalse(NearbyLocationPolicy.isUsableForInitialDiscovery(now - 5_000L, 51f, now))
+
+        // A stationary foreground session can reuse only a previously precise fix for its
+        // presence heartbeat. Its age is intentionally irrelevant; movement produces a new fix.
+        assertTrue(NearbyLocationPolicy.isReusableForPresenceKeepAlive(11f))
+        assertTrue(NearbyLocationPolicy.isReusableForPresenceKeepAlive(35f))
+        assertFalse(NearbyLocationPolicy.isReusableForPresenceKeepAlive(36f))
+        assertFalse(NearbyLocationPolicy.isReusableForPresenceKeepAlive(Float.NaN))
+        assertFalse(NearbyLocationPolicy.isReusableForPresenceKeepAlive(null))
     }
 
     @Test
