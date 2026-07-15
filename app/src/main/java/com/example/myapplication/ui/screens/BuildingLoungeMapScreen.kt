@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -50,6 +51,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -767,62 +769,83 @@ private fun SubLoungeDetailScreen(
             submissionStarted = false
         }
     }
-    PullToRefreshBox(
-        isRefreshing = state.detailLoading,
-        onRefresh = onRefresh,
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MossSurface),
     ) {
-        LazyColumn(
+        Surface(
             modifier = Modifier
-                .fillMaxSize()
-                .navigationBarsPadding(),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                start = 18.dp,
-                end = 18.dp,
-                bottom = 28.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .fillMaxWidth()
+                .statusBarsPadding(),
+            color = MossSurface,
         ) {
-            item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "하위 라운지 뒤로가기")
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            snapshot?.title ?: "하위 라운지 연결 중",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            snapshot?.style ?: "실시간 상태를 불러오고 있어요",
-                            color = MutedMint,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = if (state.realtimeState == ConnectionState.LIVE) {
-                            SignalGreen.copy(alpha = 0.16f)
-                        } else {
-                            MossSurfaceHigh
-                        },
-                    ) {
-                        Text(
-                            if (state.realtimeState == ConnectionState.LIVE) "실시간" else "재연결 중",
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                            color = if (state.realtimeState == ConnectionState.LIVE) SignalGreen else MutedMint,
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
-                    IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "라운지 새로고침")
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "하위 라운지 뒤로가기")
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        snapshot?.title ?: "하위 라운지 연결 중",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        snapshot?.style ?: "실시간 상태를 불러오고 있어요",
+                        color = MutedMint,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = if (state.realtimeState == ConnectionState.LIVE) {
+                        SignalGreen.copy(alpha = 0.16f)
+                    } else {
+                        MossSurfaceHigh
+                    },
+                ) {
+                    Text(
+                        if (state.realtimeState == ConnectionState.LIVE) "실시간" else "재연결 중",
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                        color = if (state.realtimeState == ConnectionState.LIVE) SignalGreen else MutedMint,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Outlined.Refresh, contentDescription = "라운지 새로고침")
                 }
             }
+        }
+        HorizontalDivider(color = MossOutline.copy(alpha = 0.55f))
 
+        PullToRefreshBox(
+            isRefreshing = state.detailLoading,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 18.dp,
+                    top = 18.dp,
+                    end = 18.dp,
+                    bottom = 28.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
             if (state.detailLoading && snapshot == null) {
                 item {
                     Box(Modifier.fillMaxWidth().height(180.dp), contentAlignment = Alignment.Center) {
@@ -1100,6 +1123,7 @@ private fun SubLoungeDetailScreen(
                 }
             }
         }
+    }
     }
 
     if (confirmDeleteVisible) {
