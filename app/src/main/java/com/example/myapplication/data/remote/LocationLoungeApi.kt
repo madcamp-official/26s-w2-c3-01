@@ -34,9 +34,15 @@ data class LocationLoungeChatRoomDto(
     val createdAt: String,
     val updatedAt: String,
     val status: String,
+    val memberCount: Int = 0,
 )
 
 data class CreateLocationLoungeChatRoomRequestDto(val title: String)
+
+data class ActiveLocationLoungeRoomDto(
+    val room: LocationLoungeChatRoomDto,
+    val cards: List<LoungeRecommendationCardDto>,
+)
 
 data class LocationLoungeEntry(
     val lounge: BuildingLoungeSummaryDto,
@@ -59,6 +65,11 @@ interface LocationLoungeApi {
         @Header("Authorization") authorization: String,
         @Path("loungeId") loungeId: String,
     ): List<LocationLoungeChatRoomDto>
+
+    @GET("api/v1/location-lounges/chat-rooms/active")
+    suspend fun activeChatRoom(
+        @Header("Authorization") authorization: String,
+    ): ActiveLocationLoungeRoomDto?
 
     @POST("api/v1/location-lounges/{loungeId}/chat-rooms")
     suspend fun createChatRoom(
@@ -152,6 +163,13 @@ class LocationLoungeRepository(
     suspend fun chatRooms(token: String, loungeId: String): Result<List<SubLoungeSummaryDto>> =
         runCatching { api.chatRooms("Bearer $token", loungeId).map { it.asSubLoungeSummary() } }
 
+    suspend fun activeChatRoom(token: String): Result<SubLoungeSnapshotDto?> =
+        runCatching {
+            api.activeChatRoom("Bearer $token")?.let { active ->
+                active.room.asSubLoungeSnapshot(active.cards)
+            }
+        }
+
     suspend fun createChatRoom(token: String, loungeId: String, title: String): Result<SubLoungeSummaryDto> =
         runCatching {
             api.createChatRoom(
@@ -162,7 +180,11 @@ class LocationLoungeRepository(
         }
 
     suspend fun joinChatRoom(token: String, roomId: String): Result<SubLoungeSnapshotDto> =
-        runCatching { api.joinChatRoom("Bearer $token", roomId).asSubLoungeSnapshot() }
+        runCatching {
+            val authorization = "Bearer $token"
+            val room = api.joinChatRoom(authorization, roomId)
+            room.asSubLoungeSnapshot(api.cards(authorization, roomId))
+        }
 
     suspend fun roomSnapshot(token: String, loungeId: String, roomId: String): Result<SubLoungeSnapshotDto> =
         runCatching {
@@ -218,7 +240,7 @@ class LocationLoungeRepository(
         buildingLoungeId = loungeId,
         title = title,
         style = null,
-        memberCount = if (joined) 1 else 0,
+        memberCount = memberCount,
         createdAt = createdAt,
     )
 
@@ -229,7 +251,7 @@ class LocationLoungeRepository(
         buildingLoungeId = loungeId,
         title = title,
         style = null,
-        memberCount = if (joined) 1 else 0,
+        memberCount = memberCount,
         joined = joined,
         canDelete = false,
         listeningStatuses = emptyList(),

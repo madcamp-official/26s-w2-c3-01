@@ -25,6 +25,7 @@ object LocationLoungePolicy {
     const val MAX_RADIUS_METERS = 20
     const val INITIAL_RADIUS_GRACE_SECONDS = 60L
     const val EXIT_GRACE_SECONDS = 60L
+    const val AUTO_DELETE_GRACE_SECONDS = 180L
     const val OVERLAP_THRESHOLD = 0.70
     const val MAX_CHAT_ROOMS = 5
 
@@ -50,7 +51,7 @@ object LocationLoungePolicy {
         now: Instant,
         status: LocationLoungeStatus,
     ): Boolean = status == LocationLoungeStatus.ACTIVE && currentUserCount <= 2 &&
-        !createdAt.plusSeconds(60).isAfter(now)
+        !createdAt.plusSeconds(AUTO_DELETE_GRACE_SECONDS).isAfter(now)
 
     fun radiusFor(userCount: Int): Int = when {
         userCount >= 10 -> 20

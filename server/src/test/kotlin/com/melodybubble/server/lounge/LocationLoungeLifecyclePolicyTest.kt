@@ -74,10 +74,10 @@ class LocationLoungeLifecyclePolicyTest {
     }
 
     @Test
-    fun `grace period protects underpopulated lounge for first minute`() {
+    fun `grace period protects underpopulated lounge for first three minutes`() {
         val created = Instant.parse("2026-07-14T00:00:00Z")
         assertThat(
-            LocationLoungePolicy.shouldAutoDelete(1, created, created.plusSeconds(59), LocationLoungeStatus.ACTIVE),
+            LocationLoungePolicy.shouldAutoDelete(1, created, created.plusSeconds(179), LocationLoungeStatus.ACTIVE),
         ).isFalse()
     }
 
@@ -85,7 +85,7 @@ class LocationLoungeLifecyclePolicyTest {
     fun `underpopulated lounge deletes at and after grace boundary`() {
         val created = Instant.parse("2026-07-14T00:00:00Z")
         assertThat(
-            LocationLoungePolicy.shouldAutoDelete(2, created, created.plusSeconds(60), LocationLoungeStatus.ACTIVE),
+            LocationLoungePolicy.shouldAutoDelete(2, created, created.plusSeconds(180), LocationLoungeStatus.ACTIVE),
         ).isTrue()
         assertThat(
             LocationLoungePolicy.shouldAutoDelete(0, created, created.plusSeconds(600), LocationLoungeStatus.ACTIVE),

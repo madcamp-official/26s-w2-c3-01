@@ -47,6 +47,16 @@ import java.io.IOException
 
 private const val NEARBY_PREVIEW_TRACK_STABILITY_MILLIS = 700L
 private const val STOPPED_PREVIEW_FOLLOW_KEY = "\u0000stopped"
+private val LOCATION_LOUNGE_DETAIL_EVENT_TYPES = setOf(
+    "CHAT_ROOM_CREATED",
+    "CHAT_ROOM_DELETED",
+    "CHAT_ROOM_MOVED",
+    "CHAT_ROOM_MEMBER_JOINED",
+    "CHAT_ROOM_MEMBER_LEFT",
+    "RECOMMENDATION_CARD_CREATED",
+    "RECOMMENDATION_CARD_REACTED",
+    "RECOMMENDATION_CARD_DELETED",
+)
 
 internal fun List<NearbyListener>.findPreviewSource(
     nearbyHandle: String?,
@@ -291,6 +301,24 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
                 if (event is RealtimeEvent.LocationLoungeUpdated) {
                     _buildingLoungeState.value.userLocation?.let { location ->
                         refreshBuildingLounges(location.latitude, location.longitude, location.accuracyMeters)
+                    }
+                    if (event.type in LOCATION_LOUNGE_DETAIL_EVENT_TYPES) {
+                        val token = accessToken
+                        val current = _buildingLoungeState.value
+                        val loungeId = current.enteredLoungeId
+                        if (token != null && loungeId != null) {
+                            locationLoungeRepository.chatRooms(token, loungeId)
+                                .onSuccess { rooms ->
+                                    if (_buildingLoungeState.value.enteredLoungeId == loungeId) {
+                                        _buildingLoungeState.value = _buildingLoungeState.value.copy(
+                                            subLounges = rooms,
+                                        )
+                                    }
+                                }
+                        }
+                        if (current.selectedSubLoungeId != null) {
+                            refreshSelectedSubLounge(silent = true)
+                        }
                     }
                 }
                 if (event is RealtimeEvent.SubLoungeUpdated &&
@@ -1157,13 +1185,11 @@ class MelodyViewModel(application: Application) : AndroidViewModel(application) 
         if (restoredSubLoungeSession) return
         restoredSubLoungeSession = true
         viewModelScope.launch {
-            buildingLoungeRepository.activeSubLounge(token)
+            locationLoungeRepository.activeChatRoom(token)
                 .onSuccess { snapshot ->
                     snapshot ?: return@onSuccess
                     latestSubLoungeSnapshotAt = snapshot.generatedAt
-                    realtimeClient.subscribeTopic(RealtimeDestinations.subLounge(snapshot.id))
-                    presenceCoordinator.activateSubLounge(snapshot.id)
-                    val rooms = buildingLoungeRepository.subLounges(token, snapshot.buildingLoungeId)
+                    val rooms = locationLoungeRepository.chatRooms(token, snapshot.buildingLoungeId)
                         .getOrDefault(emptyList())
                     _buildingLoungeState.value = _buildingLoungeState.value.copy(
                         enteredLoungeId = snapshot.buildingLoungeId,

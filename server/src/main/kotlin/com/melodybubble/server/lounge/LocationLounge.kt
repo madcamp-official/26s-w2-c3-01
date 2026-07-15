@@ -47,6 +47,7 @@ data class LoungeChatRoomSummary(
     val createdAt: Instant,
     val updatedAt: Instant,
     val status: String,
+    val memberCount: Int,
 )
 data class LoungeChatMessage(
     val id: UUID,
@@ -54,6 +55,10 @@ data class LoungeChatMessage(
     val senderId: UUID,
     val content: String,
     val sentAt: Instant,
+)
+data class ActiveLocationLoungeRoom(
+    val room: LoungeChatRoomSummary,
+    val cards: List<LoungeRecommendationCard>,
 )
 data class LoungeMergedPayload(
     val deletedLoungeId: UUID,
@@ -256,7 +261,7 @@ class LocationLoungeService(
         val ids = jdbc.query(
             """
             SELECT id FROM location_lounges
-            WHERE status='ACTIVE' AND current_user_count<=2 AND created_at<=now()-interval '1 minute'
+            WHERE status='ACTIVE' AND current_user_count<=2 AND created_at<=now()-interval '3 minutes'
             FOR UPDATE
             """.trimIndent(),
             { rs, _ -> UUID.fromString(rs.getString(1)) },
@@ -328,15 +333,37 @@ class LocationLoungeService(
             ON CONFLICT(chat_room_id,user_id) DO UPDATE SET active=true,updated_at=now()
             """.trimIndent(), roomId, userId,
         )
-        return chatRoomsUnchecked(userId, loungeId).first { it.chatRoomId == roomId }
+        val room = chatRoomsUnchecked(userId, loungeId).first { it.chatRoomId == roomId }
+        publish(
+            RealtimeEventTypes.CHAT_ROOM_MEMBER_JOINED,
+            mapOf(
+                "chatRoomId" to roomId,
+                "loungeId" to loungeId,
+                "userId" to userId,
+                "memberCount" to room.memberCount,
+            ),
+        )
+        return room
     }
 
     @Transactional
     fun leaveChatRoom(userId: UUID, roomId: UUID) {
-        jdbc.update(
-            "UPDATE location_lounge_chat_members SET active=false,updated_at=now() WHERE chat_room_id=? AND user_id=?",
+        val changed = jdbc.update(
+            "UPDATE location_lounge_chat_members SET active=false,updated_at=now() WHERE chat_room_id=? AND user_id=? AND active=true",
             roomId, userId,
         )
+        if (changed == 1) {
+            val loungeId = loungeIdForRoom(roomId)
+            publish(
+                RealtimeEventTypes.CHAT_ROOM_MEMBER_LEFT,
+                mapOf(
+                    "chatRoomId" to roomId,
+                    "loungeId" to loungeId,
+                    "userId" to userId,
+                    "memberCount" to activeChatRoomMemberCount(roomId),
+                ),
+            )
+        }
     }
 
     @Transactional
@@ -347,6 +374,30 @@ class LocationLoungeService(
         )
         if (changed != 1) throw ResponseStatusException(HttpStatus.FORBIDDEN, "방장만 채팅방을 삭제할 수 있습니다.")
         publish(RealtimeEventTypes.CHAT_ROOM_DELETED, mapOf("chatRoomId" to roomId))
+    }
+
+    @Transactional(readOnly = true)
+    fun activeChatRoom(userId: UUID): ActiveLocationLoungeRoom? {
+        val active = jdbc.query(
+            """
+            SELECT room.id,lounge.id lounge_id
+            FROM location_lounge_chat_members member
+            JOIN location_lounge_chat_rooms room
+              ON room.id=member.chat_room_id AND room.status='ACTIVE'
+            JOIN location_lounges lounge
+              ON lounge.id=room.lounge_id AND lounge.status='ACTIVE'
+            WHERE member.user_id=? AND member.active=true
+            ORDER BY member.updated_at DESC,room.updated_at DESC,room.id DESC
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ ->
+                UUID.fromString(rs.getString("id")) to UUID.fromString(rs.getString("lounge_id"))
+            },
+            userId,
+        ).firstOrNull() ?: return null
+        val (roomId, loungeId) = active
+        val room = chatRoomsUnchecked(userId, loungeId).firstOrNull { it.chatRoomId == roomId } ?: return null
+        return ActiveLocationLoungeRoom(room, cardsUnchecked(userId, roomId))
     }
 
     @Transactional(readOnly = true)
@@ -463,7 +514,9 @@ class LocationLoungeService(
     private fun chatRoomsUnchecked(userId: UUID, loungeId: UUID) = jdbc.query(
         """
         SELECT room.id,room.lounge_id,room.owner_id,room.title,room.created_at,room.updated_at,room.status,
-               coalesce(member.active,false) joined
+               coalesce(member.active,false) joined,
+               (SELECT count(*) FROM location_lounge_chat_members active_member
+                WHERE active_member.chat_room_id=room.id AND active_member.active=true) member_count
         FROM location_lounge_chat_rooms room
         LEFT JOIN location_lounge_chat_members member ON member.chat_room_id=room.id AND member.user_id=?
         WHERE room.lounge_id=? AND room.status='ACTIVE' ORDER BY room.created_at,room.id
@@ -473,7 +526,7 @@ class LocationLoungeService(
                 UUID.fromString(rs.getString("id")), UUID.fromString(rs.getString("lounge_id")),
                 UUID.fromString(rs.getString("owner_id")), rs.getString("title"), rs.getBoolean("joined"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("status"),
+                rs.getString("status"), rs.getInt("member_count"),
             )
         }, userId, loungeId,
     )
@@ -597,6 +650,12 @@ class LocationLoungeService(
         roomId,
     )
 
+    private fun activeChatRoomMemberCount(roomId: UUID): Int = jdbc.queryForObject(
+        "SELECT count(*) FROM location_lounge_chat_members WHERE chat_room_id=? AND active=true",
+        Int::class.java,
+        roomId,
+    ) ?: 0
+
     private fun requireActiveLounge(id: UUID) {
         val active = jdbc.queryForObject(
             "SELECT status='ACTIVE' FROM location_lounges WHERE id=?", Boolean::class.java, id,
@@ -664,6 +723,10 @@ class LocationLoungeController(private val service: LocationLoungeService) {
     @GetMapping("/{loungeId}/chat-rooms")
     fun chatRooms(principal: Principal, @PathVariable loungeId: UUID) =
         service.chatRooms(UUID.fromString(principal.name), loungeId)
+
+    @GetMapping("/chat-rooms/active")
+    fun activeChatRoom(principal: Principal) =
+        service.activeChatRoom(UUID.fromString(principal.name))
 
     @PostMapping("/{loungeId}/chat-rooms")
     fun createChatRoom(

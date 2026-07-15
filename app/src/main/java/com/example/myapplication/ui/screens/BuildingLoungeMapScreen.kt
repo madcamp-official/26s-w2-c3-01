@@ -57,6 +57,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -212,6 +213,26 @@ fun BuildingLoungeMapScreen(
         }
     }
 
+    if (state.selectedSubLoungeId != null) {
+        SubLoungeDetailScreen(
+            state = state,
+            previewPlaybackState = previewPlaybackState,
+            onBack = onLeaveSubLounge,
+            onLeave = onLeaveSubLounge,
+            onDeleteSubLounge = onDeleteSubLounge,
+            onSearchTracks = onSearchTracks,
+            onSendSearchedTrack = onSendSearchedTrack,
+            onDeleteCard = onDeleteCard,
+            onReactToCard = onReactToCard,
+            onVote = onVote,
+            onRefresh = onRefreshSubLounge,
+            onOpenProfile = onOpenProfile,
+            onOpenMembers = onOpenMembers,
+            profileHandlesByAlias = profileHandlesByAlias,
+        )
+        return
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         if (BuildConfig.GOOGLE_MAPS_API_KEY.isBlank()) {
             MissingMapKeyPanel(modifier = Modifier.fillMaxSize())
@@ -275,24 +296,6 @@ fun BuildingLoungeMapScreen(
         )
     }
 
-    if (state.selectedSubLoungeId != null) {
-        SubLoungeDetailSheet(
-            state = state,
-            previewPlaybackState = previewPlaybackState,
-            onDismiss = onLeaveSubLounge,
-            onLeave = onLeaveSubLounge,
-            onDeleteSubLounge = onDeleteSubLounge,
-            onSearchTracks = onSearchTracks,
-            onSendSearchedTrack = onSendSearchedTrack,
-            onDeleteCard = onDeleteCard,
-            onReactToCard = onReactToCard,
-            onVote = onVote,
-            onRefresh = onRefreshSubLounge,
-            onOpenProfile = onOpenProfile,
-            onOpenMembers = onOpenMembers,
-            profileHandlesByAlias = profileHandlesByAlias,
-        )
-    }
 }
 
 @Composable
@@ -734,10 +737,10 @@ private fun SubLoungeList(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SubLoungeDetailSheet(
+private fun SubLoungeDetailScreen(
     state: BuildingLoungeUiState,
     previewPlaybackState: PreviewPlaybackState,
-    onDismiss: () -> Unit,
+    onBack: () -> Unit,
     onLeave: () -> Unit,
     onDeleteSubLounge: () -> Unit,
     onSearchTracks: (String) -> Unit,
@@ -764,15 +767,16 @@ private fun SubLoungeDetailSheet(
             submissionStarted = false
         }
     }
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MossSurface,
-        contentColor = PaleMint,
+    PullToRefreshBox(
+        isRefreshing = state.detailLoading,
+        onRefresh = onRefresh,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MossSurface),
     ) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 720.dp)
+                .fillMaxSize()
                 .navigationBarsPadding(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 start = 18.dp,
@@ -783,6 +787,9 @@ private fun SubLoungeDetailSheet(
         ) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "하위 라운지 뒤로가기")
+                    }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             snapshot?.title ?: "하위 라운지 연결 중",
