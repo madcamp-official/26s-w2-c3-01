@@ -294,17 +294,26 @@ fun NearbyScreen(
             )
         }
         item {
-            AbstractNearbyMap(
-                listeners = filteredListeners,
-                selectedHandle = selected?.nearbyHandle,
-                currentTrack = currentTrack,
-                onSelectListeners = { listeners ->
-                    selectedClusterHandles.value = if (listeners.size > 1) {
-                        listeners.map(NearbyListener::nearbyHandle)
-                    } else emptyList()
-                    listeners.firstOrNull()?.let(onSelectListener)
-                }
-            )
+            Column {
+                AbstractNearbyMap(
+                    listeners = filteredListeners,
+                    selectedHandle = selected?.nearbyHandle,
+                    currentTrack = currentTrack,
+                    onSelectListeners = { listeners ->
+                        selectedClusterHandles.value = if (listeners.size > 1) {
+                            listeners.map(NearbyListener::nearbyHandle)
+                        } else emptyList()
+                        listeners.firstOrNull()?.let(onSelectListener)
+                    }
+                )
+                Text(
+                    text = "버블 위치는 정확한 실제 위치가 아닌 익명화된 랜덤 분포예요.",
+                    modifier = Modifier.fillMaxWidth().padding(top = 5.dp, end = 4.dp),
+                    color = MelodyBubbleColors.TextMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.End,
+                )
+            }
         }
         item {
             SectionTitle(
@@ -710,24 +719,22 @@ private fun CompactRadar(
                     .padding(18.dp)
             ) {
                 Text(
-                    text = "주변 버블 스냅샷",
+                    text = "sync map",
                     color = MelodyBubbleColors.Text,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = if (zoomed) {
-                        "모두 가까이 있어 10m 안을 확대했어요"
-                    } else {
-                        "정확한 방향을 숨긴 20m 이내 추상 분포"
-                    },
-                    color = MelodyBubbleColors.TextMuted,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (!zoomed) {
+                    Text(
+                        text = "정확한 방향을 숨긴 20m 이내 추상 분포",
+                        color = MelodyBubbleColors.TextMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Text(
                     text = if (zoomed) "10m로 확대됨" else "링 10m · 20m",
                     color = MelodyBubbleColors.Primary,

@@ -636,17 +636,20 @@ private fun LoungeRoomsSheet(
                     Button(
                         onClick = onShowCreate,
                         enabled = state.subLounges.size < 5,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).height(40.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SignalGreen)
                     ) {
-                        Icon(Icons.Outlined.Add, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (state.subLounges.size < 5) "하위 라운지 만들기" else "하위 라운지 5/5")
+                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (state.subLounges.size < 5) "사운드룸 열기" else "사운드룸 5/5",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                     }
-                    OutlinedButton(onClick = onLeave, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null)
-                        Spacer(Modifier.width(6.dp))
-                        Text("라운지 나가기")
+                    OutlinedButton(onClick = onLeave, modifier = Modifier.weight(1f).height(40.dp)) {
+                        Icon(Icons.AutoMirrored.Outlined.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("라운지 나가기", style = MaterialTheme.typography.labelMedium)
                     }
                 }
                 SubLoungeList(state.subLounges, onOpenSubLounge)
@@ -703,7 +706,7 @@ private fun SubLoungeList(
     if (subLounges.isEmpty()) {
         EmptyLoungePanel(
             "아직 하위 라운지가 없어요",
-            "위의 ‘하위 라운지 만들기’를 눌러 첫 번째 방을 만들어 보세요.",
+            "위의 ‘사운드룸 열기’를 눌러 첫 번째 방을 만들어 보세요.",
         )
         return
     }
@@ -1207,7 +1210,7 @@ private fun CreateSubLoungeSheet(
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("하위 라운지 만들기", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("사운드룸 열기", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it.take(80) },
