@@ -1,4 +1,4 @@
-<img width="1016" height="372" alt="image" src="https://github.com/user-attachments/assets/6c32512f-e8b6-429d-a767-4f9f1d3e3b0c" />
+<img width="1016" height="195" alt="image" src="https://github.com/user-attachments/assets/935cc69d-e1b7-4e59-b02f-4ca15f5e7f73" />
 
 # 26s-w2-c3-01
 
